@@ -1,0 +1,38 @@
+// Gameface uses a flex layout, even for ordinary block elements.
+// Give each text/container an explicit direction and constraint.
+.root { position: relative; display: flex; flex-direction: column; align-items: flex-start; flex: 0 0 auto; pointer-events: auto; color: var(--normalTextColor); font-family: var(--fontFamily); font-size: var(--fontSizeM); }
+.root button { font-family: inherit; }
+.launcher { flex: 0 0 auto; width: 40rem; height: 40rem; margin: 0; }
+// Native info buttons start at 10rem and are 40rem tall. Leave 14rem below them.
+// Keep this direct: the previous nested var() fallback did not position in Gameface.
+.panel { position: fixed; top: 64rem; left: 12rem; width: 384rem; max-width: calc(100vw - 24rem); max-height: calc(100vh - 164rem); overflow: hidden; box-shadow: 0 6rem 20rem rgba(0, 0, 0, .25); }
+.content { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; }
+.categories { display: flex; flex-direction: row; flex-wrap: wrap; flex: 0 0 auto; width: 100%; padding: 10rem 10rem 6rem; background-color: var(--panelColorDark); border-bottom: var(--stroke1, 1rem) solid var(--sectionBorderColor); }
+.category { display: flex; flex: 0 0 auto; color: var(--normalTextColor); background-color: transparent; border: 0; min-height: 32rem; padding: 6rem 9rem; margin: 0 4rem 4rem 0; border-radius: var(--panelRadius); font-size: var(--fontSizeS); line-height: 1.2; }
+.scrollArea { display: flex; flex-direction: column; flex: 0 1 auto; width: 100%; min-height: 0; max-height: calc(100vh - 300rem); }
+.body { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; }
+.list { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; padding: 8rem 10rem 4rem; }
+.upgrade { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; width: 100%; min-height: 52rem; padding: 6rem 10rem; margin-bottom: 4rem; text-align: left; color: var(--normalTextColor); background-color: var(--panelButtonColor); border: var(--stroke1, 1rem) solid transparent; border-radius: var(--panelRadius); font-size: var(--fontSizeS); line-height: 1.3; white-space: normal; }
+.upgrade:hover:not(:disabled), .secondary:hover:not(:disabled), .leave:hover:not(:disabled) { background-color: var(--panelButtonColor-hover); }
+.upgrade[aria-pressed="true"], .category[aria-pressed="true"] { background-color: var(--selectedColor); color: var(--normalTextColor); }
+.upgrade[aria-pressed="true"] { border-left: 3rem solid var(--accentColorNormal); padding-left: 8rem; }
+.upgrade:focus, .category:focus, .secondary:focus, .leave:focus, .launcher:focus, .foldout:focus { outline: 2rem solid var(--accentColorNormal); outline-offset: -2rem; }
+.upgrade:disabled, .leave:disabled { opacity: .45; }
+.icon { width: 36rem; height: 36rem; flex: 0 0 auto; margin-right: 10rem; object-fit: contain; }
+.label { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: break-word; font-weight: 600; }
+.context { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; border-top: var(--stroke1, 1rem) solid var(--sectionBorderColor); padding: 10rem 12rem 6rem; }
+.description, .status, .contextTitle, .features, .help, .empty, .text { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: break-word; font-size: var(--fontSizeXS); line-height: 1.4; }
+.description > div { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; min-width: 0; white-space: normal; overflow-wrap: break-word; margin-bottom: 6rem; }
+.contextTitle { color: var(--accentColorNormal); font-weight: 700; font-size: var(--fontSizeS); margin-bottom: 4rem; }
+.status { color: var(--normalTextColor); }
+.details, .diagnostics { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; margin: 6rem 0; font-size: var(--fontSizeXS); }
+.foldout { display: flex; flex: 0 0 auto; justify-content: flex-start; width: 100%; padding: 4rem 0; color: var(--normalTextColor); white-space: normal; font-size: var(--fontSizeXS); }
+.features { white-space: pre-wrap; margin: 4rem 0; }
+.footer { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; padding: 8rem 12rem 10rem; background-color: var(--panelColorDark); border-top: var(--stroke1, 1rem) solid var(--sectionBorderColor); }
+.leave, .secondary { display: flex; flex-direction: row; flex: 0 0 auto; align-items: center; justify-content: center; width: 100%; min-height: 32rem; padding: 6rem 10rem; color: var(--normalTextColor); background-color: var(--panelButtonColor); border-radius: var(--panelRadius); font-size: var(--fontSizeXS); white-space: normal; }
+.diagnosticActions { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; margin-top: 4rem; }
+.secondary { margin-bottom: 4rem; }
+.help, .empty { margin: 8rem 0 0; color: var(--normalTextColorDim); }
+.empty { padding: 8rem; }
+
+.pinnedFooter { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; padding: 8rem 12rem; background-color: var(--panelColorDark); border-top: var(--stroke1, 1rem) solid var(--sectionBorderColor); }

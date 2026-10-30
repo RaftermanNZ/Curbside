@@ -1,0 +1,1 @@
+Bundled third-party PNGs are intentionally excluded from this source repository. Their distribution permission is separate from the code license. For a complete production package, obtain the approved four images from the maintainer. A source-only build without those images is not the complete Paradox Mods release.

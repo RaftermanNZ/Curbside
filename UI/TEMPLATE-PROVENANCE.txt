@@ -1,0 +1,12 @@
+Baseline: create-csii-ui-mod/template shipped with installed Cities:SkylinesII1.6.2f1.
+Source: Cities2_Data/Content/Game/.ModdingToolchain/npx-create-csii-ui-mod/template.
+Retained: TypeScript/React18, cs2 ambient declarations, webpack window externals,
+ES-module export format and CSSPresencePlugin. Curbside's panel is migrated from
+its own hand-authored module; layout and native bindings are preserved.
+Deliberate changes: output into UI/build instead of installing automatically;
+retain curbside.mjs filename; module metadata banner; shared lockfile; Node22/24LTS;
+webpack5.112.2 instead of template5.97.1 to resolve current security advisory and
+schema-utils peer requirement. No external mod UI framework added.
+Publish profiles copied from game-shipped ColossalOrder.ModTemplate1.0.0.
+Build uses SDK10.0.402, game-required net48 and C#9.0. No game-wide toolchain files
+were modified. Existing source snapshots remain unchanged.

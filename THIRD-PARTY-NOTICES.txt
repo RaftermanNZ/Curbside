@@ -1,0 +1,10 @@
+THIRD-PARTY TEXTURE CREDITS
+
+Included sidewalk texture: edited from Concrete Layers 02 by Rob Tuytel / Poly Haven.
+Source: https://polyhaven.com/a/concrete_layers_02
+License: CC0. https://polyhaven.com/license
+Modified for Curbside: reduced stains and blotches, refined concrete wear and horizontal seams. This is an edited texture, not the unchanged Poly Haven original.
+The approved SidewalkFinal.png is used at its original 1254 x 1254 resolution; the experimental upscale is not included.
+
+RealVision curb-wear decal: StatikNoize. Redistribution permission confirmed by Trevor.
+Other supplied grass and road images: redistribution permission confirmed by Trevor.

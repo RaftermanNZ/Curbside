@@ -1,0 +1,114 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+
+    <OutputType>Library</OutputType>
+
+    <AssemblyName>MedianGrassReplacement</AssemblyName>
+
+    <RootNamespace>MedianGrassReplacement</RootNamespace>
+
+    <Version>0.5.1-test.111</Version>
+
+    <Product>The Curbside Mod</Product>
+
+    <Title>The Curbside Mod</Title>
+
+    <AssemblyTitle>The Curbside Mod</AssemblyTitle>
+
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+
+    <Description>Curbside grass textures and optional road-marking upgrades.</Description>
+
+    <Deterministic>true</Deterministic>
+
+    <PathMap>$(MSBuildProjectDirectory)=/_/TheCurbsideMod</PathMap>
+
+    <LangVersion>9.0</LangVersion>
+    <Configurations>Debug;Release</Configurations>
+    <DefaultItemExcludes>$(DefaultItemExcludes);UI\node_modules\**;UI\build\**</DefaultItemExcludes>
+    <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
+
+  </PropertyGroup>
+
+
+
+  <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
+
+
+
+  <ItemGroup>
+
+    <Reference Include="System"><HintPath>$(ManagedPath)\System.dll</HintPath><Private>false</Private></Reference>
+
+    <Reference Include="System.Runtime.Serialization"><HintPath>$(ManagedPath)\System.Runtime.Serialization.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Core"><HintPath>$(ManagedPath)\System.Core.dll</HintPath><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.PSI.Common"><Private>false</Private></Reference>
+    <Reference Include="Colossal.AssetPipeline"><Private>false</Private></Reference>
+    <Reference Include="Colossal.Mathematics"><Private>false</Private></Reference>
+
+    <Reference Include="Game"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.UI"><Private>false</Private></Reference>
+    <Reference Include="Colossal.UI.Binding"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.Collections"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.Core"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.Logging"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.IO.AssetDatabase"><Private>false</Private></Reference>
+
+    <Reference Include="Colossal.Localization"><Private>false</Private></Reference>
+
+    <Reference Include="Unity.InputSystem"><Private>false</Private></Reference>
+
+    <Reference Include="UnityEngine.CoreModule"><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextCoreFontEngineModule"><Private>false</Private></Reference><Reference Include="Unity.TextMeshPro"><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><Private>false</Private></Reference>
+
+    <Reference Include="UnityEngine.ImageConversionModule"><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule"><Private>false</Private></Reference>
+
+    <Reference Include="Unity.Burst"><Private>false</Private></Reference>
+
+    <Reference Include="Unity.Collections"><Private>false</Private></Reference>
+
+    <Reference Include="Unity.Entities"><Private>false</Private></Reference>
+
+    <Reference Include="Unity.Mathematics"><Private>false</Private></Reference>
+
+  </ItemGroup>
+
+
+
+  <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+
+  <ItemGroup><EmbeddedResource Include="Icons/*.svg" LogicalName="MedianGrassReplacement.%(Filename)%(Extension)" /></ItemGroup>
+
+  <ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideGrass_BaseColor.png" LogicalName="MedianGrassReplacement.CurbsideGrass.png" /></ItemGroup>
+
+  <ItemGroup><Reference Include="Unity.RenderPipelines.HighDefinition.Runtime"><Private>false</Private></Reference></ItemGroup>
+
+<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideRoadWear_BaseColor.png" LogicalName="MedianGrassReplacement.RoadWear.png" /></ItemGroup>
+  <ItemGroup><Compile Remove="Validation/**/*.cs" /></ItemGroup>
+<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideRoad_BaseColor.png" LogicalName="MedianGrassReplacement.RoadSurface.png" /></ItemGroup>
+<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideSidewalk_BaseColor.png" LogicalName="MedianGrassReplacement.SidewalkSurface.png" /></ItemGroup>
+  <ItemGroup>
+    <None Include="$(ModPropsFile)" Link="Properties\Mod.props" />
+    <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
+  </ItemGroup>
+  <Target Name="BuildCurbsideUI" BeforeTargets="PrepareResources" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Build-UI.ps1&quot;" />
+  </Target>
+  <ItemGroup>
+    <Content Include="UI\build\curbside.mjs" TargetPath="curbside.mjs" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="UI\build\curbside.css" TargetPath="curbside.css" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+<ItemGroup><EmbeddedResource Include="Localization/Translations/*.json" LogicalName="MedianGrassReplacement.Localization.%(Filename)%(Extension)" /></ItemGroup>
+</Project>
+
+

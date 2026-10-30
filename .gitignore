@@ -1,0 +1,15 @@
+bin/
+obj/
+BuildOutput/
+UI/node_modules/
+UI/build/
+Properties/PublishConfiguration.xml
+Properties/PublishProfiles/
+BundledTextures/*.png
+*.dll
+*.pdb
+*.exe
+*.dmp
+*.log
+*.user
+*.suo
