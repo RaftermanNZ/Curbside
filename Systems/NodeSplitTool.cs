@@ -1,4 +1,4 @@
-﻿using Colossal.Mathematics;using Game.Common;using Game.Net;using Game.Prefabs;using Game.Tools;
+using Colossal.Mathematics;using Game.Common;using Game.Net;using Game.Prefabs;using Game.Tools;
 using Unity.Collections;using Unity.Entities;using Unity.Jobs;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {

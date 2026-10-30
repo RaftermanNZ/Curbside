@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;using Colossal.Mathematics;using Game.Net;using Unity.Entities;using Unity.Mathematics;
+using System.Collections.Generic;using Colossal.Mathematics;using Game.Net;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     internal static class PassingLinePolicy

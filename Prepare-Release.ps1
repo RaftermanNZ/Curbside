@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory=$true)][string]$BuildFolder,
     [Parameter(Mandatory=$true)][string]$ReleaseFolder
 )
@@ -51,8 +51,12 @@ foreach($name in @('MedianGrassReplacement.dll','MedianGrassReplacement_win_x86_
     Set-PortableSymbolPaths $destination
 }
 Copy-Item -LiteralPath (Join-Path $BuildFolder 'curbside.mjs') -Destination $ReleaseFolder
-foreach($name in @('README.md','CHANGELOG.md','PARADOX-MODS-DESCRIPTION.txt')){
+foreach($name in @('README.md','CHANGELOG.md')){
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $ReleaseFolder
 }
 Write-Output 'Release folder prepared. Symbol files remain in the build folder.'
 
+
+Copy-Item -LiteralPath (Join-Path $BuildFolder "curbside.css") -Destination $ReleaseFolder
+Copy-Item -LiteralPath (Join-Path $BuildFolder "BundledTextures") -Destination $ReleaseFolder -Recurse
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $ReleaseFolder

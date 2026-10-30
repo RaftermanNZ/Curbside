@@ -1,4 +1,4 @@
-﻿using Colossal.Mathematics;
+using Colossal.Mathematics;
 
 using Colossal.Serialization.Entities;
 
@@ -74,7 +74,21 @@ namespace MedianGrassReplacement.Systems
 
         internal static byte SetMask(byte old, bool left, bool remove) => (byte)((remove ? old & ~SideMask(left) : old | SideMask(left)) & 3);
 
-        internal static byte SelectDecals(byte old, bool left, bool remove, bool both) => both ? (remove ? (byte)0 : (byte)3) : SetMask(old,left,remove);
+        internal static byte DecalTarget(bool left, bool both) => both ? (byte)3 : SideMask(left);
+
+        internal static byte SelectDecals(byte old, bool left, bool remove, bool both)
+        {
+            byte target=DecalTarget(left,both);
+            return (byte)((remove ? old & ~target : old | target) & 3);
+        }
+
+        internal static byte PreviewSides(string asset,bool left,bool bothDecals)
+        {
+            if(asset==DecalAsset)return DecalTarget(left,bothDecals);
+            // Section-wide operations must not advertise a single roadside.
+            if(asset==StreetLightingSystem.AssetName||asset==RoadFeatureInspector.AssetName||SegmentUpgradePolicy.Known(asset)||UpgradeAssetsSystem.Mask(asset)!=0||SurfaceUpgradePolicy.Slot(asset)!=0)return 3;
+            return SideMask(left);
+        }
 
         internal static bool IsLeft(EntityManager em, Entity road, float3 position)
 

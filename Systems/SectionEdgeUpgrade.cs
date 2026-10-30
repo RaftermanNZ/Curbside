@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;using Colossal.Mathematics;using Colossal.Serialization.Entities;using Game.Net;using Game.Prefabs;using Unity.Entities;using Unity.Mathematics;
+using System.Collections.Generic;using Colossal.Mathematics;using Colossal.Serialization.Entities;using Game.Net;using Game.Prefabs;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     public struct MGRSectionEdges:IComponentData,ISerializable
@@ -22,6 +22,7 @@ namespace MedianGrassReplacement.Systems
             if(!EntityManager.HasComponent<NetCompositionData>(composition)||!EntityManager.HasBuffer<NetCompositionLane>(composition))return false;
             float width=EntityManager.GetComponentData<NetCompositionData>(composition).m_Width;
             if(!math.isfinite(width)||width<=0)return false;
+            if(NativeHighwaySectionPlan(road,2,out var nativeEdges)&&nativeEdges.Count==4){paths=nativeEdges;return true;}
             var geometry=EntityManager.GetComponentData<EdgeGeometry>(road);
             var lanes=EntityManager.GetBuffer<NetCompositionLane>(composition,true);var anchors=ReadCurbAnchors(composition,lanes);
             if(anchors.Count<2)anchors=ReadDecalAnchors(composition,width,lanes);

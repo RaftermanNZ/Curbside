@@ -1,4 +1,4 @@
-﻿using Colossal.Mathematics;
+using Colossal.Mathematics;
 
 using Colossal.Serialization.Entities;
 

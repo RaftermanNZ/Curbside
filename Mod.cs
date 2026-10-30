@@ -82,6 +82,7 @@ namespace MedianGrassReplacement
 
 
 
+            BundledAssets.Initialize(this);
             GardenCitySignals.Mod.Initialize(updateSystem);
             updateSystem.UpdateBefore<SignalSaveCoordinatorSystem,Game.Serialization.BeginPrefabSerializationSystem>(SystemUpdatePhase.Serialize);
             updateSystem.UpdateAfter<SignalSaveNativeCompletionSystem,Game.Serialization.BeginPrefabSerializationSystem>(SystemUpdatePhase.Serialize);
@@ -93,7 +94,8 @@ namespace MedianGrassReplacement
             TextureCatalog.EnsureDefaultFolder();
 
             TextureCatalog.InstallBundled();
-            SurfaceTextureCatalog.InstallBundled();
+            try { SurfaceTextureCatalog.InstallBundled(); }
+            catch (System.IO.IOException error) { Log.Warn("Included surface textures unavailable; road upgrades remain enabled: " + error.Message); }
 
             System.IO.Directory.CreateDirectory(System.IO.Path.Combine(TextureCatalog.DefaultFolder, "Decals"));
 

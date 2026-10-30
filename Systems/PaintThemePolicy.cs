@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 namespace MedianGrassReplacement.Systems
 {
     internal static class PaintThemePolicy

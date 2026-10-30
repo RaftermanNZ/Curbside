@@ -439,10 +439,10 @@ namespace MedianGrassReplacement.Systems
 
     {
 
-        private struct Moved { internal Entity Node, Prefab, AppliedPrefab; internal ObjectTransform Original, Applied; internal ushort OriginalPedMask,AppliedPedMask; internal bool HadRelative; internal Game.Objects.Relative OriginalRelative; }
+        private struct Moved { internal Entity Node, Prefab, AppliedPrefab; internal ObjectTransform Original, Applied; internal ushort OriginalPedMask,AppliedPedMask,AppliedVehicleMask; internal bool HadRelative; internal Game.Objects.Relative OriginalRelative; }
         private readonly Dictionary<Entity, Moved> _moved = new Dictionary<Entity, Moved>();
         private readonly Dictionary<Entity,Entity> _hiddenSignals=new Dictionary<Entity,Entity>();
-        private struct Suppressed {internal Entity Original,Applied;}
+        private struct Suppressed {internal Entity Original,Applied;internal ushort VehicleMask,PedestrianMask;}
         private readonly Dictionary<Entity,Suppressed> _suppressedPrefabs=new Dictionary<Entity,Suppressed>();
         private readonly Dictionary<Entity,Entity[]> _generatedLamps=new Dictionary<Entity,Entity[]>();
         private EntityQuery _lampTemplates;private Entity _lampDonor;
@@ -475,6 +475,8 @@ namespace MedianGrassReplacement.Systems
         private readonly HashSet<Entity> _nodeWork = new HashSet<Entity>();
 
         private readonly List<Entity> _dead = new List<Entity>(), _props = new List<Entity>();
+        private readonly List<Entity> _retiredLampNodes = new List<Entity>();
+        private static readonly ComponentType[] ChangedNodeChildren = { ComponentType.ReadOnly<ObjectChild>(), ComponentType.ReadOnly<ConnectedEdge>() };
 
         protected override void OnCreate()
 
@@ -616,7 +618,7 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                _changedNodes.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<ObjectChild>(), ComponentType.ReadOnly<ConnectedEdge>() });
+                _changedNodes.SetChangedVersionFilter(ChangedNodeChildren);
 
                 using (var items = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in items) nodes.Add(node);
 
@@ -663,11 +665,16 @@ namespace MedianGrassReplacement.Systems
                     foreach(var child in EntityManager.GetBuffer<ObjectChild>(check,true))
                     {
                         var actor=child.m_SubObject;if(!SignalProp(actor,check))continue;
+                        var binding=EntityManager.GetComponentData<ObjectLight>(actor);
+                        if(_suppressedPrefabs.TryGetValue(actor,out var suppressedBinding)
+                            ?SignalBindingPolicy.Changed(binding.m_GroupMask0,binding.m_GroupMask1,suppressedBinding.VehicleMask,suppressedBinding.PedestrianMask)
+                            :_moved.TryGetValue(actor,out var bound)&&SignalBindingPolicy.Changed(binding.m_GroupMask0,binding.m_GroupMask1,bound.AppliedVehicleMask,bound.AppliedPedMask))
+                        {nodes.Add(check);break;}
                         if(!_moved.ContainsKey(actor)&&!_hiddenSignals.ContainsKey(actor)){nodes.Add(check);break;}
                     }
                 }
             }
-            var retiredNodes=new List<Entity>();foreach(var item in _generatedLamps)if(!EnabledNode(item.Key)||!EntityManager.HasComponent<MGRGardenCitySignals>(item.Key))retiredNodes.Add(item.Key);
+            var retiredNodes=_retiredLampNodes;retiredNodes.Clear();foreach(var item in _generatedLamps)if(!EnabledNode(item.Key)||!EntityManager.HasComponent<MGRGardenCitySignals>(item.Key))retiredNodes.Add(item.Key);
             foreach(var node in retiredNodes)RetireGeneratedLamps(node);
             var dead = _dead; dead.Clear();
 
@@ -747,10 +754,10 @@ namespace MedianGrassReplacement.Systems
                 selectedPrefab=GardenCityLightPolicy.Select(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager,node,original,ref placed,approaches,originalPrefab,originalMask,out selectedMask,_supportPositions,_supportPositions.Count>_plannedSignals.Count?_supportPositions.Count-1:-1,_requiredWireSpans,_sourceApproaches.TryGetValue(prop,out var bound)?bound:-1,OwnsSharedPole(prop),lightState.m_GroupMask0);
             if(selectedPrefab==originalPrefab){selectedMask=originalMask;if(EntityManager.HasComponent<MGRGardenCitySignals>(node)){if(applied){Undo(prop,saved);_moved.Remove(prop);}return;}}
             if(lightState.m_GroupMask1!=selectedMask){lightState.m_GroupMask1=selectedMask;EntityManager.SetComponentData(prop,lightState);}
-            if(applied&&placed.Equals(current)&&prefab==selectedPrefab&&saved.AppliedPedMask==selectedMask)return;
+            if(applied&&placed.Equals(current)&&prefab==selectedPrefab&&saved.AppliedPedMask==selectedMask&&saved.AppliedVehicleMask==lightState.m_GroupMask0)return;
             if(prefab!=selectedPrefab){if(custom)Mod.Log.Info("Signal composite applied: node="+node+" prop="+prop+" prefab="+World.GetOrCreateSystemManaged<PrefabSystem>().GetPrefab<StaticObjectPrefab>(selectedPrefab).name+" vehicleMask="+lightState.m_GroupMask0+" pedestrianMask="+selectedMask);EntityManager.SetComponentData(prop,new PrefabRef{m_Prefab=selectedPrefab});if(!EntityManager.HasComponent<BatchesUpdated>(prop))EntityManager.AddComponent<BatchesUpdated>(prop);}
 
-            _moved[prop] = new Moved { Node = node, Prefab = originalPrefab, AppliedPrefab=selectedPrefab, Original = original, Applied = placed,OriginalPedMask=originalMask,AppliedPedMask=selectedMask };
+            _moved[prop] = new Moved { Node = node, Prefab = originalPrefab, AppliedPrefab=selectedPrefab, Original = original, Applied = placed,OriginalPedMask=originalMask,AppliedPedMask=selectedMask,AppliedVehicleMask=lightState.m_GroupMask0 };
 
             Write(prop, placed);
 
@@ -1052,9 +1059,9 @@ namespace MedianGrassReplacement.Systems
                     var placed=pole.Applied;var face=faces[faceIndex];_visibleSignals.Add(winner);var selected=GardenCityLightPolicy.SelectPedestrian(prefabs,EntityManager,node,originalPrefab,ref placed,face);
                     if(selected==originalPrefab)continue;
                     _visibleSignals.Add(winner);ReleaseHiddenSignal(winner);
-                    if(wasMoved&&prior.AppliedPrefab==selected&&current.Equals(placed)&&light.m_GroupMask1==face.Mask)continue;
+                    if(wasMoved&&prior.AppliedPrefab==selected&&current.Equals(placed)&&light.m_GroupMask1==face.Mask&&prior.AppliedVehicleMask==light.m_GroupMask0)continue;
                     light.m_GroupMask1=face.Mask;EntityManager.SetComponentData(winner,light);EntityManager.SetComponentData(winner,new PrefabRef{m_Prefab=selected});
-                    _moved[winner]=new Moved{Node=node,Prefab=originalPrefab,AppliedPrefab=selected,Original=original,Applied=placed,OriginalPedMask=originalMask,AppliedPedMask=face.Mask};Write(winner,placed);
+                    _moved[winner]=new Moved{Node=node,Prefab=originalPrefab,AppliedPrefab=selected,Original=original,Applied=placed,OriginalPedMask=originalMask,AppliedPedMask=face.Mask,AppliedVehicleMask=light.m_GroupMask0};Write(winner,placed);
                     Mod.Log.Info("Crossing face attached: node="+node+" support="+planned.Key+" phase="+face.Mask);
                 }
             }
@@ -1065,16 +1072,21 @@ namespace MedianGrassReplacement.Systems
             if(!EntityManager.HasComponent<ObjectLight>(actor))return false;
             var role=EntityManager.GetComponentData<TrafficLightData>(OriginalPrefab(actor)).m_Type;
             var light=EntityManager.GetComponentData<ObjectLight>(actor);
-            bool vehicle=!FarSideLightPolicy.Vehicle(role),crossing=(role&(TrafficLightType.CrossingLeft|TrafficLightType.CrossingRight))==0;
-            foreach(var entry in _moved)
+            ushort vehicle=0,crossing=0;
+            if(!EntityManager.HasBuffer<ObjectChild>(node))return false;
+            foreach(var child in EntityManager.GetBuffer<ObjectChild>(node,true))
             {
-                if(entry.Value.Node!=node||entry.Value.AppliedPrefab==entry.Value.Prefab||!Live(entry.Key)||!EntityManager.HasComponent<ObjectLight>(entry.Key)||!EntityManager.HasComponent<TrafficLightData>(entry.Value.AppliedPrefab))continue;
-                var replacement=EntityManager.GetComponentData<ObjectLight>(entry.Key);
-                var replacedRole=EntityManager.GetComponentData<TrafficLightData>(entry.Value.AppliedPrefab).m_Type;
-                if(light.m_GroupMask0!=0&&replacement.m_GroupMask0==light.m_GroupMask0&&FarSideLightPolicy.Vehicle(replacedRole))vehicle=true;
-                if(light.m_GroupMask1!=0&&(replacement.m_GroupMask1&light.m_GroupMask1)==light.m_GroupMask1&&(replacedRole&(TrafficLightType.CrossingLeft|TrafficLightType.CrossingRight))!=0&&math.distancesq(OriginalTransform(actor).m_Position.xz,entry.Value.Applied.m_Position.xz)<576)crossing=true;
+                var key=child.m_SubObject;if(!_moved.TryGetValue(key,out var moved))continue;
+                if(moved.Node!=node||moved.AppliedPrefab==moved.Prefab||!Live(key)||_hiddenSignals.ContainsKey(key)||!EntityManager.HasComponent<PrefabRef>(key)||EntityManager.GetComponentData<PrefabRef>(key).m_Prefab!=moved.AppliedPrefab||!EntityManager.HasComponent<ObjectLight>(key)||!EntityManager.HasComponent<TrafficLightData>(moved.AppliedPrefab))continue;
+                var replacement=EntityManager.GetComponentData<ObjectLight>(key);
+                var replacedRole=EntityManager.GetComponentData<TrafficLightData>(moved.AppliedPrefab).m_Type;
+                if(FarSideLightPolicy.Vehicle(replacedRole))vehicle|=replacement.m_GroupMask0;
+                if((replacedRole&(TrafficLightType.CrossingLeft|TrafficLightType.CrossingRight))!=0)crossing|=replacement.m_GroupMask1;
             }
-            return vehicle&&crossing;
+            // Membership is scoped to applied, live replacements at this node.
+            // A fixed 24m radius left duplicate actors at larger T junctions even
+            // when their exact phases were already displayed by custom panels.
+            return SignalBindingPolicy.Covered(light.m_GroupMask0,light.m_GroupMask1,FarSideLightPolicy.Vehicle(role),(role&(TrafficLightType.CrossingLeft|TrafficLightType.CrossingRight))!=0,vehicle,crossing);
         }
         private bool EdgeMedianSignals(Entity node,bool apply)
         {
@@ -1107,8 +1119,10 @@ namespace MedianGrassReplacement.Systems
             if(EntityManager.HasComponent<Game.Tools.Hidden>(prop))return;
             var original=OriginalPrefab(prop);var current=EntityManager.GetComponentData<PrefabRef>(prop).m_Prefab;
             var selected=GardenCityLightPolicy.SelectSuppressed(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager,node,original);
-            if(selected==original||current==selected)return;
-            _hiddenSignals[prop]=node;_suppressedPrefabs[prop]=new Suppressed{Original=original,Applied=selected};
+            if(selected==original)return;
+            var binding=EntityManager.GetComponentData<ObjectLight>(prop);
+            _hiddenSignals[prop]=node;_suppressedPrefabs[prop]=new Suppressed{Original=original,Applied=selected,VehicleMask=binding.m_GroupMask0,PedestrianMask=binding.m_GroupMask1};
+            if(current==selected)return;
             EntityManager.SetComponentData(prop,new PrefabRef{m_Prefab=selected});Write(prop,EntityManager.GetComponentData<ObjectTransform>(prop));
         }
         private void ReleaseHiddenSignal(Entity prop)

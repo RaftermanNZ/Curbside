@@ -30,9 +30,9 @@ namespace MedianGrassReplacement
 
         [SettingsUISection(kTexturesTab,kDecalGroup)] public bool DecalsBothSides { get; set; } = false;
 
-        private int _decalLimit = 512;
 
-        private bool _unlimitedDecals;
+
+
 
         private float _decalOffset = -.95f, _decalSetback = .25f, _decalOverlap = 50f, _decalWidth = 13.25f, _decalLength = 2.6f;
 
@@ -62,27 +62,15 @@ namespace MedianGrassReplacement
 
         [SettingsUISlider(min = -180f, max = 180f, step = 1f, scalarMultiplier = 1, unit = Unit.kFloatTwoFractions)][SettingsUISection(kTexturesTab, kDecalGroup)] public float CurbDecalRotation { get => _decalRotation; set { float n = Clamp(value, -90, -180, 180); if (n == _decalRotation) return; _decalRotation = n; DecalChanged(); } }
 
-        [SettingsUISection(kTexturesTab,kDecalGroup)]
-
-        public bool UnlimitedDecals { get => _unlimitedDecals; set { if (_unlimitedDecals == value) return; _unlimitedDecals=value; DecalChanged(); } }
-
-        public bool IsUnlimitedDecalMode() => UnlimitedDecals;
-
-        public bool IsLimitedDecalMode() => !UnlimitedDecals;
-
-        [Colossal.Json.Exclude][SettingsUIHideByCondition(typeof(Setting),nameof(IsLimitedDecalMode))][SettingsUISection(kTexturesTab,kDecalGroup)]
-
-        public string UnlimitedDecalWarning => Localization.LocalizationService.Text("Unlimited coverage increases rendering and memory use. Very large coverage may exceed available memory. Per-road and per-frame limits still apply.");
-
-        [SettingsUIDisableByCondition(typeof(Setting),nameof(IsUnlimitedDecalMode))]
-
-        [SettingsUISlider(min = 16, max = 2048, step = 16, scalarMultiplier = 1)][SettingsUISection(kTexturesTab, kDecalGroup)] public int CurbDecalLimit { get => _decalLimit; set { int n = System.Math.Max(16, System.Math.Min(2048, value)); if (n == _decalLimit) return; _decalLimit = n; DecalChanged(); } }
+        // Accept old JSON keys without exposing or enforcing a city-wide cap.
+        [SettingsUIHidden] public bool UnlimitedDecals { get => true; set { } }
+        [SettingsUIHidden] public int CurbDecalLimit { get => 2048; set { } }
 
         [SettingsUISection(kTexturesTab, kDecalGroup)] public bool OrientDecalsToCurb { get => _orientDecalsToCurb; set { if (_orientDecalsToCurb == value) return; _orientDecalsToCurb = value; DecalChanged(); } }
 
         [SettingsUISection(kTexturesTab, kDecalGroup)] public string CurbDecalStatus => Localization.LocalizationService.Text(_decalValueError ?? CurbDecalSystem.Status);
 
-        private void SetDecalDefaults() { _alleyDecalOffset=-.95f; _highwayDecalOffset=-.95f; _decalsEnabled = true; _decalFolder = null; _decalTexture = DecalCatalog.BundledValue; _decalOffset = -.95f; _decalSetback = .25f; _decalOverlap = 50; _decalWidth = 13.25f; _decalLength = 2.6f; _decalRotation = -90; _decalLimit = 2048; _unlimitedDecals=true; _orientDecalsToCurb = true; DecalsBothSides = true; ShowExactDecalValues = false; _decalValueError = null; ClearDecalDrafts(); }
+        private void SetDecalDefaults() { _alleyDecalOffset=-.95f; _highwayDecalOffset=-.95f; _decalsEnabled = true; _decalFolder = null; _decalTexture = DecalCatalog.BundledValue; _decalOffset = -.95f; _decalSetback = .25f; _decalOverlap = 50; _decalWidth = 13.25f; _decalLength = 2.6f; _decalRotation = -90; _orientDecalsToCurb = true; DecalsBothSides = false; ShowExactDecalValues = false; _decalValueError = null; ClearDecalDrafts(); }
 
     }
 

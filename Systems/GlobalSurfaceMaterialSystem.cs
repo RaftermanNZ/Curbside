@@ -1,4 +1,4 @@
-﻿using System;using System.Collections.Generic;using System.IO;using Colossal.Serialization.Entities;using Game;using UnityEngine;
+using System;using System.Collections.Generic;using System.IO;using Colossal.Serialization.Entities;using Game;using UnityEngine;
 namespace MedianGrassReplacement.Systems
 {
     internal static class GlobalSurfacePolicy
@@ -40,7 +40,7 @@ namespace MedianGrassReplacement.Systems
         internal static string Status="Global surfaces: Vanilla.";
         internal static void RequestRefresh(){_refresh=true;}
         internal static void RequestUvRefresh(){_uvRefresh=true;}
-        internal static void NotifyRenderActivity(){if(Mod.Settings==null||(string.IsNullOrWhiteSpace(Mod.Settings.GlobalRoadTexture)&&string.IsNullOrWhiteSpace(Mod.Settings.GlobalSidewalkTexture)))return;_discover=true;_quietUntil=UnityEngine.Time.realtimeSinceStartup+.35f;}
+        internal static void NotifyRenderActivity(){if(Mod.Settings==null||Mod.Settings.DisableTextureReplacement||(string.IsNullOrWhiteSpace(Mod.Settings.GlobalRoadTexture)&&string.IsNullOrWhiteSpace(Mod.Settings.GlobalSidewalkTexture)))return;_discover=true;_quietUntil=UnityEngine.Time.realtimeSinceStartup+.35f;}
         private Texture2D Load(string path)
         {
             path=SurfaceTextureCatalog.Resolve(path??"");if(string.IsNullOrWhiteSpace(path))return null;
@@ -147,7 +147,7 @@ namespace MedianGrassReplacement.Systems
             long started=ModDiagnostics.RuntimeCosts.Begin();
             try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("GlobalSurfaceMaterialSystem",started);}
         }
-        private void UpdateMeasured(){if(!_active||Mod.Settings==null||Mod.Saving)return;if(_refresh){_refresh=false;_discover=false;_uvRefresh=false;Restore(false);RefreshTextures();Apply();}else if(_uvRefresh){_uvRefresh=false;ApplyUv();}else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}}
+        private void UpdateMeasured(){if(!_active||Mod.Settings==null||Mod.Saving)return;if(Mod.Settings.DisableTextureReplacement){if(_patches.Count>0||_textures.Count>0)Restore(true);_refresh=true;_discover=false;_uvRefresh=false;return;}if(_refresh){_refresh=false;_discover=false;_uvRefresh=false;Restore(false);RefreshTextures();Apply();}else if(_uvRefresh){_uvRefresh=false;ApplyUv();}else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}}
         protected override void OnDestroy(){Restore(true);base.OnDestroy();}
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -47,6 +47,9 @@ namespace MedianGrassReplacement.Systems
         internal static void QueueRoad(Entity road) { _queuedOwners.Add(road); }
 
         private readonly HashSet<Entity> _waiting = new HashSet<Entity>();
+
+        private readonly HashSet<Entity> _pendingLanes = new HashSet<Entity>();
+        private static readonly ComponentType[] LaneChanges = { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() };
 
         private readonly Dictionary<Entity, Entity> _originals = new Dictionary<Entity, Entity>();
 
@@ -277,11 +280,11 @@ namespace MedianGrassReplacement.Systems
 
             { RestoreAndDestroy(true); _length = length; _setback = Mod.Settings.ParkingIntersectionSetback; }
 
-            var pending = new HashSet<Entity>();
+            var pending = _pendingLanes; pending.Clear();
 
             _lanes.ResetFilter();
 
-            if (!_scanAll) _lanes.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() });
+            if (!_scanAll) _lanes.SetChangedVersionFilter(LaneChanges);
 
             try { using (var changed = _lanes.ToEntityArray(Allocator.Temp)) foreach (var lane in changed) pending.Add(lane); }
 

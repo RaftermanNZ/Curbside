@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -39,6 +39,9 @@ namespace MedianGrassReplacement.Systems
     {
 
         private EntityQuery _sources, _originals, _paint, _definitions, _changedOwners, _changedGeometry;
+
+        private static readonly ComponentType[] SourceChanges = { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() };
+        private readonly System.Diagnostics.Stopwatch _updateWatch = new System.Diagnostics.Stopwatch();
 
         private PrefabSystem _prefabs;
 
@@ -288,7 +291,8 @@ namespace MedianGrassReplacement.Systems
             bool center=roadLine&&prefab.name.IndexOf("Center Line",StringComparison.OrdinalIgnoreCase)>=0;
             bool opposing=roadLine&&lineSystem.IsOpposingBoundary(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier);
 
-            bool yellow=Mod.Settings.YellowCenterLines&&(nodeBoundary||opposing);
+            bool automatic=AutomaticMarkingPolicy.Adjusts(EntityManager,owner);
+            bool yellow=automatic&&Mod.Settings.YellowCenterLines&&(nodeBoundary||opposing);
 
             bool medianOwned=roadLine&&(prefab.name.IndexOf("Parking",StringComparison.OrdinalIgnoreCase)<0||RoadSurfacePolicy.IsHighway(EntityManager,owner))&&(lineSystem.HasMedianReplacement(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier));
             bool curbOwned=roadLine&&!center&&lineSystem.HasCurbReplacement(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier);
@@ -313,10 +317,10 @@ namespace MedianGrassReplacement.Systems
             bool highwayOwned=EntityManager.HasComponent<Node>(owner)&&lineSystem.OwnsHighwayNodePaint(owner,source);
             medianOwned|=nativeHidden||highwayOwned;
             Entity themedEdge=Entity.Null;
-            if(!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
+            if(automatic&&!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
                 themedEdge=lineSystem.ThemeEquivalent(prefabEntity);
             bool adaptEdge=themedEdge!=Entity.Null&&themedEdge!=prefabEntity;
-            if (!crossing && !center && !yellow && !medianOwned && !adaptEdge) { Remove(source); return; }
+            if (!crossing && !(center&&automatic) && !yellow && !medianOwned && !adaptEdge) { Remove(source); return; }
 
             if (!_replacements.ContainsKey(source) && EntityManager.HasComponent<Game.Tools.Hidden>(source)) { Defer(source); return; }
 
@@ -482,7 +486,8 @@ namespace MedianGrassReplacement.Systems
 
                 if(_previousCenterStyle!=Mod.Settings.CenterLineStyle||_previousYellow!=Mod.Settings.YellowCenterLines||_catalogVersion!=CurbLineEmissionSystem.CatalogRevision){_previousCenterStyle=Mod.Settings.CenterLineStyle;_previousYellow=Mod.Settings.YellowCenterLines;_catalogVersion=CurbLineEmissionSystem.CatalogRevision;_initial=true;}
 
-                var watch = System.Diagnostics.Stopwatch.StartNew();
+                var watch = _updateWatch; watch.Restart();
+                var crossingVisuals = World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();
 
                 var pending = _pending; pending.Clear(); foreach (var item in _backlog) pending.Add(item); _backlog.Clear();
 
@@ -547,13 +552,16 @@ namespace MedianGrassReplacement.Systems
 
                         }
 
-                        foreach (var paint in pair.Value.Paint) if (Alive(paint) && EntityManager.HasComponent<Game.Tools.Hidden>(paint)) { visibility.RemoveComponent<Game.Tools.Hidden>(paint); if (!EntityManager.HasComponent<BatchesUpdated>(paint)) visibility.AddComponent<BatchesUpdated>(paint); }
-
-                        bool intact = true; foreach (var entity in pair.Value.Paint) if (!Alive(entity)) intact = false;
+                        bool intact = true;
+                        foreach (var paint in pair.Value.Paint)
+                        {
+                            if (!Alive(paint)) { intact = false; continue; }
+                            if (EntityManager.HasComponent<Game.Tools.Hidden>(paint)) { visibility.RemoveComponent<Game.Tools.Hidden>(paint); if (!EntityManager.HasComponent<BatchesUpdated>(paint)) visibility.AddComponent<BatchesUpdated>(paint); }
+                        }
 
                         if (!intact) { pending.Add(pair.Key); continue; }
 
-                        if(pair.Value.RoutedCrossing) World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().Suppress(pair.Key);
+                        if(pair.Value.RoutedCrossing) crossingVisuals.Suppress(pair.Key);
                         else if (!EntityManager.HasComponent<Game.Tools.Hidden>(pair.Key))
 
                         {
@@ -566,15 +574,15 @@ namespace MedianGrassReplacement.Systems
 
                     }
 
-                    visibility.Playback(EntityManager);
+                    if (!visibility.IsEmpty) visibility.Playback(EntityManager);
 
                 }
 
                 _sources.ResetFilter();
 
-                if (!_initial) _sources.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() });
+                if (!_initial) _sources.SetChangedVersionFilter(SourceChanges);
 
-                try { using (var sources = _sources.ToEntityArray(Allocator.Temp)) foreach (var source in sources) if (!_replacements.TryGetValue(source, out var tracked) || affected.Contains(source) || _initial || !tracked.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab)))) pending.Add(source); }
+                try { using (var sources = _sources.ToEntityArray(Allocator.Temp)) foreach (var source in sources) if (!_replacements.TryGetValue(source, out var tracked) || affected.Contains(source) || _initial || !tracked.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, crossingVisuals.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab)))) pending.Add(source); }
 
                 finally { _sources.ResetFilter(); }
 

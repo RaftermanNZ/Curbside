@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using Colossal.Serialization.Entities;
 
@@ -211,6 +211,7 @@ namespace MedianGrassReplacement.Systems
                 return center&&marking.OwnsNodeCenterRole(owner,EntityManager.GetComponentData<Curve>(line).m_Bezier)||marking.CoversNativeNodePaint(owner,EntityManager.GetComponentData<Curve>(line).m_Bezier,center);
             }
 
+            if (!AutomaticMarkingPolicy.Adjusts(EntityManager,owner)) return false;
             if (roads < 2 || (roads == 2 && Mod.Settings.CurbWhiteLines && !World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().HasNodeJoin(owner))) return false;
 
             return JunctionMarkingPolicy.Suppress(prefab.name, roads, true);

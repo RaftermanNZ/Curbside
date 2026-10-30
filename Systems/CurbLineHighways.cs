@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Mathematics;
 using Game.Common;
 using Game.Net;
@@ -16,6 +16,7 @@ namespace MedianGrassReplacement.Systems
             if(!string.IsNullOrEmpty(Mod.Settings.MedianLineStyle))_nativeLineDefinitions.TryGetValue(Mod.Settings.MedianLineStyle,out asset);
             if(Mod.Settings.EuropeanMarkings&&asset!=Entity.Null)asset=ThemeEquivalent(asset);
             if(asset==Entity.Null)return;
+            if(AddNativeHighwayMarks(road,asset,geometry,data,stops,output,unmarked))return;
             var groups=HighwayTrafficGroups(composition);
             foreach(var group in groups.Values)
             {
@@ -44,6 +45,45 @@ namespace MedianGrassReplacement.Systems
                 if(TrimMedian(wl,stops,out var wb))output.Add(new MarkCurve(wb,white,0,false,true));
 
             }
+        }
+        private bool AddNativeHighwayMarks(Entity road,Entity yellowAsset,EdgeGeometry geometry,NetCompositionData data,List<StopMark> stops,List<MarkCurve> output,List<float2> unmarked)
+        {
+            if(!EntityManager.HasBuffer<Game.Net.SubLane>(road)||!EntityManager.HasComponent<Edge>(road))return false;
+            var native=new List<MarkCurve>();var caps=new List<JoinCap>();var seen=new List<Bezier4x3>();int count=0;
+            var edge=EntityManager.GetComponentData<Edge>(road);
+            foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(road,true))
+            {
+                if(++count>256)break;var source=entry.m_SubLane;
+                if(!EntityManager.HasComponent<Curve>(source)||!EntityManager.HasComponent<PrefabRef>(source)||EntityManager.HasComponent<Deleted>(source)||EntityManager.HasComponent<MGRCurbMarking>(source)||EntityManager.HasComponent<MGRIntersectionPaint>(source)||_nodeDividerExternal.Contains(EntityManager,source))continue;
+                var sourcePrefab=EntityManager.GetComponentData<PrefabRef>(source).m_Prefab;
+                if(!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(sourcePrefab,out var prefab)||prefab==null||!NodeLinePolicy.IsLineGeometry(prefab)||HighwayNodePaintPolicy.Role(prefab.name,false)!=2)continue;
+                var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
+                if(!Valid(path)||seen.Exists(p=>GranularHighwayLinePolicy.Matches(p,path)))continue;seen.Add(path);
+                float lateral=RoadMarkingPolicy.Lateral(geometry,MathUtils.Position(path,.5f),data.m_Width);
+                if(RoadMarkingPolicy.Suppressed(lateral,unmarked))continue;
+                bool yellow=IsOpposingBoundary(road,path);
+                if(SectionEdgePolicy.Mode(EntityManager,road)==2||yellow&&(output.Exists(m=>m.CenterUpgrade)||CenterlineUpgradePolicy.Mode(EntityManager,road)==CenterlineUpgradePolicy.Removed))continue;
+                var asset=yellow?yellowAsset:(_nativeLineDefinitions.TryGetValue("EU Highway Edge Line",out var white)?white:sourcePrefab);
+                if(asset==Entity.Null)continue;
+                if(TrimMedian(path,stops,out var trimmed))native.Add(new MarkCurve(trimmed,asset,0,yellow,!yellow){NativeSource=source});
+                bool indexed=EntityManager.HasComponent<EdgeLane>(source);var delta=indexed?EntityManager.GetComponentData<EdgeLane>(source).m_EdgeDelta:default;
+                for(int end=0;end<2;end++)
+                {
+                    var point=end==0?path.a:path.d;bool start;
+                    if(indexed){float at=end==0?delta.x:delta.y;if(at>.001f&&at<.999f)continue;start=at<=.001f;}
+                    else if(!NodeLinePlacement.TryRoadEnd(point,geometry.m_Start.m_Left.a,geometry.m_Start.m_Right.a,geometry.m_End.m_Left.d,geometry.m_End.m_Right.d,out start))continue;
+                    bool stopped=false;foreach(var stop in stops)if(stop.AtStart==start){stopped=true;break;}if(stopped)continue;
+                    caps.Add(new JoinCap{Node=start?edge.m_Start:edge.m_End,Point=point,Outward=(end==0?-1:1)*math.normalizesafe(MathUtils.Tangent(path,end)),Kind=yellow?2:0,Side=start?-(lateral<0?-1:1):(lateral<0?-1:1),Prefab=asset});
+                }
+            }
+            // Vanilla's secondary-lane system already resolves skewed boundaries,
+            // merge tips and split segment halves. Reuse its final paint geometry
+            // throughout, instead of interpolating road-surface edges separately.
+            if(seen.Count<2)return false;
+            output.RemoveAll(m=>!m.Protected&&!m.CenterUpgrade&&!m.DividerUpgrade&&(m.Median||m.Curb));
+            if(_caps.TryGetValue(road,out var existing)){existing.RemoveAll(c=>c.Kind==0||c.Kind==2);existing.AddRange(caps);}
+            else _caps[road]=caps;
+            output.AddRange(native);_dirtyNodes.Add(edge.m_Start);_dirtyNodes.Add(edge.m_End);return true;
         }
         private Dictionary<byte,List<NorthAmericanLinePolicy.Traffic>> HighwayTrafficGroups(Entity composition)
         {

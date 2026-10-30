@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -52,11 +52,11 @@ namespace MedianGrassReplacement.Systems
 
             internal Bezier4x3 Curve;
 
-            internal Entity Prefab;
+            internal Entity Prefab; internal Entity NativeSource;
 
             internal float Width; internal bool Median,Curb,CenterUpgrade,DividerUpgrade,Protected;
 
-            internal MarkCurve(Bezier4x3 curve, Entity prefab, float width = 0f,bool median=false,bool curb=false) { Curve = curve; Prefab = prefab; Width = width; Median=median; Curb=curb; CenterUpgrade=false;DividerUpgrade=false;Protected=false; }
+            internal MarkCurve(Bezier4x3 curve, Entity prefab, float width = 0f,bool median=false,bool curb=false) { Curve = curve; Prefab = prefab; NativeSource=Entity.Null; Width = width; Median=median; Curb=curb; CenterUpgrade=false;DividerUpgrade=false;Protected=false; }
 
         }
 
@@ -480,6 +480,11 @@ namespace MedianGrassReplacement.Systems
         private int _ownedCount;
 
         private readonly HashSet<Entity> _pendingRoads = new HashSet<Entity>();
+        private readonly HashSet<Entity> _directRoadWork = new HashSet<Entity>(), _backlogRoadWork = new HashSet<Entity>();
+        private readonly List<Entity> _deliveredParking = new List<Entity>(8), _retryRoadWork = new List<Entity>();
+        private readonly List<Entity> _joinCandidates = new List<Entity>(8), _completedJoins = new List<Entity>(8);
+        private readonly System.Diagnostics.Stopwatch _roadWatch = new System.Diagnostics.Stopwatch(), _joinWatch = new System.Diagnostics.Stopwatch();
+        private static readonly ComponentType[] RoadGeometryChanges = { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Composition>() };
 
         private readonly Dictionary<Entity, RoadMarks> _marks = new Dictionary<Entity, RoadMarks>();
 
@@ -608,7 +613,7 @@ namespace MedianGrassReplacement.Systems
 
             if (_active) RefreshDefinitionsIfNeeded();
 
-            var directRoads=_externalDirtyRoads.Count>0?new HashSet<Entity>(_externalDirtyRoads):null;
+            var directRoads=_directRoadWork;directRoads.Clear();directRoads.UnionWith(_externalDirtyRoads);
 
             _externalDirtyRoads.Clear();
 
@@ -746,7 +751,7 @@ namespace MedianGrassReplacement.Systems
 
             int parkingBudget = 8;
 
-            var delivered = new List<Entity>();
+            var delivered = _deliveredParking;delivered.Clear();
 
             foreach (var road in _parkingDirtyRoads) { if (parkingBudget-- <= 0) break; _pendingRoads.Add(road); delivered.Add(road); }
 
@@ -756,11 +761,11 @@ namespace MedianGrassReplacement.Systems
 
             // Apply each filter only while collecting that snapshot, then reset.
 
-            var backlog=new HashSet<Entity>(_pendingRoads);_pendingRoads.Clear();
-            var pending=directRoads??new HashSet<Entity>();
+            var backlog=_backlogRoadWork;backlog.Clear();backlog.UnionWith(_pendingRoads);_pendingRoads.Clear();
+            var pending=directRoads;
             try
             {
-                _roads.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<EdgeGeometry>(),ComponentType.ReadOnly<Composition>()});
+                _roads.SetChangedVersionFilter(RoadGeometryChanges);
                 using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)pending.Add(road);
                 _roads.SetChangedVersionFilter(ComponentType.ReadOnly<SubLane>());
                 using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)pending.Add(road);
@@ -784,7 +789,7 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                var rebuildWatch=System.Diagnostics.Stopwatch.StartNew();int rebuilt=0;var retryRoads=new List<Entity>();
+                var rebuildWatch=_roadWatch;rebuildWatch.Restart();int rebuilt=0;var retryRoads=_retryRoadWork;retryRoads.Clear();
 
                 foreach (var road in pending)
 
@@ -1135,6 +1140,7 @@ namespace MedianGrassReplacement.Systems
 
             // anchors are left alone, so median/platform markings are not added.
 
+            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,road);
             bool alley=RoadSurfacePolicy.IsAlleyForEdges(EntityManager,road);byte edgeMode=SectionEdgePolicy.Mode(EntityManager,road);
             if(edgeMode==1||Mod.Settings.AlleyWhiteEdges && alley || EntityManager.HasComponent<MGRParkingBanSides>(road))
                 anchors=ReadDecalAnchors(composition,data.m_Width,lanes);
@@ -1147,7 +1153,7 @@ namespace MedianGrassReplacement.Systems
 
                 bool left = anchors.Count == 1 ? anchors[i].x < 0f : i == 0;
                 bool parkingBan=EntityManager.HasComponent<MGRParkingBanSides>(road)&&(EntityManager.GetComponentData<MGRParkingBanSides>(road).Mask&RoadSideUpgrades.SideMask(left))!=0;
-                if(edgeMode==2||RoadSurfacePolicy.IsHighway(EntityManager,road)||!RoadSurfacePolicy.IsPaved(EntityManager,road)||edgeMode!=1&&!parkingBan&&!WhiteEdgePolicy.Enabled(true,alley,Mod.Settings.CurbWhiteLines,Mod.Settings.AlleyWhiteEdges))continue;
+                if(!automatic&&edgeMode!=1&&!parkingBan||edgeMode==2||RoadSurfacePolicy.IsHighway(EntityManager,road)||!RoadSurfacePolicy.IsPaved(EntityManager,road)||edgeMode!=1&&!parkingBan&&!WhiteEdgePolicy.Enabled(true,alley,Mod.Settings.CurbWhiteLines,Mod.Settings.AlleyWhiteEdges))continue;
 
 
                 if (!CurbPlacement.TryMapComposed(data.m_Width, anchors[i], left, Mod.Settings.CurbLineOffset, out var position, out float t)) continue;
@@ -1192,11 +1198,11 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            if(CenterlineUpgradePolicy.Mode(EntityManager,road)!=CenterlineUpgradePolicy.Removed)AddMedianMarks(road,composition,data,geometry,stops,curves,unmarked);
+            if(automatic&&CenterlineUpgradePolicy.Mode(EntityManager,road)!=CenterlineUpgradePolicy.Removed)AddMedianMarks(road,composition,data,geometry,stops,curves,unmarked);
 
             AddCenterUpgrade(road,stops,curves);AddDividerMarks(road,stops,curves);
-            AddHighwayMarks(road,composition,data,geometry,stops,curves,unmarked);
-            AddNativeLineCaps(road,stops,composition,data,curves);
+            if(automatic)AddHighwayMarks(road,composition,data,geometry,stops,curves,unmarked);
+            if(automatic)AddNativeLineCaps(road,stops,composition,data,curves);
             byte hidden=SegmentUpgradePolicy.Mode(EntityManager,road);
             curves.RemoveAll(m=>!m.Protected&&!m.CenterUpgrade&&!m.DividerUpgrade&&SegmentUpgradePolicy.Hides(hidden,m.Median,m.Curb));
             if(_caps.TryGetValue(road,out var filteredCaps))filteredCaps.RemoveAll(c=>SegmentUpgradePolicy.Hides(hidden,c.Kind==2||c.Kind==3,c.Kind==0));
@@ -2079,8 +2085,9 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            var completed=new List<Entity>();var joinWatch=System.Diagnostics.Stopwatch.StartNew();
-            foreach (var node in new List<Entity>(_dirtyNodes))
+            var completed=_completedJoins;completed.Clear();var joinWatch=_joinWatch;joinWatch.Restart();
+            WorkBatchPolicy.Take(_dirtyNodes,_joinCandidates,8);
+            foreach (var node in _joinCandidates)
 
             {
 
@@ -2147,23 +2154,23 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                AddHighwayJoins(node,roads,curves);
-                AddHighwayNodePaint(node,curves);
+                bool nativeHighway=NativeHighwayPathsReady(node);
+                if(!nativeHighway&&AutomaticMarkingPolicy.Allows(EntityManager,node))AddHighwayJoins(node,roads,curves);
                 byte nodeHidden=SegmentUpgradePolicy.Mode(EntityManager,node);
                 curves.RemoveAll(m=>!m.Protected&&SegmentUpgradePolicy.Hides(nodeHidden,m.Median,m.Curb));
                 if(CenterlineVisibility.Hidden(EntityManager,node))curves.RemoveAll(m=>m.Median&&!m.Protected);
-                AddNodeDividers(node,curves);
-                AddNodeCenter(node,curves);CanonicalCenterPairs(curves);
-                if(EntityManager.HasComponent<MGRJunctionEdgeLines>(node))AddJunctionEdges(node,roads,curves);
+                if(!nativeHighway){AddNodeDividers(node,curves);AddNodeCenter(node,curves);CanonicalCenterPairs(curves);}
+                if(!nativeHighway&&EntityManager.HasComponent<MGRJunctionEdgeLines>(node))AddJunctionEdges(node,roads,curves);
                 if(EntityManager.HasComponent<MGRRemoveJunctionEdges>(node))curves.RemoveAll(m=>!m.Protected&&(m.Curb||roads.Exists(r=>RoadSurfacePolicy.IsHighway(EntityManager,r))&&m.Median&&!m.CenterUpgrade));
                 // Render explicit paired node edges as the same individual stripes as their previews.
                 byte edgePattern=EdgeUpgradePolicy.Mode(EntityManager,node,true);
-                if(EdgeUpgradePolicy.Paired(edgePattern)){
+                if(!nativeHighway&&EdgeUpgradePolicy.Paired(edgePattern)){
                     var split=new List<MarkCurve>();var single=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,EdgeUpgradePolicy.IsYellow(edgePattern));
                     foreach(var mark in curves)if(mark.Curb&&!mark.Protected){if(edgePattern>=12){AddPassingMarks(node,true,1,new List<Bezier4x3>{NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern))},single,split);continue;}split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),single,0,false,true));split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern)),single,0,false,true));}else split.Add(mark);
                     curves=split;
                 }
-                ApplyDashedEdges(node,curves,true);
+                if(nativeHighway)AddHighwayNodePaint(node,curves);else ApplyDashedEdges(node,curves,true);
+                ApplyHighwayLineIntents(node,curves);
                 var reusable = new Dictionary<MarkingKey, Queue<Entity>>();
 
                 if (_joins.TryGetValue(node, out var old))

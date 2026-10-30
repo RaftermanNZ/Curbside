@@ -1,4 +1,4 @@
-﻿using Colossal.Mathematics;
+using Colossal.Mathematics;
 using Game.Common;
 using Game.Net;
 using Game.Prefabs;

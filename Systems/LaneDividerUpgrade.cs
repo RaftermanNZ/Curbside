@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Mathematics;using Colossal.Serialization.Entities;
 using Game.Net;using Game.Prefabs;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
@@ -46,6 +46,7 @@ namespace MedianGrassReplacement.Systems
             if(!RoadSurfacePolicy.IsPaved(EntityManager,road)||!EntityManager.HasComponent<Composition>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return false;
             var composition=EntityManager.GetComponentData<Composition>(road).m_Edge;if(!EntityManager.HasComponent<NetCompositionData>(composition))return false;
             float width=EntityManager.GetComponentData<NetCompositionData>(composition).m_Width;if(!math.isfinite(width)||width<=0)return false;
+            if(NativeHighwaySectionPlan(road,3,out var nativeDividers)){paths=nativeDividers;return true;}
             var geometry=EntityManager.GetComponentData<EdgeGeometry>(road);var stops=ReadStopMarks(road);
             foreach(var boundary in LaneDividerPolicy.Boundaries(TrafficLanes(composition)))
             {

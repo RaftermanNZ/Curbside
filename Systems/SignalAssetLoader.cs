@@ -81,6 +81,7 @@ namespace GardenCitySignals
   private bool ImportProgress(string title,string detail,float value)=>CancelImport;
   private double nextProbe;
   private double preparedProbeStart=-1;
+  internal static string DiscoveryStatus { get; private set; }="Waiting for native signal catalog";
   // Recovery: cached prefab registration is not yet proven to restore rendering.
   private static bool CacheRestoreEnabled=>false;
   internal static bool ValidModuleHeight(string name,float height)
@@ -90,7 +91,7 @@ namespace GardenCitySignals
   }
   private readonly Dictionary<EmissiveProperties.Purpose,EmissiveProperties.LightProperties> calibration=new Dictionary<EmissiveProperties.Purpose,EmissiveProperties.LightProperties>();
   private readonly List<PrefabBase> created=new List<PrefabBase>();
-  protected override void OnCreate(){base.OnCreate();prefabs=World.GetOrCreateSystemManaged<PrefabSystem>();nativeModules=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<StaticObjectData>(),ComponentType.Exclude<Game.Common.Deleted>());templates=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<TrafficLightData>());streetTemplates=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<StreetLightData>());}
+  protected override void OnCreate(){base.OnCreate();DiscoveryStatus="Waiting for native signal catalog";prefabs=World.GetOrCreateSystemManaged<PrefabSystem>();nativeModules=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<StaticObjectData>(),ComponentType.Exclude<Game.Common.Deleted>());templates=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<TrafficLightData>());streetTemplates=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<StreetLightData>());}
   protected override void OnUpdate()
   {
    if(started||stopping||!(AppDomain.CurrentDomain.GetData("Curbside.Active.v1") is bool active&&active))return;
@@ -154,11 +155,18 @@ namespace GardenCitySignals
    foreach(string name in new[]{"NA_TrafficLightCarCrosswalk01","NA_TrafficLightCar01","EU_TrafficLightCar01"})
     if(prefabs.TryGetPrefab(new PrefabID(nameof(StaticObjectPrefab),name),out var item)&&item is StaticObjectPrefab native&&native.isBuiltin&&prefabs.TryGetEntity(native,out fallbackEntity)&&EntityManager.Exists(fallbackEntity)){fallback=native;break;}
    bool published=false;
-   if(!Mod.PreparedPack&&discovered.TryGetValue("CSG Module CSGHeadBlack",out var known)&&Published(known))
+   if(!Mod.PreparedPack&&discovered.Count>0)
    {published=true;AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",true);}
    if(!Mod.PreparedPack&&!published)
    {
-    if(GameManager.instance!=null&&GameManager.instance.state>=GameManager.State.WorldReady){started=true;Enabled=false;AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);Mod.Log.Info("Optional native signal pack not present at completed boot; discovery stopped. No source import or loading buttons.");}
+    if(GameManager.instance!=null&&GameManager.instance.state>=GameManager.State.WorldReady)
+    {
+     if(preparedProbeStart<0)preparedProbeStart=Mod.LoadTimer.Elapsed.TotalSeconds;
+     DiscoveryStatus="No published signal modules detected; checking native catalog during bounded startup grace";
+     if(Mod.LoadTimer.Elapsed.TotalSeconds-preparedProbeStart<30)return;
+     started=true;Enabled=false;DiscoveryStatus="Optional signal pack absent after startup grace; custom buttons hidden";
+     AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);Mod.Log.Info(DiscoveryStatus+". No source import or loading buttons.");
+    }
     return;
    }
    var adopted=new List<Entity>();
@@ -172,10 +180,11 @@ namespace GardenCitySignals
    {
     NativeSignalCatalog.Register(prefabs,discovered);
     foreach(var entity in adopted)MedianGrassReplacement.Systems.SignalAssetSaveSystem.Register(entity,fallbackEntity);
-    started=true;Enabled=false;
+    started=true;Enabled=false;DiscoveryStatus="Ready: "+adopted.Count+" native signal modules";
     Mod.Log.Info("Prepared signal pack adopted from native startup: modules="+adopted.Count+" uptime="+UnityEngine.Time.realtimeSinceStartup+". No FBX import, runtime database population or manual geometry loading.");
     return;
    }
+   DiscoveryStatus="Signal modules "+adopted.Count+"/"+Modules.Length+"; ambiguous="+ambiguousCatalog+"; missing="+string.Join(",",Modules.Where(n=>!discovered.ContainsKey("CSG Module "+n)).Take(8));
    // Native prefab boot may take longer with a large playset. A missing-pack
    // deadline must not run while the game is still registering its assets.
    if(GameManager.instance==null||GameManager.instance.state<GameManager.State.WorldReady)return;
@@ -183,6 +192,7 @@ namespace GardenCitySignals
    if(Mod.LoadTimer.Elapsed.TotalSeconds-preparedProbeStart<30)return;
    started=true;Enabled=false;
    AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);
+   Mod.Log.Error(DiscoveryStatus);
    Mod.Log.Error("Prepared signal pack incomplete after native boot: "+adopted.Count+"/"+Modules.Length+" modules. Custom buttons disabled; Curbside remains available. Refusing duplicate source import. Check asset pack installation and native asset errors.");
   }
   private static bool Published(StaticObjectPrefab model)

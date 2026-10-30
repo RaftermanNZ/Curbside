@@ -1,4 +1,4 @@
-﻿namespace MedianGrassReplacement.Systems
+namespace MedianGrassReplacement.Systems
 {
     internal static class UpgradeInputPolicy
     {

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Serialization.Entities;
 using Game;using Game.Common;using Game.Prefabs;using Game.Serialization;using Game.Tools;
 using Unity.Collections;using Unity.Entities;using Unity.Mathematics;

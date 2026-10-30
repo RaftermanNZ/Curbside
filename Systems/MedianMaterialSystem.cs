@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -286,7 +286,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
             _waitingForRoadGrass = !string.IsNullOrWhiteSpace(selected)
 
@@ -378,9 +378,14 @@ namespace MedianGrassReplacement.Systems
 
                 s_refreshRequested = false;
 
+                // A committed road rebuild can destroy the cached instances.
+                // Decide whether to probe using live entries, rather than a stale
+                // Count that would skip the only menu-triggered discovery.
+                PruneDestroyedSnapshots();
 
 
-                string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+
+                string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
                 if (string.IsNullOrWhiteSpace(selected) || selected == TextureCatalog.VanillaValue)
 
@@ -678,7 +683,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
 
 
@@ -779,8 +784,8 @@ namespace MedianGrassReplacement.Systems
         private bool LoadSelectedTextures(string selected)
 
         {
-
-            DestroyCustomTextures();
+            // Detach owned material references before releasing their textures.
+            RestoreVanilla(clearSnapshots: false);
 
 
 
@@ -902,6 +907,8 @@ namespace MedianGrassReplacement.Systems
 
 
 
+                snapshot.CaptureBaseline();
+
                 material.SetTexture(AlbedoProperty, _customAlbedo ?? snapshot.Albedo);
 
                 material.SetTexture(NormalProperty, _customNormal ?? snapshot.Normal);
@@ -960,7 +967,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
             if (string.IsNullOrWhiteSpace(selected) || selected == TextureCatalog.VanillaValue)
 
@@ -997,6 +1004,8 @@ namespace MedianGrassReplacement.Systems
                 if (snapshot.HasUvScale && material.HasProperty(UvScaleProperty))
 
                 {
+
+                    snapshot.CaptureUvBaseline();
 
                     material.SetFloat(UvScaleProperty, clamped);
 
@@ -1240,19 +1249,35 @@ namespace MedianGrassReplacement.Systems
 
             internal Material Material { get; }
 
-            internal Texture Albedo { get; }
+            internal Texture Albedo { get; private set; }
 
-            internal Texture Normal { get; }
+            internal Texture Normal { get; private set; }
 
-            internal Texture Mask { get; }
+            internal Texture Mask { get; private set; }
 
             internal bool HasBaseColor { get; }
 
-            internal Color BaseColor { get; }
+            internal Color BaseColor { get; private set; }
 
             internal bool HasUvScale { get; }
 
-            internal float UvScale { get; }
+            internal float UvScale { get; private set; }
+
+            internal void CaptureBaseline()
+            {
+                Albedo = MaterialOwnership.Baseline(OwnTextures, Material.GetTexture(AlbedoProperty), AppliedAlbedo, Albedo);
+                Normal = MaterialOwnership.Baseline(OwnTextures, Material.GetTexture(NormalProperty), AppliedNormal, Normal);
+                Mask = MaterialOwnership.Baseline(OwnTextures, Material.GetTexture(MaskProperty), AppliedMask, Mask);
+                if (HasBaseColor && Material.HasProperty(BaseColorProperty))
+                    BaseColor = MaterialOwnership.Baseline(OwnBaseColor, Material.GetColor(BaseColorProperty), AppliedBaseColor, BaseColor);
+                CaptureUvBaseline();
+            }
+
+            internal void CaptureUvBaseline()
+            {
+                if (HasUvScale && Material.HasProperty(UvScaleProperty))
+                    UvScale = MaterialOwnership.Baseline(OwnUvScale, Material.GetFloat(UvScaleProperty), AppliedUvScale, UvScale);
+            }
 
         }
 

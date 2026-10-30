@@ -1,4 +1,4 @@
-﻿using Game.Common;using Game.Net;using Unity.Entities;
+using Game.Common;using Game.Net;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     public partial class SegmentUpgradeSystem
@@ -21,7 +21,7 @@ namespace MedianGrassReplacement.Systems
             }
             else if(asset==SegmentUpgradePolicy.ResetLines&&!remove)
             {
-                Remove<MGRCenterlineStyle>(node);Remove<MGRLaneDivider>(node);Remove<MGREdgePaint>(node);Remove<MGRHideCenterline>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);
+                if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRLaneDivider>(node);Remove<MGREdgePaint>(node);Remove<MGRHideCenterline>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);
             }
             else return;
             var emitter=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();emitter.QueueNodeRefresh(node);emitter.RefreshNodePaint(node);

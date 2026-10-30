@@ -1,4 +1,4 @@
-﻿using Game.Net;using Unity.Entities;
+using Game.Net;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     public partial class DecalUpgradeTool

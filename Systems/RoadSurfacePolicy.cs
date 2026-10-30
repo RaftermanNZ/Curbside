@@ -1,4 +1,4 @@
-﻿using Game.Prefabs;
+using Game.Prefabs;
 using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {

@@ -1,4 +1,4 @@
-﻿using Unity.Mathematics;
+using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     internal static class MedianPaintPolicy

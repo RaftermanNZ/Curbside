@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.IO;
 
@@ -12,11 +12,39 @@ namespace MedianGrassReplacement
 
     {
 
+        private static string _directory;
+
+        internal static void Initialize(Game.Modding.IMod mod)
+        {
+            _directory = null;
+            var manager = Game.SceneFlow.GameManager.instance?.modManager;
+            if (manager != null && manager.TryGetExecutableAsset(mod, out var asset))
+                _directory = BundledAssetPathPolicy.DirectoryFromExecutable(asset.path);
+        }
+
+        internal static Stream Open(string resource)
+        {
+            string filename;
+            switch(resource)
+            {
+                case "MedianGrassReplacement.CurbsideGrass.png":filename="CurbsideGrass_BaseColor.png";break;
+                case "MedianGrassReplacement.RoadWear.png":filename="CurbsideRoadWear_BaseColor.png";break;
+                case "MedianGrassReplacement.RoadSurface.png":filename="CurbsideRoad_BaseColor.png";break;
+                case "MedianGrassReplacement.SidewalkSurface.png":filename="CurbsideSidewalk_BaseColor.png";break;
+                default:return typeof(Mod).Assembly.GetManifestResourceStream(resource);
+            }
+            if (string.IsNullOrEmpty(_directory))
+                throw new FileNotFoundException("The game did not resolve Curbside's installed asset directory.");
+            string path=Path.Combine(_directory,"BundledTextures",filename);
+            if(!File.Exists(path))throw new FileNotFoundException("Included texture file missing; reinstall the complete Curbside package.",path);
+            return File.OpenRead(path);
+        }
+
         internal static bool Install(string resource, string path)
 
         {
 
-            using (var source = typeof(Mod).Assembly.GetManifestResourceStream(resource))
+            using (var source = Open(resource))
 
             {
 
@@ -58,6 +86,16 @@ namespace MedianGrassReplacement
 
         }
 
+    }
+
+    internal static class BundledAssetPathPolicy
+    {
+        internal static string DirectoryFromExecutable(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            try { return Path.IsPathRooted(path) ? Path.GetDirectoryName(Path.GetFullPath(path)) : null; }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { return null; }
+        }
     }
 
 }

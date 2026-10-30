@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;using Colossal.Mathematics;using Game.Common;using Game.Net;using Unity.Entities;using Unity.Mathematics;
+using System.Collections.Generic;using Colossal.Mathematics;using Game.Common;using Game.Net;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     public partial class CurbLineEmissionSystem

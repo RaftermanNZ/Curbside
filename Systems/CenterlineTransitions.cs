@@ -1,4 +1,4 @@
-﻿using System;using System.Collections.Generic;using Colossal.Mathematics;using Game.Prefabs;using Unity.Entities;using Unity.Mathematics;
+using System;using System.Collections.Generic;using Colossal.Mathematics;using Game.Prefabs;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     internal static class CenterTransitionPolicy

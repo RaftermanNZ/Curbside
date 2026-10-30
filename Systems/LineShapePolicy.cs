@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;using Colossal.Mathematics;using Unity.Entities;
+using System.Collections.Generic;using Colossal.Mathematics;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     internal static class LineShapePolicy

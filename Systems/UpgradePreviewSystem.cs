@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Mathematics;using Game;using Game.Common;using Game.Net;using Game.Prefabs;using Game.Tools;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
@@ -63,7 +63,7 @@ namespace MedianGrassReplacement.Systems
             if(name==RoadSideUpgrades.DecalAsset)
             {
                 var s=Mod.Settings;var footprint=DecalStripPolicy.Footprint(s.CurbDecalWidth,s.CurbDecalLength,s.CurbDecalRotation);var paths=new List<Bezier4x3>();var sides=new List<bool>();
-                if(emission.TryDecalCurves(road,RoadSurfacePolicy.DecalOffset(EntityManager,road),footprint.x,s.CurbDecalSetback,paths,sides,s.DecalsBothSides?(byte)3:RoadSideUpgrades.SideMask(left)))
+                if(emission.TryDecalCurves(road,RoadSurfacePolicy.DecalOffset(EntityManager,road),footprint.x,s.CurbDecalSetback,paths,sides,RoadSideUpgrades.DecalTarget(left,s.DecalsBothSides)))
                 foreach(var path in paths){var a=NetUtils.OffsetCurveLeftSmooth(path,footprint.x*.5f);var b=NetUtils.OffsetCurveLeftSmooth(path,-footprint.x*.5f);overlay.DrawCurve(Blue,a,.1f);overlay.DrawCurve(Blue,b,.1f);Line(overlay,a.a,b.a,Blue);Line(overlay,a.d,b.d,Blue);}return;
             }
             if(name==VisualPowerlineSystem.AssetName||name==StreetLightingSystem.AssetName)

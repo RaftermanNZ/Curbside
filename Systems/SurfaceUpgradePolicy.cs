@@ -1,4 +1,4 @@
-﻿using System;using Colossal.Serialization.Entities;using Unity.Entities;
+using System;using Colossal.Serialization.Entities;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     public struct MGRSurfaceSlots:IComponentData,ISerializable

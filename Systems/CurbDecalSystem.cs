@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -37,6 +37,8 @@ namespace MedianGrassReplacement.Systems
         internal static float RoadLayerMask => math.asfloat((uint)Game.Rendering.DecalLayers.Roads);
 
         internal const int MaxProjectors = 2048, MaxPerRoad = 128;
+
+        internal const string LimitWarning="Road-wear coverage reached this section's safety limit. Increase repeat length or reduce overlap.";
 
         internal static int Capacity(bool unlimited,int limit,int total,int replacing)
 
@@ -136,7 +138,7 @@ namespace MedianGrassReplacement.Systems
 
         private readonly Dictionary<Entity, RoadVisual> _visuals = new Dictionary<Entity, RoadVisual>();
 
-        private sealed class Build { internal Entity Road; internal RoadVisual Visual; internal List<Tile> Tiles; internal int Cursor; }
+        private sealed class Build { internal Entity Road; internal RoadVisual Visual; internal List<Tile> Tiles; internal int Cursor; internal bool Limited; }
 
         private struct Tile { internal float3 Position, Tangent; internal float Length, Rotation; }
 
@@ -307,7 +309,7 @@ namespace MedianGrassReplacement.Systems
 
                 Remove(finished.Road); _visuals[finished.Road] = finished.Visual; _total += finished.Visual.Count; finished.Visual.Root.SetActive(true);
 
-                Status = _total + (Mod.Settings.UnlimitedDecals ? " mesh decals (no city-wide limit)" : " mesh decals");
+                Status = _total + " mesh decals (no city-wide limit)"+(finished.Limited?" "+DecalStripPolicy.LimitWarning:"");
 
             }
 
@@ -432,11 +434,11 @@ namespace MedianGrassReplacement.Systems
 
             if (_visuals.TryGetValue(road, out var previous) && previous.Hash == hash) return true;
 
-            int capacity=DecalStripPolicy.Capacity(s.UnlimitedDecals,s.CurbDecalLimit,_total,previous?.Count??0);
+            int capacity=DecalStripPolicy.MaxPerRoad;
 
-            if(capacity<=0) { Status="Decal limit reached."; Remove(road); return true; }
+            if(capacity<=0) { Status=DecalStripPolicy.LimitWarning; Remove(road); return true; }
 
-            var tiles = new List<Tile>(); int curveIndex=0, placementIndex=0;
+            var tiles = new List<Tile>(); int curveIndex=0, placementIndex=0; bool limited=false;
 
             foreach (var curve in curves)
 
@@ -459,6 +461,7 @@ namespace MedianGrassReplacement.Systems
                 int allowance=math.max(1,(capacity-tiles.Count)/math.max(1,curves.Count-curveIndex++));
 
                 int count=math.min(wanted,math.min(allowance,capacity-tiles.Count));
+                limited|=count<wanted;
 
                 for (int i = 0; i < count; i++)
 
@@ -518,11 +521,11 @@ namespace MedianGrassReplacement.Systems
 
             if (tiles.Count == 0) { Remove(road); return true; }
 
-            if (tiles.Count > capacity) { Status = "Decal limit reached; increase repeat length or reduce overlap."; Remove(road); return true; }
+            if (tiles.Count > capacity) { Status = DecalStripPolicy.LimitWarning; Remove(road); return true; }
 
             var holder = new GameObject("Curbside road decals") { hideFlags = HideFlags.HideAndDontSave }; holder.SetActive(false);
 
-            _build = new Build { Road = road, Tiles = tiles, Visual = new RoadVisual { Root = holder, Hash = hash, Count = tiles.Count } };return true;
+            _build = new Build { Road = road, Tiles = tiles, Limited=limited, Visual = new RoadVisual { Root = holder, Hash = hash, Count = tiles.Count } };return true;
 
         }
 

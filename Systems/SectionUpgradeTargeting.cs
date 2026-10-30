@@ -1,4 +1,4 @@
-﻿using Colossal.Mathematics;using Game.Common;using Game.Net;using Game.Tools;using Unity.Entities;using Unity.Mathematics;
+using Colossal.Mathematics;using Game.Common;using Game.Net;using Game.Tools;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
 {
     internal static class SectionUpgradeTargeting

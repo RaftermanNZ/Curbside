@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Globalization;
 
@@ -96,7 +96,7 @@ namespace MedianGrassReplacement
 
         public string ExactDecalOverlap { get => _overlapDraft.Read(CurbDecalOverlap); set => _overlapDraft.Write(value,CurbDecalOverlap); }
 
-        [Exclude][SettingsUITextInput][SettingsUIHideByCondition(typeof(Setting),nameof(HideExactDecalValues))][SettingsUIDisableByCondition(typeof(Setting),nameof(IsUnlimitedDecalMode))][SettingsUISection(kTexturesTab,kDecalGroup)]
+        [Exclude][SettingsUIHidden]
 
         public string ExactDecalLimit { get => _limitDraft.Read(CurbDecalLimit); set => _limitDraft.Write(value,CurbDecalLimit); }
 
@@ -122,13 +122,7 @@ namespace MedianGrassReplacement
 
                 for(int i=0;i<text.Length;i++) if(!DecalValueInput.TryFloat(text[i],out parsed[i])) { _decalValueError=names[i]+": enter a finite number, for example -0.125 or 22.5. Typed values have not been applied."; return; }
 
-                int limit=CurbDecalLimit;
-
-                if(!UnlimitedDecals && !int.TryParse(ExactDecalLimit,NumberStyles.Integer,CultureInfo.CurrentCulture,out limit)) { _decalValueError="Maximum decals: enter a whole number. Typed values have not been applied."; return; }
-
                 CurbDecalWidth=parsed[0]; CurbDecalLength=parsed[1]; CurbDecalOffset=parsed[2]; CurbDecalSetback=parsed[3]; CurbDecalRotation=parsed[4]; CurbDecalOverlap=parsed[5];
-
-                if(!UnlimitedDecals) CurbDecalLimit=limit;
 
                 _decalValueError=null; ClearDecalDrafts();
 

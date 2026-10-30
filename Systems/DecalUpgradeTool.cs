@@ -1,4 +1,4 @@
-﻿using Colossal.Serialization.Entities;
+using Colossal.Serialization.Entities;
 
 using Game.Common;
 
@@ -127,7 +127,18 @@ namespace MedianGrassReplacement.Systems
 
             bool left = RoadSideUpgrades.IsLeft(EntityManager, road, hit.m_Hit.m_HitPosition);
 
-            var overlay = World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>(); var buffer = overlay.GetBuffer(out var pending); pending.Complete(); if(!dividerTool)buffer.DrawCurve(new UnityEngine.Color(.15f, 1f, .3f, .8f), (hideCenter || wear && Mod.Settings.DecalsBothSides) ? EntityManager.GetComponentData<Curve>(road).m_Bezier : RoadSideUpgrades.Preview(EntityManager, road, left), 2f);
+            var overlay = World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>(); var buffer = overlay.GetBuffer(out var pending); pending.Complete();
+            if(!dividerTool)
+            {
+                var color=new UnityEngine.Color(.15f,1f,.3f,.8f);
+                if(hideCenter||centerStyle!=0)buffer.DrawCurve(color,EntityManager.GetComponentData<Curve>(road).m_Bezier,2f);
+                else
+                {
+                    byte previewSides=RoadSideUpgrades.PreviewSides(_selected?.name,left,Mod.Settings.DecalsBothSides);
+                    if((previewSides&1)!=0)buffer.DrawCurve(color,RoadSideUpgrades.Preview(EntityManager,road,true),2f);
+                    if((previewSides&2)!=0)buffer.DrawCurve(color,RoadSideUpgrades.Preview(EntityManager,road,false),2f);
+                }
+            }
 
             if(_selected?.name==RoadFeatureInspector.AssetName)return default;
             if (applyAction.WasPressedThisFrame() || remove)
@@ -227,10 +238,11 @@ namespace MedianGrassReplacement.Systems
 
                         else { if (!EntityManager.HasComponent<MGRCurbDecalSides>(road)) EntityManager.AddComponent<MGRCurbDecalSides>(road); EntityManager.SetComponentData(road, new MGRCurbDecalSides { Mask = sides }); }
 
-                        World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);
-
                     }
-
+                    // A repeated explicit click can retry an unchanged intent after
+                    // the user frees capacity or changes the decal budget.
+                    if(sides!=oldSides||!remove)World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);
+                    UpgradeFeedback.Report(_selected.name,Mod.Settings.DecalsBothSides?"Road wear targets both roadsides.":"Road wear targets the highlighted roadside.");
                     return default;
 
                 }

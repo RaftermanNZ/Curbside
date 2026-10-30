@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Mathematics;using Game.Common;using Game.Prefabs;
 using Unity.Collections;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 using Colossal;
 
@@ -27,6 +27,14 @@ namespace MedianGrassReplacement.Localization
             void Option(string id, string label, string help) { entries.Add(_setting.GetOptionLabelLocaleID(id), label); entries.Add(_setting.GetOptionDescLocaleID(id), help); }
 
             void Asset(string id, string label, string help) { entries["Assets.NAME[" + id + "]"]=label; entries["Assets.DESCRIPTION[" + id + "]"]=help; }
+            entries[_setting.GetOptionTabLocaleID(Setting.kHighwaysTab)]="Highway markings";
+            entries[_setting.GetOptionGroupLocaleID(Setting.kCompatibilityGroup)]="Compatibility controls";
+            entries[_setting.GetOptionGroupLocaleID(Setting.kHighwayControlGroup)]="Automatic highway markings";
+            Option(nameof(Setting.DisableAutomaticMarkings),"Disable automatic road lines","Keep manual line, parking, crossing and visibility upgrades. Stop automatically added curb/median lines; saved upgrade choices remain intact. Default: off.");
+            Option(nameof(Setting.DisableAutomaticHighwayMarkings),"Disable automatic highway lines","Keep vanilla highway markings and your manual upgrades; stop automatic highway additions at sections, nodes and junctions. Default: off.");
+            Option(nameof(Setting.DisableAutomaticLineAdjustments),"Disable automatic line adjustments","Stop unsolicited native line recoloring and junction cleanup. Explicit manual upgrades and visibility choices remain active. Default: off.");
+            Option(nameof(Setting.DisableTextureReplacement),"Disable surface texture replacements","Restore Curbside-owned road, sidewalk and grass surface changes. Keep your texture selections for re-enabling. Decorative road-wear decals are separate upgrades. Default: off.");
+
 
             Asset(MedianGrassReplacement.Systems.ParkingBanPolicy.AssetName, "Ban parking on this side", "Click near one side of a road to ban parking there. Right-click restores parking and the previous bay layout. Existing parked cars are not moved.");
             Asset(MedianGrassReplacement.Systems.CenterlineVisibility.AssetName,"Hide centerline","Click a road section to hide its opposing-traffic center and yellow median-edge lines. Right-click restores normal markings. Manual Town Road Lane paint is preserved.");
@@ -114,7 +122,6 @@ namespace MedianGrassReplacement.Localization
 
             Option(nameof(Setting.ExactDecalOverlap), "Exact: Overlap (%)", "Type an exact value, then click Apply exact values. You can clear and replace the entire number. The slider limits still apply.");
 
-            Option(nameof(Setting.ExactDecalLimit), "Exact: maximum decals", "Enter a whole number from 16 to 2048.");
 
             Option(nameof(Setting.DecalsBothSides), "Apply decals to both sides", "The curbside decal upgrade selects both curbs of the clicked road section. Right-click removes both. Disable to select the side nearest the pointer. Existing selections change only when you apply the tool.");
 
@@ -122,11 +129,8 @@ namespace MedianGrassReplacement.Localization
 
             Option(nameof(Setting.CurbDecalRotation), "Rotation (degrees)", "Rotate around the road surface normal. Full corners are checked against segment end clearance.");
 
-            Option(nameof(Setting.UnlimitedDecals), "Unlimited decals", "Remove the city-wide count limit. Heavy coverage increases draw calls and memory use and can lower FPS or exhaust memory. The per-road and per-frame limits remain. Default: off.");
 
-            Option(nameof(Setting.UnlimitedDecalWarning), "Performance note", "Reduce coverage or turn off Unlimited decals if performance or memory use becomes excessive.");
 
-            Option(nameof(Setting.CurbDecalLimit), "Maximum decals", "City-wide limit while Unlimited decals is off. Default 2048, adjustable up to 2048. This setting is ignored in unlimited mode.");
 
             Option(nameof(Setting.CurbDecalStatus), "Decal status", "Current build or texture status. Changes are applied gradually to limit frame spikes.");
 
@@ -140,7 +144,7 @@ namespace MedianGrassReplacement.Localization
 
             Group(Setting.kLibraryGroup, "Curbside grass"); Group(Setting.kAppearanceGroup, "Edge lines"); Group(Setting.kParkingGroup, "Parking bays"); Group(Setting.kCrosswalkGroup, "Two-line crosswalks"); Group(Setting.kStopGroup, "Stop-line alignment"); Group(Setting.kMaintenanceGroup, "Refresh"); Group(Setting.kAboutGroup, "The Curbside Mod");
 
-            Option(nameof(Setting.TextureFolder), "Texture library folder", "Choose the folder containing your PNG textures. Subfolders are not scanned.");
+            Option(nameof(Setting.TextureFolder), "Texture library folder", "Choose the folder containing your PNG textures. A bounded set of subfolders is scanned; refresh the list after adding files.");
 
             Option(nameof(Setting.SelectedTexture), "Grass texture", "Replace grass on grassy sidewalks and road medians. Choose Vanilla to restore the original texture.");
 
@@ -172,7 +176,7 @@ namespace MedianGrassReplacement.Localization
 
             Option(nameof(Setting.RefreshCurbLineStyles), "Refresh line styles", "Update the style list after loading a new marking asset pack.");
 
-            Option(nameof(Setting.Version), "Version", "Installed version."); Option(nameof(Setting.Function), "Features", "Road upgrade tools are in Roads > Road Services, beside Crosswalk.");
+            Option(nameof(Setting.Version), "Version", "Installed version."); Option(nameof(Setting.Function), "Features", "Open Curbside to access road upgrades.");
 
             Asset("MGR Line Crosswalk Upgrade", "Crosswalk: two lines", "Left-click to add or restyle a crossing. Right-click to remove it. Select the game's Crosswalk tool for zebra paint.");
 

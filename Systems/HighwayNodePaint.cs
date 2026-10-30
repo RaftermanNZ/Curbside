@@ -1,4 +1,4 @@
-﻿using System;using System.Collections.Generic;using Game.Common;using Game.Net;using Game.Prefabs;using Unity.Entities;
+using System;using System.Collections.Generic;using Game.Common;using Game.Net;using Game.Prefabs;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     internal static class HighwayNodePaintPolicy
@@ -30,27 +30,48 @@ namespace MedianGrassReplacement.Systems
             if(!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab,out var prefab)||prefab==null||!NodeLinePolicy.IsLineGeometry(prefab))return 0;
             return HighwayNodePaintPolicy.Role(prefab.name,IsYellowNodeBoundary(node,EntityManager.GetComponentData<Curve>(source).m_Bezier));
         }
-        private static bool HasHighwayRole(List<MarkCurve> curves,int role)=>curves.Exists(m=>role==1?m.Median:role==2?m.Curb:m.DividerUpgrade);
+        private bool NativeHighwayPathsReady(Entity node)
+        {
+            if(!HighwayNode(node)||!EntityManager.HasBuffer<Game.Net.SubLane>(node))return false;
+            int count=0;foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))
+            {if(++count>256)break;int role=HighwayNodeSourceRole(node,entry.m_SubLane);if((role==1||role==2)&&Valid(EntityManager.GetComponentData<Curve>(entry.m_SubLane).m_Bezier))return true;}
+            return false;
+        }
         private void AddHighwayNodePaint(Entity node,List<MarkCurve> output)
         {
-            if(!HighwayNode(node)||!EntityManager.HasBuffer<Game.Net.SubLane>(node))return;
-            // Generated shoulder/gore geometry takes precedence. For unsupported
-            // layouts, retain authored paths as owned paint rather than erase a role.
-            bool center=HasHighwayRole(output,1),edge=HasHighwayRole(output,2);
-            int count=0;foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))
+            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,node);
+            var anchors=HighwayPaintAnchors(node);
+            var native=new List<MarkCurve>();var seen=new List<Colossal.Mathematics.Bezier4x3>();int count=0;
+            foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))
             {
-                if(++count>256)break;var source=entry.m_SubLane;int role=HighwayNodeSourceRole(node,source);if(role==0||role==1&&center||role==2&&edge||role==3&&LaneDividerPolicy.Mode(EntityManager,node)!=0)continue;
-                var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;if(!Valid(path))continue;
-                var prefab=EntityManager.GetComponentData<PrefabRef>(source).m_Prefab;
-                if(role==1)prefab=ResolveCenterStyle(prefab);else if(Mod.Settings.EuropeanMarkings)prefab=ThemeEquivalent(prefab);
+                if(++count>256)break;var source=entry.m_SubLane;int role=HighwayNodeSourceRole(node,source);if(role==0)continue;
+                var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;if(!Valid(path)||seen.Exists(p=>GranularHighwayLinePolicy.Matches(p,path)))continue;seen.Add(path);
+                if(role==2&&HighwayPaintAnchorPolicy.Yellow(path,anchors))role=1;
+                var joined=HighwayPaintAnchorPolicy.Join(path,anchors);
+                byte legacy=role==1?CenterlineUpgradePolicy.Mode(EntityManager,node):role==2?EdgeUpgradePolicy.Mode(EntityManager,node,true):LaneDividerPolicy.Mode(EntityManager,node);
+                if(role==2&&legacy==0&&EntityManager.HasComponent<MGRJunctionEdgeLines>(node))legacy=1;
+                byte style=GranularHighwayLinePolicy.LegacyStyle(role,legacy,Mod.Settings.YellowToolPaint);
+                if(style==GranularHighwayLinePolicy.Removed)continue;
+                if(style==0&&(!automatic||SegmentUpgradePolicy.Hides(SegmentUpgradePolicy.Mode(EntityManager,node),role==1,role==2)||role==1&&CenterlineVisibility.Hidden(EntityManager,node)||role==2&&EntityManager.HasComponent<MGRRemoveJunctionEdges>(node)))continue;
+                var prefab=EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(source).m_Prefab;
+                if(style!=0)prefab=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LineShapePolicy.Yellow(style));
+                else if(role==1&&Mod.Settings.MedianEdgeLines){prefab=AutomaticMedianAsset();if(!string.IsNullOrEmpty(Mod.Settings.MedianLineStyle)&&_nativeLineDefinitions.TryGetValue(Mod.Settings.MedianLineStyle,out var medianStyle))prefab=medianStyle;if(Mod.Settings.EuropeanMarkings&&prefab!=Entity.Null)prefab=ThemeEquivalent(prefab);}else if(Mod.Settings.EuropeanMarkings)prefab=ThemeEquivalent(prefab);
                 if(prefab==Entity.Null)continue;
-                var mark=new MarkCurve(path,prefab,0,role==1,role==2);mark.DividerUpgrade=role==3;output.Add(mark);
+                var paths=style==0?new List<Colossal.Mathematics.Bezier4x3>{joined}:HighwayLinePaths(node,joined,style,role);
+                foreach(var stroke in paths){var mark=new MarkCurve(stroke,prefab,0,role==1,role==2){DividerUpgrade=role==3,NativeSource=source};native.Add(mark);}
             }
+            // Native topology identifies each path; shared segment paint anchors
+            // retain configured segment offsets at its endpoints. Legacy
+            // styles are mapped per path instead of reconstructed across a fork.
+            output.RemoveAll(m=>!m.Protected&&(m.Median||m.Curb||m.DividerUpgrade));
+            output.AddRange(native);
         }
         internal bool OwnsHighwayNodePaint(Entity node,Entity source)
         {
-            if(!HighwayNode(node)||!_joins.TryGetValue(node,out var marks))return false;
-            int role=HighwayNodeSourceRole(node,source);return role!=0&&HasHighwayRole(marks.Curves,role);
+            if(!HighwayNode(node))return false;
+            if(TryHighwayLineIntent(node,source,out var intent))
+            {if(intent.Style==GranularHighwayLinePolicy.Native)return false;if(intent.Style==GranularHighwayLinePolicy.Removed)return true;}
+            return _joins.TryGetValue(node,out var marks)&&marks.Curves.Exists(m=>m.NativeSource==source||m.NativeSource!=Entity.Null&&EntityManager.HasComponent<Curve>(source)&&GranularHighwayLinePolicy.Matches(m.Curve,EntityManager.GetComponentData<Curve>(source).m_Bezier));
         }
     }
 }

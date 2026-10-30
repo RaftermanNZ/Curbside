@@ -1,0 +1,20 @@
+{
+  "tests": [
+    "AuditHardeningChecks",
+    "RightBankChecks",
+    "SharedPoleChecks",
+    "ArmBankChecks",
+    "CapturedBankChecks",
+    "OwnerPolicyChecks",
+    "SignalWireChecks",
+    "LuminaireChecks",
+    "StopPriorityChecks",
+    "GrassCatalogChecks",
+    "BundledAssetPathChecks",
+    "MaterialCompatibilityChecks",
+    "SignalBindingChecks",
+    "WorkBatchChecks",
+    "SettingsContractChecks",
+    "LineIsolationChecks"
+  ]
+}

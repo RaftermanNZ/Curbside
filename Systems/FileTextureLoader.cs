@@ -152,7 +152,7 @@ namespace MedianGrassReplacement.Systems
             error=string.Empty; Texture2D texture=null;
             try
             {
-                using(var stream=typeof(Mod).Assembly.GetManifestResourceStream("MedianGrassReplacement.RoadWear.png"))
+                using(var stream=BundledAssets.Open("MedianGrassReplacement.RoadWear.png"))
                 {
                     if(stream==null||stream.Length<=0||stream.Length>MaxFileBytes){error="Included road-wear texture is unavailable.";return null;}
                     using(var buffer=new MemoryStream())

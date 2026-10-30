@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-`main` and tag `source-test111` contain the released Test111 code baseline. `hotfix/test113` contains unreleased compatibility controls, grass-library fixes and sidecar texture packaging. Compilation and policy tests do not establish in-game compatibility or performance. No hotfix is published automatically.
+`main` and tag `source-test122` contain the Test122 update source. Earlier source tags remain available. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
 
 ## Build locally on Windows
 
@@ -14,7 +14,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 2. Install .NET SDK 10.0.402 (see `global.json`), the .NET Framework 4.8 targeting pack and Node.js 22 or 24 LTS. SDK 10 is a developer tool; the mod still targets the game-shipped net48 runtime and C# 9.
 3. In `UI`, run `npm ci --ignore-scripts`, then `npm run build`. Editable TypeScript/SCSS, ambient UI declarations and the lockfile are included. See `UI/TEMPLATE-PROVENANCE.txt` for the shipped-template baseline and deliberate deviations.
 4. Run `./Build-Local.ps1` from PowerShell. It compiles and invokes the official game postprocessor/Burst tools. `BuildOutput` is a local staging folder; the script does not install or publish.
-5. Bundled texture artwork is excluded here. Obtain the approved images from the maintainer for a complete production package. The hotfix branch deploys them beside the DLL in `BundledTextures`, using the same saved selection IDs and extracted filenames.
+5. Bundled texture artwork is excluded here. Obtain the approved images from the maintainer for a complete production package. The mod deploys them beside the DLL in `BundledTextures`, using the same saved selection IDs and extracted filenames.
 6. Before local installation, close the game and disable the subscribed core copy. Never run two Curbside copies. Use disposable copies of saves for development.
 
 GitHub checks build the UI without proprietary game assemblies. Full native compilation, policy tests and in-game save/reload/performance checks run locally with the licensed game/toolchain. See [release gates](docs/RELEASE-SAFETY.md).
@@ -30,3 +30,5 @@ Original Curbside source code is MIT licensed; see `LICENSE`. That license does 
 Thanks to WinterQT for troubleshooting help and bug-fix suggestions. RealVision curb-wear decal: StatikNoize, used with permission. Edited sidewalk: Concrete Layers 02 by Rob Tuytel / Poly Haven, CC0. Other supplied road/grass images have separate redistribution permission. See `THIRD-PARTY-NOTICES.txt`.
 
 This spare-time project was developed with AI assistance. Back up saves; compatibility, safe removal, stability and performance cannot be guaranteed for every configuration.
+
+Local validation uses `Validation/Run-CurrentChecks.ps1` with a full game-postprocessed build. Set `CURBSIDE_CECIL` to your installed Mono.Cecil.dll for optional IL checks. Proprietary assemblies and texture images are not included.

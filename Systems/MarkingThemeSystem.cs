@@ -1,4 +1,4 @@
-﻿using Game;using Game.City;using Game.Prefabs;using Unity.Entities;
+using Game;using Game.City;using Game.Prefabs;using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {
     // Reads one city setting, not city entities. No shared prefab is changed.

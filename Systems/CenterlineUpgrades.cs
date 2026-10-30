@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Colossal.Mathematics;using Colossal.Serialization.Entities;
 using Game.Common;using Game.Net;using Game.Prefabs;
 using Unity.Entities;using Unity.Mathematics;
@@ -70,6 +70,16 @@ namespace MedianGrassReplacement.Systems
             float halfSpacing=.15f;var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();bool yellow=selectedYellow;
             var pairAsset=palette.Explicit(2,yellow);var singleAsset=palette.Explicit(1,yellow);
             if(EntityManager.HasComponent<NetLaneGeometryData>(pairAsset)&&EntityManager.HasComponent<NetLaneGeometryData>(singleAsset))halfSpacing=CenterlineUpgradePolicy.HalfSpacing(EntityManager.GetComponentData<NetLaneGeometryData>(pairAsset).m_Size.x,EntityManager.GetComponentData<NetLaneGeometryData>(singleAsset).m_Size.x);
+            if(NativeHighwaySectionPlan(road,1,out var nativeCenters))
+            {
+                for(int pair=0;pair<nativeCenters.Count;pair+=2)for(int stripe=0;stripe<(style==2?2:1);stripe++)for(int half=0;half<2;half++)
+                {
+                    var path=nativeCenters[pair+half];
+                    if(style==2)path=NetUtils.OffsetCurveLeftSmooth(path,stripe==0?-halfSpacing:halfSpacing);
+                    paths.Add(path);
+                }
+                return true;
+            }
             var targets=new List<float2>();var raised=new List<float2>();
             if(EntityManager.HasBuffer<NetCompositionPiece>(composition))foreach(var piece in EntityManager.GetBuffer<NetCompositionPiece>(composition,true))
             {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Colossal.Mathematics;using Colossal.Serialization.Entities;
 using Game;using Game.Common;using Game.Net;using Unity.Entities;using Unity.Mathematics;
 namespace MedianGrassReplacement.Systems
@@ -51,6 +51,12 @@ namespace MedianGrassReplacement.Systems
         {
             // Explicit native-only hiding remains available as a separate action.
             if(selection==SegmentUpgradePolicy.HideNative)return;
+            if(EntityManager.HasBuffer<MGRHighwayLineIntent>(target))
+            {
+                var intents=EntityManager.GetBuffer<MGRHighwayLineIntent>(target);
+                for(int i=intents.Length-1;i>=0;i--)
+                    if(selection==SegmentUpgradePolicy.HideAll||SegmentUpgradePolicy.Hides(selection,intents[i].Role==1,intents[i].Role==2))intents.RemoveAt(i);
+            }
             if(selection==SegmentUpgradePolicy.HideAll)Remove<MGRCenterlineStyle>(target);
             if(selection==SegmentUpgradePolicy.HideAll||selection==SegmentUpgradePolicy.HideLanes)Remove<MGRLaneDivider>(target);
             if(selection==SegmentUpgradePolicy.HideAll||selection==SegmentUpgradePolicy.HideLanes||selection==SegmentUpgradePolicy.HideEdges){Remove<MGREdgePaint>(target);Remove<MGRSectionEdges>(target);Remove<MGRJunctionEdgeLines>(target);Remove<MGRRemoveJunctionEdges>(target);}
@@ -91,7 +97,7 @@ namespace MedianGrassReplacement.Systems
                         World.GetOrCreateSystemManaged<StreetLightingSystem>().ResetNode(node);
                         // Node-wide upgrades cannot be removed for only half a junction.
                         Remove<MGRSurfaceSlots>(node);
-                        Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(node);
+                        if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(node);
                     }
                 }
             }

@@ -1,4 +1,4 @@
-﻿using Game.Common;
+using Game.Common;
 using Unity.Entities;
 namespace MedianGrassReplacement.Systems
 {

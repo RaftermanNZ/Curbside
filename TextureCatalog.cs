@@ -170,9 +170,9 @@ namespace MedianGrassReplacement
 
                         {
 
-                            value = file,
+                            value = SurfaceTextureCatalog.LibraryLabel(normalized,path),
 
-                            displayName = GetDisplayName(file)
+                            displayName = GetDisplayName(SurfaceTextureCatalog.LibraryLabel(normalized,path))
 
                         });
 
@@ -222,7 +222,7 @@ namespace MedianGrassReplacement
 
             {
 
-                return Path.GetFullPath(folder.Trim().Trim('"'));
+                return Path.GetFullPath(folder.Trim().Trim(new[] { '"' }));
 
             }
 
@@ -280,9 +280,14 @@ namespace MedianGrassReplacement
 
             string root = NormalizeFolder(folder);
 
-            string safeName = Path.GetFileName(selectedValue);
+            string safeName = selectedValue;
 
-            if (!string.Equals(safeName, selectedValue, StringComparison.Ordinal))
+            string albedo;
+            try { albedo = Path.GetFullPath(Path.Combine(root, safeName)); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            { error = "The selected texture name is invalid."; return false; }
+            string boundary=root.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+            if (Path.IsPathRooted(safeName)||!albedo.StartsWith(boundary,StringComparison.OrdinalIgnoreCase))
 
             {
 
@@ -294,7 +299,7 @@ namespace MedianGrassReplacement
 
 
 
-            string albedo = Path.Combine(root, safeName);
+            root = Path.GetDirectoryName(albedo);
 
             if (!File.Exists(albedo))
 
@@ -308,7 +313,7 @@ namespace MedianGrassReplacement
 
 
 
-            string stem = Path.GetFileNameWithoutExtension(safeName);
+            string stem = Path.GetFileNameWithoutExtension(albedo);
 
             string prefix = StripKnownAlbedoSuffix(stem);
 
@@ -370,7 +375,9 @@ namespace MedianGrassReplacement
 
             string stem = Path.GetFileNameWithoutExtension(file);
 
-            return StripKnownAlbedoSuffix(stem).Replace('_', ' ');
+            string name = StripKnownAlbedoSuffix(stem).Replace('_', ' ');
+            string parent = Path.GetDirectoryName(file);
+            return string.IsNullOrEmpty(parent) ? name : Path.Combine(parent, name);
 
         }
 

@@ -39,7 +39,7 @@ namespace MedianGrassReplacement.Systems
             new Entry(GardenCityLightPolicy.WireAsset,"Span-wire traffic lights","Traffic","FarSideLights.svg","One junction. Suspended vertical signals over approaching lanes. Right-click removes traffic lights."),
             new Entry(GardenCityLightPolicy.MastAsset,"Rigid mast-arm traffic lights","Traffic","FarSideLights.svg","One junction. Galvanized mast arms and yellow vertical signals, fitted to approaching lanes. Right-click removes traffic lights."),
             new Entry(FarSideLightUpgradeTool.AssetName,"Far-side traffic lights","Traffic","FarSideLights.svg","One junction. Adds lights if needed and moves them far side; right-click removes traffic lights."),
-            new Entry(RoadSideUpgrades.DecalAsset,"Road-wear decals","Decoration","CurbsideDecals.svg","Selected section, using the both-sides setting. Right-click removes road wear."),
+            new Entry(RoadSideUpgrades.DecalAsset,"Road-wear decals","Decoration","CurbsideDecals.svg","One roadside by default; enable both sides in Options. Right-click removes the highlighted target. Maximum decals can be adjusted in Options → The Curbside Mod → Textures."),
             new Entry(VisualPowerlineSystem.AssetName,"Decorative powerlines","Decoration","VisualPowerlines.svg","One roadside. Decorative poles and wires only; right-click removes the selected run."),
             new Entry(SegmentUpgradePolicy.All,"Hide all road lines","Visibility","HideAllLines.svg","Selected section or node: native and existing Curbside lane, center and edge paint. Keeps crossings and stop bars. Right-click restores visibility."),
             new Entry(SegmentUpgradePolicy.Lanes,"Hide lane and edge lines","Visibility","HideLaneLines.svg","Selected section or node: native and existing Curbside divider/edge paint hidden; center and median kept. Right-click restores visibility."),
@@ -94,7 +94,7 @@ namespace MedianGrassReplacement.Systems
             AddBinding(new TriggerBinding("curbside","leaveTool",Leave));
             AddBinding(new TriggerBinding("curbside","saveWithoutPreview",()=>DiagnosticSave.Request(World,message=>{_noticeUntil=UnityEngine.Time.realtimeSinceStartup+30;_status.Update(message);})));
             AddBinding(new TriggerBinding<bool>("curbside","diagnostics",v=>{ModDiagnostics.TraceBuffer.SetEnabled(v);ModDiagnostics.RuntimeCosts.Reset();_diagnostics.Update(v);_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update(v?"Diagnostics enabled. Reproduce, then write a snapshot.":"Diagnostics off.");}));
-            AddBinding(new TriggerBinding("curbside","snapshot",()=>{World.GetOrCreateSystemManaged<FarSideLightSystem>().RecordSnapshot();World.GetOrCreateSystemManaged<SignalStreetNameSystem>().ExportDiagnostics();var crossings=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.state","saving="+Mod.Saving+" tool="+_tools.activeTool?.toolID+" crossing="+crossings.CrossingStatus);var paint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.paint","singleYellow="+(paint.Explicit(1,true)!=Entity.Null)+" doubleYellow="+(paint.Explicit(2,true)!=Entity.Null)+" singleWhite="+(paint.Explicit(1,false)!=Entity.Null)+" doubleWhite="+(paint.Explicit(2,false)!=Entity.Null));ModDiagnostics.TraceBuffer.Record("snapshot.surface",GlobalSurfaceMaterialSystem.Status);ModDiagnostics.TraceBuffer.Record("snapshot.discovery",paint.DiscoveryStatus+" divider="+(paint.Divider!=Entity.Null));World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RecordPaintSnapshot();Mod.Log.Info(GardenCityLightPolicy.CacheStatus);Mod.Log.Info(World.GetOrCreateSystemManaged<SignalStreetNameSystem>().CostStatus);Mod.Log.Info(ModDiagnostics.RuntimeCosts.Snapshot());Mod.Log.Info(ModDiagnostics.TraceBuffer.Snapshot("The Curbside Mod "+BuildIdentity.Label));_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update("Diagnostic snapshot written to the existing MedianGrassReplacement log.");}));
+            AddBinding(new TriggerBinding("curbside","snapshot",()=>{CompatibilityDiagnostics.Record();World.GetOrCreateSystemManaged<FarSideLightSystem>().RecordSnapshot();World.GetOrCreateSystemManaged<SignalStreetNameSystem>().ExportDiagnostics();var crossings=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.state","saving="+Mod.Saving+" tool="+_tools.activeTool?.toolID+" crossing="+crossings.CrossingStatus);var paint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.paint","singleYellow="+(paint.Explicit(1,true)!=Entity.Null)+" doubleYellow="+(paint.Explicit(2,true)!=Entity.Null)+" singleWhite="+(paint.Explicit(1,false)!=Entity.Null)+" doubleWhite="+(paint.Explicit(2,false)!=Entity.Null));ModDiagnostics.TraceBuffer.Record("snapshot.surface",GlobalSurfaceMaterialSystem.Status);ModDiagnostics.TraceBuffer.Record("snapshot.decals","status="+CurbDecalSystem.Status+" bothSides="+Mod.Settings.DecalsBothSides+" unlimited="+Mod.Settings.UnlimitedDecals);ModDiagnostics.TraceBuffer.Record("snapshot.discovery",paint.DiscoveryStatus+" divider="+(paint.Divider!=Entity.Null));World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RecordPaintSnapshot();Mod.Log.Info(GardenCitySignals.PackSystem.DiscoveryStatus);Mod.Log.Info(GardenCityLightPolicy.CacheStatus);Mod.Log.Info(World.GetOrCreateSystemManaged<SignalStreetNameSystem>().CostStatus);Mod.Log.Info(ModDiagnostics.RuntimeCosts.Snapshot());Mod.Log.Info(ModDiagnostics.TraceBuffer.Snapshot("The Curbside Mod "+BuildIdentity.Label));_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update("Diagnostic snapshot written to the existing MedianGrassReplacement log.");}));
         }
         private PrefabBase Find(string name)=>World.GetOrCreateSystemManaged<UpgradeAssetsSystem>().FindAsset(name)??World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>().FindAsset(name);
         private bool Available(PrefabBase prefab)
@@ -149,6 +149,8 @@ namespace MedianGrassReplacement.Systems
             long started=ModDiagnostics.RuntimeCosts.Begin();
             try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbsidePanelSystem",started);}
         }
+        private string _wearStatusSource,_wearStatusText;
+        private bool _wearStatusBoth;
         private void UpdateMeasured()
         {
             base.OnUpdate();
@@ -165,7 +167,16 @@ namespace MedianGrassReplacement.Systems
             var current=_tools.activeTool?.GetPrefab()?.name;int selected=-1;
             for(int i=0;i<Entries.Length;i++)if(Entries[i].Asset==current){selected=i;break;}
             if(current=="Crosswalk") {var crossing=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();if(crossing.NativeLineMode)selected=0;else if(crossing.NativeInvisibleMode)selected=1;if(UnityEngine.Time.realtimeSinceStartup>=_noticeUntil)_status.Update(crossing.CrossingStatus);}
-            if(current==UpgradeFeedback.Asset&&UpgradeFeedback.Text!=null&&UnityEngine.Time.realtimeSinceStartup>=_noticeUntil)_status.Update(UpgradeFeedback.Text);
+            if(current==RoadSideUpgrades.DecalAsset&&UnityEngine.Time.realtimeSinceStartup>=_noticeUntil)
+            {
+                if(_wearStatusText==null||_wearStatusSource!=CurbDecalSystem.Status||_wearStatusBoth!=Mod.Settings.DecalsBothSides)
+                {
+                    _wearStatusSource=CurbDecalSystem.Status;_wearStatusBoth=Mod.Settings.DecalsBothSides;
+                    _wearStatusText=(_wearStatusBoth?"Both roadsides. ":"Highlighted roadside. ")+_wearStatusSource;
+                }
+                _status.Update(_wearStatusText);
+            }
+            else if(current==UpgradeFeedback.Asset&&UpgradeFeedback.Text!=null&&UnityEngine.Time.realtimeSinceStartup>=_noticeUntil)_status.Update(UpgradeFeedback.Text);
             _active.Update(selected);
             if(UnityEngine.Time.realtimeSinceStartup>=_nextRefresh){_nextRefresh=UnityEngine.Time.realtimeSinceStartup+2;_catalog.Update();}
         }

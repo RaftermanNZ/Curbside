@@ -18,7 +18,7 @@ namespace MedianGrassReplacement
 
     [FileLocation("ModsSettings/MedianGrassReplacement/MedianGrassReplacement")]
 
-    [SettingsUITabOrder(kTexturesTab, kMainTab, kAdvancedTab, kAboutTab)]
+    [SettingsUITabOrder(kTexturesTab, kMainTab, kHighwaysTab, kAdvancedTab, kAboutTab)]
 
     [SettingsUIGroupOrder(kLibraryGroup, kDecalGroup, kSurfaceGroup, kAppearanceGroup, kAlleyGroup, kMedianGroup, kParkingGroup, kCrosswalkGroup, kStopGroup, kMaintenanceGroup, kAboutGroup)]
 
@@ -28,7 +28,7 @@ namespace MedianGrassReplacement
 
     {
 
-        public const string kMainTab = "Main", kTexturesTab = "Textures", kAdvancedTab = "Advanced", kAboutTab = "About";
+        public const string kMainTab = "Main", kTexturesTab = "Textures", kAdvancedTab = "Advanced", kAboutTab = "About", kHighwaysTab = "Highways";
 
         public const string kLibraryGroup = "TextureLibrary", kAppearanceGroup = "Appearance", kAlleyGroup="AlleyEdges", kMedianGroup = "MedianLines", kParkingGroup = "Parking", kCrosswalkGroup = "Crosswalks", kStopGroup = "StopLines", kMaintenanceGroup = "Maintenance", kAboutGroup = "About";
 
@@ -104,7 +104,7 @@ namespace MedianGrassReplacement
 
         [SettingsUISection(kTexturesTab, kLibraryGroup)]
 
-        public string TextureFolder { get => string.IsNullOrWhiteSpace(_textureFolder) ? TextureCatalog.DefaultFolder : _textureFolder; set { var next = TextureCatalog.NormalizeFolder(value); if (string.Equals(next, _textureFolder, StringComparison.OrdinalIgnoreCase)) return; _textureFolder = next; TextureCatalog.Invalidate(); SurfaceTextureCatalog.Invalidate(); if (_runtimeEventsEnabled) ApplyAndSave(); } }
+        public string TextureFolder { get => string.IsNullOrWhiteSpace(_textureFolder) ? TextureCatalog.DefaultFolder : _textureFolder; set { var next = TextureCatalog.NormalizeFolder(value); if (string.Equals(next, _textureFolder, StringComparison.OrdinalIgnoreCase)) return; _textureFolder = next; TextureCatalog.Invalidate(); SurfaceTextureCatalog.Invalidate(); if (_runtimeEventsEnabled) { ApplyAndSave(); MedianMaterialSystem.RequestRefresh("texture folder changed"); } } }
 
         [SettingsUIDropdown(typeof(Setting), nameof(GetTextureChoices))]
 
@@ -140,28 +140,60 @@ namespace MedianGrassReplacement
 
         [SettingsUISlider(min=15f,max=80f,step=1f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)]
 
-        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlinePoleSpacing {get;set;}=35f;
+        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlinePoleSpacing {get=>_powerlinePoleSpacing;set=>_powerlinePoleSpacing=Clamp(value,35f,15f,80f);}
+        private float _powerlinePoleSpacing=35f;
 
         [SettingsUISlider(min=4f,max=20f,step=1f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)]
 
-        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlineMinimumGap {get;set;}=10f;
+        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlineMinimumGap {get=>_powerlineMinimumGap;set=>_powerlineMinimumGap=Clamp(value,10f,4f,20f);}
+        private float _powerlineMinimumGap=10f;
 
         [SettingsUISlider(min=2f,max=15f,step=.5f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)]
 
-        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlineCornerSetback {get;set;}=6f;
+        [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlineCornerSetback {get=>_powerlineCornerSetback;set=>_powerlineCornerSetback=Clamp(value,6f,2f,15f);}
+        private float _powerlineCornerSetback=6f;
 
         [Colossal.Json.Exclude][SettingsUISection(kAdvancedTab, kMaintenanceGroup)] public string PowerlineStatus => Localization.LocalizationService.Text(VisualPowerlineSystem.Status);
 
-        [SettingsUISection(kAboutTab, kAboutGroup)] public string Version => "0.5.1 Test 48";
+        [SettingsUISection(kAboutTab, kAboutGroup)] public string Version => BuildIdentity.Version;
 
-        [SettingsUISection(kAboutTab, kAboutGroup)] public string Function => Localization.LocalizationService.Text("Curbside grass textures, edge lines, parking bays and optional road-marking upgrades.");
+        [SettingsUISection(kAboutTab, kAboutGroup)] public string Function => Localization.LocalizationService.Text("Road markings, crosswalks, parking, textures, roadside decoration and optional traffic signals.");
 
         [SettingsUISlider(min=5f,max=100f,step=.5f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)]
 
         [SettingsUISection(kAdvancedTab,kMaintenanceGroup)] public float PowerlineHeight {get=>_powerlineHeight;set{float next=PoleHeightPolicy.Requested(value);if(next==_powerlineHeight)return;_powerlineHeight=next;if(_runtimeEventsEnabled)ApplyAndSave();}}
         private float _powerlineHeight=10f;
 
-        public override void SetDefaults() { _markingToolColor="Yellow"; FollowCityMarkingTheme=false;ThemeAssetEdgeColors=true; _centerLineStyle=""; AlignMedianStopBar=true; MedianEdgeLines=true; _medianLineOffset=.35f; _medianLineSetback=.05f; _medianLineStyle=""; PowerlinePoleSpacing=35f;PowerlineMinimumGap=10f;PowerlineCornerSetback=6f;PowerlineHeight=10f; SetDecalDefaults(); SetSurfaceDefaults(); _textureFolder = TextureCatalog.DefaultFolder; _selectedTexture = TextureCatalog.BundledValue; _uvScale = .10f; AlleyWhiteEdges=false; AlleyLineOffset=.20f; AlleyLineStopGap=0f; CurbWhiteLines = true; CurbLinesBesideParking = false; _curbLineOffset = .25f; _curbLineStyle = "NA Parking Edge Line"; _fixedParkingBayLength = 7f; _parkingIntersectionSetback = 6.5f; _stopLineCurbGap = .15f; _curbLineStopGap = .05f; _crosswalkUpgradeWidth = 2.5f; LockCurbAndStopLines = true; }
+        private void SetDefaultValues(string textureFolder)
+        {
+            _disableAutomaticMarkings=false; _disableAutomaticHighwayMarkings=false; _disableAutomaticLineAdjustments=false; _disableTextureReplacement=false; _markingToolColor="Yellow"; FollowCityMarkingTheme=false;ThemeAssetEdgeColors=true; _centerLineStyle=""; AlignMedianStopBar=true; MedianEdgeLines=true; _medianLineOffset=.35f; _medianLineSetback=.05f; _medianLineStyle=""; PowerlinePoleSpacing=35f;PowerlineMinimumGap=10f;PowerlineCornerSetback=6f;PowerlineHeight=10f; SetDecalDefaults(); SetSurfaceDefaults(); _textureFolder = textureFolder; _selectedTexture = TextureCatalog.BundledValue; _uvScale = .10f; AlleyWhiteEdges=false; AlleyLineOffset=.20f; AlleyLineStopGap=0f; CurbWhiteLines = true; CurbLinesBesideParking = false; _curbLineOffset = .25f; _curbLineStyle = "NA Parking Edge Line"; _fixedParkingBayLength = 7f; _parkingIntersectionSetback = 6.5f; _stopLineCurbGap = .15f; _curbLineStopGap = .05f; _crosswalkUpgradeWidth = 2.5f; LockCurbAndStopLines = true;
+        }
+
+        public override void SetDefaults()
+        {
+            // Reset is one settings transaction. Constructors/deserialization must
+            // not queue renderer work, and live reset must use the final values.
+            bool live = _runtimeEventsEnabled;
+            _runtimeEventsEnabled = false;
+            try
+            {
+                SetDefaultValues(TextureCatalog.DefaultFolder);
+                if (live) GlobalTextureSelectionVersion = 1;
+            }
+            finally { _runtimeEventsEnabled = live; }
+            if (!live) return;
+            TextureCatalog.Invalidate();
+            SurfaceTextureCatalog.Invalidate();
+            DecalCatalog.Invalidate();
+            ApplyAndSave();
+            MedianMaterialSystem.RequestRefresh("settings reset");
+            GlobalSurfaceMaterialSystem.RequestRefresh();
+            CurbDecalSystem.RequestRefresh();
+            CurbLineEmissionSystem.RequestRoadRefresh();
+            FixedParkingSystem.RequestScan();
+            IntersectionPaintSystem.RequestRefresh();
+            JunctionMarkingSystem.RequestRefresh();
+        }
 
     }
 
