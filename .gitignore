@@ -13,3 +13,4 @@ BundledTextures/*.png
 *.log
 *.user
 *.suo
+outputs/

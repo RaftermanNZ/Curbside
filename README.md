@@ -17,7 +17,9 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 5. Bundled texture artwork is excluded here. Obtain the approved images from the maintainer for a complete production package. The hotfix branch deploys them beside the DLL in `BundledTextures`, using the same saved selection IDs and extracted filenames.
 6. Before local installation, close the game and disable the subscribed core copy. Never run two Curbside copies. Use disposable copies of saves for development.
 
-GitHub checks build the UI without proprietary game assemblies. Full native compilation, policy tests and in-game save/reload/performance checks run locally with the licensed game/toolchain. See [release gates](docs/RELEASE-SAFETY.md).
+GitHub checks build the UI without proprietary game assemblies. Run local policy checks with `./Validation/Run-CurrentChecks.ps1 -Dll ./BuildOutput/MedianGrassReplacement.dll -OutputFolder ./outputs/checks`; set `CURBSIDE_CECIL_PATH` to your local Mono.Cecil assembly for metadata-only checks. Test helpers copy game dependencies into the ignored output folder; never commit those files.
+
+Full native compilation, policy tests and in-game save/reload/performance checks run locally with the licensed game/toolchain. See [release gates](docs/RELEASE-SAFETY.md).
 
 ## Reporting issues
 

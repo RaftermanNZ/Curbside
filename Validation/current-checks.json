@@ -1,0 +1,1 @@
+{"tests": ["AuditHardeningChecks", "RightBankChecks", "SharedPoleChecks", "ArmBankChecks", "CapturedBankChecks", "OwnerPolicyChecks", "SignalWireChecks", "LuminaireChecks", "StopPriorityChecks", "GrassCatalogChecks"]}
