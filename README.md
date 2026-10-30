@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-`main` and tag `source-test111` contain the released Test111 code baseline. `hotfix/test112` contains unreleased compatibility controls, grass-library fixes and sidecar texture packaging. Compilation and policy tests do not establish in-game compatibility or performance. No hotfix is published automatically.
+`main` and tag `source-test111` contain the released Test111 code baseline. `hotfix/test113` contains unreleased compatibility controls, grass-library fixes and sidecar texture packaging. Compilation and policy tests do not establish in-game compatibility or performance. No hotfix is published automatically.
 
 ## Build locally on Windows
 
