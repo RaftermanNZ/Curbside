@@ -1,4 +1,4 @@
-﻿param(
+ï»¿param(
     [Parameter(Mandatory=$true)][string]$BuildFolder,
     [Parameter(Mandatory=$true)][string]$ReleaseFolder
 )
@@ -56,3 +56,7 @@ foreach($name in @('README.md','CHANGELOG.md','PARADOX-MODS-DESCRIPTION.txt')){
 }
 Write-Output 'Release folder prepared. Symbol files remain in the build folder.'
 
+
+Copy-Item -LiteralPath (Join-Path $BuildFolder "curbside.css") -Destination $ReleaseFolder
+Copy-Item -LiteralPath (Join-Path $BuildFolder "BundledTextures") -Destination $ReleaseFolder -Recurse
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $ReleaseFolder

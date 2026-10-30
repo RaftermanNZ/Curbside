@@ -8,7 +8,7 @@
 
     <RootNamespace>MedianGrassReplacement</RootNamespace>
 
-    <Version>0.5.1-test.111</Version>
+    <Version>0.5.1-test.112</Version>
 
     <Product>The Curbside Mod</Product>
 
@@ -89,14 +89,14 @@
 
   <ItemGroup><EmbeddedResource Include="Icons/*.svg" LogicalName="MedianGrassReplacement.%(Filename)%(Extension)" /></ItemGroup>
 
-  <ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideGrass_BaseColor.png" LogicalName="MedianGrassReplacement.CurbsideGrass.png" /></ItemGroup>
+  
 
   <ItemGroup><Reference Include="Unity.RenderPipelines.HighDefinition.Runtime"><Private>false</Private></Reference></ItemGroup>
 
-<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideRoadWear_BaseColor.png" LogicalName="MedianGrassReplacement.RoadWear.png" /></ItemGroup>
+
   <ItemGroup><Compile Remove="Validation/**/*.cs" /></ItemGroup>
-<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideRoad_BaseColor.png" LogicalName="MedianGrassReplacement.RoadSurface.png" /></ItemGroup>
-<ItemGroup><EmbeddedResource Include="BundledTextures/CurbsideSidewalk_BaseColor.png" LogicalName="MedianGrassReplacement.SidewalkSurface.png" /></ItemGroup>
+
+
   <ItemGroup>
     <None Include="$(ModPropsFile)" Link="Properties\Mod.props" />
     <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
@@ -109,6 +109,9 @@
     <Content Include="UI\build\curbside.css" TargetPath="curbside.css" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 <ItemGroup><EmbeddedResource Include="Localization/Translations/*.json" LogicalName="MedianGrassReplacement.Localization.%(Filename)%(Extension)" /></ItemGroup>
+  <ItemGroup>
+    <Content Include="BundledTextures/*.png" TargetPath="BundledTextures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
 
 

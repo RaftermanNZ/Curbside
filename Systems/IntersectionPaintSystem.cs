@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -288,7 +288,8 @@ namespace MedianGrassReplacement.Systems
             bool center=roadLine&&prefab.name.IndexOf("Center Line",StringComparison.OrdinalIgnoreCase)>=0;
             bool opposing=roadLine&&lineSystem.IsOpposingBoundary(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier);
 
-            bool yellow=Mod.Settings.YellowCenterLines&&(nodeBoundary||opposing);
+            bool automatic=AutomaticMarkingPolicy.Adjusts(EntityManager,owner);
+            bool yellow=automatic&&Mod.Settings.YellowCenterLines&&(nodeBoundary||opposing);
 
             bool medianOwned=roadLine&&(prefab.name.IndexOf("Parking",StringComparison.OrdinalIgnoreCase)<0||RoadSurfacePolicy.IsHighway(EntityManager,owner))&&(lineSystem.HasMedianReplacement(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier));
             bool curbOwned=roadLine&&!center&&lineSystem.HasCurbReplacement(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier);
@@ -313,10 +314,10 @@ namespace MedianGrassReplacement.Systems
             bool highwayOwned=EntityManager.HasComponent<Node>(owner)&&lineSystem.OwnsHighwayNodePaint(owner,source);
             medianOwned|=nativeHidden||highwayOwned;
             Entity themedEdge=Entity.Null;
-            if(!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
+            if(automatic&&!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
                 themedEdge=lineSystem.ThemeEquivalent(prefabEntity);
             bool adaptEdge=themedEdge!=Entity.Null&&themedEdge!=prefabEntity;
-            if (!crossing && !center && !yellow && !medianOwned && !adaptEdge) { Remove(source); return; }
+            if (!crossing && !(center&&automatic) && !yellow && !medianOwned && !adaptEdge) { Remove(source); return; }
 
             if (!_replacements.ContainsKey(source) && EntityManager.HasComponent<Game.Tools.Hidden>(source)) { Defer(source); return; }
 

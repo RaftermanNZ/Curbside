@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -286,7 +286,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
             _waitingForRoadGrass = !string.IsNullOrWhiteSpace(selected)
 
@@ -380,7 +380,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-                string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+                string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
                 if (string.IsNullOrWhiteSpace(selected) || selected == TextureCatalog.VanillaValue)
 
@@ -678,7 +678,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
 
 
@@ -779,8 +779,8 @@ namespace MedianGrassReplacement.Systems
         private bool LoadSelectedTextures(string selected)
 
         {
-
-            DestroyCustomTextures();
+            // Detach owned material references before releasing their textures.
+            RestoreVanilla(clearSnapshots: false);
 
 
 
@@ -960,7 +960,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            string selected = Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
+            string selected = Mod.Settings?.DisableTextureReplacement==true ? TextureCatalog.VanillaValue : Mod.Settings?.SelectedTexture ?? TextureCatalog.VanillaValue;
 
             if (string.IsNullOrWhiteSpace(selected) || selected == TextureCatalog.VanillaValue)
 

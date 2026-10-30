@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -1135,6 +1135,7 @@ namespace MedianGrassReplacement.Systems
 
             // anchors are left alone, so median/platform markings are not added.
 
+            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,road);
             bool alley=RoadSurfacePolicy.IsAlleyForEdges(EntityManager,road);byte edgeMode=SectionEdgePolicy.Mode(EntityManager,road);
             if(edgeMode==1||Mod.Settings.AlleyWhiteEdges && alley || EntityManager.HasComponent<MGRParkingBanSides>(road))
                 anchors=ReadDecalAnchors(composition,data.m_Width,lanes);
@@ -1147,7 +1148,7 @@ namespace MedianGrassReplacement.Systems
 
                 bool left = anchors.Count == 1 ? anchors[i].x < 0f : i == 0;
                 bool parkingBan=EntityManager.HasComponent<MGRParkingBanSides>(road)&&(EntityManager.GetComponentData<MGRParkingBanSides>(road).Mask&RoadSideUpgrades.SideMask(left))!=0;
-                if(edgeMode==2||RoadSurfacePolicy.IsHighway(EntityManager,road)||!RoadSurfacePolicy.IsPaved(EntityManager,road)||edgeMode!=1&&!parkingBan&&!WhiteEdgePolicy.Enabled(true,alley,Mod.Settings.CurbWhiteLines,Mod.Settings.AlleyWhiteEdges))continue;
+                if(!automatic&&edgeMode!=1&&!parkingBan||edgeMode==2||RoadSurfacePolicy.IsHighway(EntityManager,road)||!RoadSurfacePolicy.IsPaved(EntityManager,road)||edgeMode!=1&&!parkingBan&&!WhiteEdgePolicy.Enabled(true,alley,Mod.Settings.CurbWhiteLines,Mod.Settings.AlleyWhiteEdges))continue;
 
 
                 if (!CurbPlacement.TryMapComposed(data.m_Width, anchors[i], left, Mod.Settings.CurbLineOffset, out var position, out float t)) continue;
@@ -1192,11 +1193,11 @@ namespace MedianGrassReplacement.Systems
 
 
 
-            if(CenterlineUpgradePolicy.Mode(EntityManager,road)!=CenterlineUpgradePolicy.Removed)AddMedianMarks(road,composition,data,geometry,stops,curves,unmarked);
+            if(automatic&&CenterlineUpgradePolicy.Mode(EntityManager,road)!=CenterlineUpgradePolicy.Removed)AddMedianMarks(road,composition,data,geometry,stops,curves,unmarked);
 
             AddCenterUpgrade(road,stops,curves);AddDividerMarks(road,stops,curves);
-            AddHighwayMarks(road,composition,data,geometry,stops,curves,unmarked);
-            AddNativeLineCaps(road,stops,composition,data,curves);
+            if(automatic)AddHighwayMarks(road,composition,data,geometry,stops,curves,unmarked);
+            if(automatic)AddNativeLineCaps(road,stops,composition,data,curves);
             byte hidden=SegmentUpgradePolicy.Mode(EntityManager,road);
             curves.RemoveAll(m=>!m.Protected&&!m.CenterUpgrade&&!m.DividerUpgrade&&SegmentUpgradePolicy.Hides(hidden,m.Median,m.Curb));
             if(_caps.TryGetValue(road,out var filteredCaps))filteredCaps.RemoveAll(c=>SegmentUpgradePolicy.Hides(hidden,c.Kind==2||c.Kind==3,c.Kind==0));
@@ -2147,8 +2148,7 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                AddHighwayJoins(node,roads,curves);
-                AddHighwayNodePaint(node,curves);
+                if(AutomaticMarkingPolicy.Allows(EntityManager,node)){AddHighwayJoins(node,roads,curves);AddHighwayNodePaint(node,curves);}
                 byte nodeHidden=SegmentUpgradePolicy.Mode(EntityManager,node);
                 curves.RemoveAll(m=>!m.Protected&&SegmentUpgradePolicy.Hides(nodeHidden,m.Median,m.Curb));
                 if(CenterlineVisibility.Hidden(EntityManager,node))curves.RemoveAll(m=>m.Median&&!m.Protected);

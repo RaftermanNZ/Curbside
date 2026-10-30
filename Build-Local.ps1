@@ -86,3 +86,7 @@ Write-Output "Windows test build ready: $OutputFolder. Installed mod was not rep
 
 
 
+
+$textureOutput=Join-Path $OutputFolder "BundledTextures"
+New-Item -ItemType Directory -Path $textureOutput -Force|Out-Null
+Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "BundledTextures") -Filter "*.png" -File|Copy-Item -Destination $textureOutput -Force
