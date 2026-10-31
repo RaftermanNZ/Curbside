@@ -37,5 +37,6 @@ try{
  & (Join-Path $PSScriptRoot 'Check-PerformanceAudit.ps1') -Dll $candidate
  & (Join-Path $PSScriptRoot 'Check-SettingsContract.ps1') -Dll $candidate
  & (Join-Path $PSScriptRoot 'Check-NativeRoadMode.ps1') -Dll $candidate
+ & (Join-Path $PSScriptRoot 'Check-VanillaSurface.ps1') -Dll $candidate
  @{utc=[DateTime]::UtcNow.ToString('o');dll=$candidate;sha256=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash;results=$results;nativeRuntimeValidation='pending'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $output 'results.json')
 }finally{Pop-Location}

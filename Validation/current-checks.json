@@ -20,6 +20,7 @@
     "SignalMaintenanceChecks",
     "NativeJunctionChecks",
     "NativeTrafficBoundaryChecks",
-    "ActionJournalChecks"
+    "ActionJournalChecks",
+    "VanillaSurfaceChecks"
   ]
 }

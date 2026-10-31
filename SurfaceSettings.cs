@@ -16,7 +16,7 @@ namespace MedianGrassReplacement
         [SettingsUIHidden]public int GlobalRoadSurface{get;set;}=1;
         [SettingsUIHidden]public int GlobalSidewalkSurface{get;set;}=1;
         private string _globalRoadTexture=SurfaceTextureCatalog.BundledRoad,_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;
-        private bool _surfaceAssets=true;
+        private bool _surfaceAssets=false;
         [SettingsUIDropdown(typeof(Setting),nameof(GetGlobalTextureChoices))][SettingsUIValueVersion(typeof(Setting),nameof(GetSurfaceVersion))][SettingsUISection(kTexturesTab,kSurfaceGroup)]public string GlobalRoadTexture{get=>_globalRoadTexture;set{string next=value??"";if(next==_globalRoadTexture)return;_globalRoadTexture=next;GlobalSurfaceChanged();}}
         [SettingsUIDropdown(typeof(Setting),nameof(GetGlobalTextureChoices))][SettingsUIValueVersion(typeof(Setting),nameof(GetSurfaceVersion))][SettingsUISection(kTexturesTab,kSurfaceGroup)]public string GlobalSidewalkTexture{get=>_globalSidewalkTexture;set{string next=value??"";if(next==_globalSidewalkTexture)return;_globalSidewalkTexture=next;GlobalSurfaceChanged();}}
         [SettingsUISection(kTexturesTab,kSurfaceGroup)]public bool SurfaceTexturesOnAssets{get=>_surfaceAssets;set{if(value==_surfaceAssets)return;_surfaceAssets=value;GlobalSurfaceChanged();}}
@@ -42,6 +42,6 @@ namespace MedianGrassReplacement
         [SettingsUISection(kMainTab,kParkingGroup)]public bool CloseParkingAtBuildingEntrances{get=>_closeAtAccess;set{if(value==_closeAtAccess)return;_closeAtAccess=value;ParkingPaintChanged();}}
         private bool _hatchAtAccess,_closeAtAccess;
         private void ParkingPaintChanged(){if(_runtimeEventsEnabled){ApplyAndSave();CurbLineEmissionSystem.RequestRoadRefresh();}}
-        private void SetSurfaceDefaults(){_globalRoadTexture=SurfaceTextureCatalog.BundledRoad;_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;_roadSurfaceUv=.16f;_sidewalkSurfaceTiling=1f;_surfaceAssets=true;GlobalTextureSelectionVersion=_runtimeEventsEnabled?1:0;SurfaceDefaultVersion=1;_hatchAtAccess=true;_closeAtAccess=false;if(_runtimeEventsEnabled){SurfaceTextureCatalog.Invalidate();GlobalSurfaceMaterialSystem.RequestRefresh();CurbLineEmissionSystem.RequestRoadRefresh();}}
+        private void SetSurfaceDefaults(){_globalRoadTexture=SurfaceTextureCatalog.BundledRoad;_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;_roadSurfaceUv=.16f;_sidewalkSurfaceTiling=1f;_surfaceAssets=false;GlobalTextureSelectionVersion=_runtimeEventsEnabled?1:0;SurfaceDefaultVersion=1;_hatchAtAccess=true;_closeAtAccess=false;if(_runtimeEventsEnabled){SurfaceTextureCatalog.Invalidate();GlobalSurfaceMaterialSystem.RequestRefresh();CurbLineEmissionSystem.RequestRoadRefresh();}}
     }
 }

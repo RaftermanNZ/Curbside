@@ -1,5 +1,16 @@
 # Changelog
 
+0.5.1-test.142 — Surface replacement hotfix
+
+- "Apply road and sidewalk textures to assets and surfaces" is off by default for new/reset settings. Existing explicit preferences are retained.
+- Restricted this optional replacement to verified vanilla Pavement Surface 01 (selected road texture) and Pavement Surface 02 (selected sidewalk texture), on building grounds and manually placed surfaces. Other surface types and custom textures are excluded.
+- Corrected the lookup for native rendered surface materials; shared prefab material templates remain untouched.
+- Removed temporary surface-tracing logs. Normal warnings and user-triggered diagnostics remain available.
+- No changes to road-line, parking, traffic-signal or save serialization behavior in this update.
+
+Known limitation: Pavement Surface 02 can still remain unchanged in some cases. Surface tiling is unchanged and remains a follow-up item. The surface option is opt-in.
+
+
 ## 0.5.1-test.132 — October 30, 2026
 
 Changes since 0.5.1-test.122

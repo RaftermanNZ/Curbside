@@ -9,12 +9,10 @@ namespace MedianGrassReplacement.Systems
         internal static int AssetKind(string name,string shader)
         {
             if(string.IsNullOrEmpty(shader)||shader.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0)return 0;
-            string key=(name??"").ToLowerInvariant();
-            foreach(var excluded in new[]{"grass","curb","kerb","wear","roadparts","marking","arrow","rail","gravel","dirt","line","crosswalk","paint","stripe","sign"})if(key.Contains(excluded))return 0;
-            if(key.Contains("sidewalk")||key.Contains("footpath")||key.Contains("pedestrian"))return 2;
-            // Asset pavement/parking areas use ordinary albedo UVs rather than the
-            // shared network world's separate road and sidewalk channels.
-            return key.Contains("asphalt")||key.Contains("pavement")||key.Contains("parking")?4:0;
+            // Exact renderer copies only; no substring-based surface expansion.
+            if(name==VanillaSurfacePolicy.AreaBatchName("Pavement Surface 01"))return 4;
+            if(name==VanillaSurfacePolicy.AreaBatchName("Pavement Surface 02"))return 2;
+            return 0;
         }
         internal static int Kind(string name,string shader)
         {
@@ -31,6 +29,22 @@ namespace MedianGrassReplacement.Systems
     {
         private sealed class Patch {internal Material Material;internal string Property;internal int Role;internal Texture Before,Applied;}
         private readonly Dictionary<(Material,string),Patch> _patches=new Dictionary<(Material,string),Patch>();
+        private readonly VanillaSurfaceOwnership _vanilla=new VanillaSurfaceOwnership();
+        private Unity.Entities.EntityQuery _areaPrefabs;
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            _areaPrefabs=GetEntityQuery(Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.PrefabData>(),Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.RenderedAreaData>());
+        }
+        private void RefreshAreaCatalog()
+        {
+            var prefabs=World.GetExistingSystemManaged<Game.Prefabs.PrefabSystem>();
+            if(prefabs==null)return;
+            // Read values on explicit refresh only. No area renderer buffers,
+            // native batch access, prefab mutations or asset loads are needed.
+            using(var entities=_areaPrefabs.ToEntityArray(Unity.Collections.Allocator.Temp))
+                foreach(var entity in entities)if(prefabs.TryGetPrefab<Game.Prefabs.AreaPrefab>(entity,out var prefab))_vanilla.AddAreaPrefab(prefab);
+        }
         private sealed class UvPatch {internal Material Material;internal string Property;internal bool Scalar,Road;internal float BeforeFloat,AppliedFloat;internal Vector2 BeforeScale,AppliedScale;}
         private readonly Dictionary<(Material,string),UvPatch> _uvPatches=new Dictionary<(Material,string),UvPatch>();
         private Texture2D _roadTexture,_walkTexture;
@@ -67,7 +81,9 @@ namespace MedianGrassReplacement.Systems
             if(!material.HasProperty(property))return false;
             bool found=_patches.TryGetValue((material,property),out var patch);
             if(found)return material.GetTexture(property)==patch.Applied;
-            var original=material.GetTexture(property);material.SetTexture(property,replacement);
+            var original=material.GetTexture(property);
+            if(!_vanilla.Allows(material,property,original))return false;
+            material.SetTexture(property,replacement);
             if(Mod.Settings.VerboseLogging)Mod.Log.Info("Global surface target: "+material.name+" property="+property+" texture="+replacement.width+"x"+replacement.height);
             _patches[(material,property)]=new Patch{Material=material,Property=property,Role=role,Before=original,Applied=replacement};return true;
         }
@@ -123,6 +139,8 @@ namespace MedianGrassReplacement.Systems
             var road=_roadTexture;var walk=_walkTexture;var errors=_loadErrors;
             if(road==null&&walk==null){Status="Global surfaces: Vanilla. "+string.Join(" ",errors);Mod.Log.Info(Status);return;}
             int roads=0,walks=0;var candidates=new List<string>();
+            _vanilla.Begin(World.GetExistingSystemManaged<Game.Rendering.ManagedBatchSystem>());
+            try{
             foreach(var material in Resources.FindObjectsOfTypeAll<Material>())
             {
                 if(material==null||material.shader==null)continue;
@@ -136,18 +154,19 @@ namespace MedianGrassReplacement.Systems
                 if(roadApplied)roads++;if(walkApplied)walks++;
                 if(!roadApplied&&!walkApplied&&candidates.Count<12)candidates.Add(material.name);
             }
+            }finally{_vanilla.End();}
             ApplyUv();
             Status="Global surfaces: "+roads+" road and "+walks+" sidewalk material(s). Cache "+_textures.Count+" textures, "+(_bytes/1048576)+" MiB estimate (GPU/native overhead extra). "+string.Join(" ",errors);if(Status==_lastReport)return;_lastReport=Status;Mod.Log.Info(Status);
             if((road!=null&&roads==0||walk!=null&&walks==0)&&candidates.Count>0)Mod.Log.Warn("Global surface unmatched network materials: "+string.Join(", ",candidates));
         }
-        protected override void OnGamePreload(Purpose purpose,GameMode mode){Restore(true);_active=false;_refresh=true;_discover=false;base.OnGamePreload(purpose,mode);}
+        protected override void OnGamePreload(Purpose purpose,GameMode mode){Restore(true);_vanilla.Clear();_active=false;_refresh=true;_discover=false;base.OnGamePreload(purpose,mode);}
         protected override void OnGameLoadingComplete(Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_active=(mode&GameMode.GameOrEditor)!=GameMode.None;_refresh=true;}
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
             try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("GlobalSurfaceMaterialSystem",started);}
         }
-        private void UpdateMeasured(){if(!_active||Mod.Settings==null||Mod.Saving)return;if(Mod.Settings.DisableTextureReplacement){if(_patches.Count>0||_textures.Count>0)Restore(true);_refresh=true;_discover=false;_uvRefresh=false;return;}if(_refresh){_refresh=false;_discover=false;_uvRefresh=false;Restore(false);RefreshTextures();Apply();}else if(_uvRefresh){_uvRefresh=false;ApplyUv();}else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}}
-        protected override void OnDestroy(){Restore(true);base.OnDestroy();}
+        private void UpdateMeasured(){if(!_active||Mod.Settings==null||Mod.Saving)return;if(Mod.Settings.DisableTextureReplacement){if(_patches.Count>0||_textures.Count>0)Restore(true);_refresh=true;_discover=false;_uvRefresh=false;return;}if(_refresh){_refresh=false;_discover=false;_uvRefresh=false;Restore(false);_vanilla.RefreshCatalog();RefreshAreaCatalog();RefreshTextures();Apply();}else if(_uvRefresh){_uvRefresh=false;ApplyUv();}else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}}
+        protected override void OnDestroy(){Restore(true);_vanilla.Clear();base.OnDestroy();}
     }
 }
