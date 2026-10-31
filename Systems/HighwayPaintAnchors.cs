@@ -42,7 +42,7 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class CurbLineEmissionSystem
     {
-        private List<HighwayPaintAnchor> HighwayPaintAnchors(Entity node)
+        internal List<HighwayPaintAnchor> HighwayPaintAnchors(Entity node,bool highwaysOnly=true)
         {
             var result=new List<HighwayPaintAnchor>();
             if(!EntityManager.HasBuffer<ConnectedEdge>(node))return result;
@@ -50,7 +50,7 @@ namespace MedianGrassReplacement.Systems
             foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
             {
                 if(++roads>16)break;var road=connection.m_Edge;
-                if(!EntityManager.HasComponent<Edge>(road)||!EntityManager.HasComponent<EdgeGeometry>(road)||!EntityManager.HasBuffer<Game.Net.SubLane>(road)||EntityManager.HasComponent<Deleted>(road)||EntityManager.HasComponent<Game.Tools.Temp>(road)||!RoadSurfacePolicy.IsHighway(EntityManager,road))continue;
+                if(!EntityManager.HasComponent<Edge>(road)||!EntityManager.HasComponent<EdgeGeometry>(road)||!EntityManager.HasBuffer<Game.Net.SubLane>(road)||EntityManager.HasComponent<Deleted>(road)||EntityManager.HasComponent<Game.Tools.Temp>(road)||highwaysOnly&&!RoadSurfacePolicy.IsHighway(EntityManager,road))continue;
                 var edge=EntityManager.GetComponentData<Edge>(road);bool start=edge.m_Start==node;if(!start&&edge.m_End!=node)continue;
                 var geometry=EntityManager.GetComponentData<EdgeGeometry>(road);int count=0;
                 foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(road,true))
@@ -91,4 +91,3 @@ namespace MedianGrassReplacement.Systems
         }
     }
 }
-

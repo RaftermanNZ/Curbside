@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.1-test.132 — October 30, 2026
+
+Changes since 0.5.1-test.122
+
+### Performance and memory
+- Bound decorative-powerline queue snapshots to the work consumed in a pass instead of copying the entire pending set. Reuse temporary work collections and buffers.
+- Reduce recurring allocations in road attachment transfer, parking, street lighting, paint ownership and cleanup. Reuse change-filter arrays and avoid unnecessary work when the relevant feature is idle.
+- Reuse junction eligibility results within a signal-maintenance pass and combine hidden-signal checks, retaining native traffic-phase handling and regeneration checks.
+- Avoid formatting signal trace messages and looking up diagnostic prefab names when tracing is disabled or its limit is reached. Skip street-name label planning while that feature is disabled.
+- Losslessly compress the four bundled PNGs. Decoded pixels, resolution, color metadata and appearance are unchanged from Test122; this reduces download/file size, not decoded GPU texture memory.
+- Add optional elapsed-time spike counters, workload gauges and a user-requested environment/memory snapshot to help investigate large-city reports. These are diagnostic measurements, not an FPS benchmark.
+
+### Road markings and targeting
+- Add an opt-in “Preserve vanilla road lines — recolor only” mode covering sections, junctions and transitions. It retains native paths rather than automatic offset geometry, with manual upgrades and visibility settings retaining priority. The option is off by default.
+- Improve native median/gore classification using directed traffic-lane boundaries, shared endpoints and elevation checks. Cache copied boundary/anchor data within each reconciliation pass.
+- Resolve marking targets from the actual hit node before falling back to an adjoining section. Inspect road can highlight a node directly.
+- Remove a redundant synthetic centerline target on one-way highways where the traffic-left edge already represents that boundary.
+- Use finite, distinct native highway edge and divider pieces for editing even when the native layout does not form complete paired halves. Preserve their control points instead of falling back to a different curve.
+- Stop fabricating pair-based highway end caps across unrelated taper pieces. Improve recognition of native edge pieces when applying or removing explicit markings.
+- Compare a merge node and its directly connected sections, or a section and its endpoint nodes, when selecting a line. Preview, apply and removal use the selected path’s actual owner. The existing selection distance remains unchanged.
+
+### Troubleshooting
+- Add opt-in local action recording with line creation/replacement/retirement requests, observed tool and settings activity, curve coordinates, pick candidates and missed clicks.
+- Allow marking an intersection and comparing its bounded local line state over time. Observed changes do not identify which mod caused them.
+- Optional game-window screenshots can be recorded every 30 seconds, up to 40 images. The journal is limited to 32 MiB or 20 minutes and stops on scene changes, diagnostics being disabled, or UI-world disposal. Nothing is uploaded automatically.
+
+### Compatibility and limitations
+- Existing saved component layouts, upgrade selections and default marking mode are retained. No save-cleanup redesign or signal-model update is included.
+- Highway merges and curved junctions still have unresolved alignment, duplicate/phantom-marking and selection cases. Some section taper pieces remain grouped by road side. This is not a complete freeway-marking fix.
+- The opt-in native recolor mode still needs further validation, including median colors and intersections; it should not be treated as a universal correction. Existing automatic-line opt-outs and manual visibility tools remain available as workarounds.
+- 21 automated validation suites passed, including 911 line identity, style and preview/apply/remove cases. Those checks do not establish universal save compatibility, full-playset compatibility or measured FPS/TPS gains. Back up saves before updating.
+
+
 ## 0.5.1-test.122 — October 30, 2026
 
 - Add controls to disable automatic road lines, automatic highway lines, automatic line adjustments, or surface texture replacements while retaining saved selections and manual upgrades. Highway controls have their own settings tab.

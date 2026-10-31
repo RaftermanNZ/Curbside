@@ -87,6 +87,7 @@ namespace MedianGrassReplacement.Systems
             QueueNodeRefresh(node);RefreshNodePaint(node);
             UpgradeFeedback.Report("Highway line",style==GranularHighwayLinePolicy.Native?"Selected highway line restored.":style==GranularHighwayLinePolicy.Removed?"Selected highway line removed.":"Selected highway line applied. Other paths kept.");
         }
+        internal bool KeepsNativeHighwayLine(Entity node,Entity source)=>HighwayNode(node)&&TryHighwayLineIntent(node,source,out var intent)&&intent.Style==GranularHighwayLinePolicy.Native;
         private bool TryHighwayLineIntent(Entity node,Entity source,out MGRHighwayLineIntent intent)
         {
             intent=default;if(!EntityManager.HasBuffer<MGRHighwayLineIntent>(node)||!EntityManager.HasComponent<Curve>(source))return false;

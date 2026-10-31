@@ -175,6 +175,17 @@ namespace MedianGrassReplacement.Systems
             return source;
         }
         internal Entity AutomaticMedianAsset()=>World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,!Mod.Settings.EuropeanMarkings);
+        internal Entity NativeJunctionColor(Entity source,bool opposing,bool edge)
+        {
+            // Only exact mesh-family color variants. Never fall back to a
+            // generic solid/dashed definition or the configured center style.
+            byte target=NativeJunctionColorPolicy.Target(opposing,edge,Mod.Settings.EuropeanMarkings,Mod.Settings.ThemeAssetEdgeColors);
+            if(target==0)return source;
+            var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
+            Entity color=target==1?palette.WhiteVariant(source):target==2?palette.Variant(source):Entity.Null;
+            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.colorDecision","sourcePrefab="+source+" opposing="+opposing+" edge="+edge+" targetColor="+target+" variant="+color+" missingVariant="+(target!=0&&color==Entity.Null));
+            return color==Entity.Null?source:color;
+        }
         internal Entity ResolveCenterStyle(Entity source)
 
         {
@@ -263,8 +274,10 @@ namespace MedianGrassReplacement.Systems
         }
 
         internal bool IsYellowNodeBoundary(Entity node,Bezier4x3 curve)=>TryNodeBoundaryRoads(node,curve,out var first,out var last)&&first!=last;
+        internal bool IsYellowNativeNodeBoundary(Entity node,Bezier4x3 curve)=>TryNodeBoundaryRoads(node,curve,out _,out _);
         internal bool OwnsNodeCenterRole(Entity node,Bezier4x3 curve)
         {
+            if(AutomaticMarkingPolicy.PreservesNode(EntityManager,node)&&!OwnsExplicitNodeCenter(node))return false;
             if(!HasCenterNodeJoin(node)||!EntityManager.HasBuffer<ConnectedEdge>(node)||EntityManager.GetBuffer<ConnectedEdge>(node,true).Length!=2)return false;
             return TryNodeBoundaryRoads(node,curve,out var first,out var last)&&first!=last;
         }
@@ -281,6 +294,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal bool OwnsNodeUTurnPaint(Entity node,Bezier4x3 curve)
         {
+            if(AutomaticMarkingPolicy.PreservesNode(EntityManager,node))return false;
             if(!Mod.Settings.MedianEdgeLines||!HasCenterNodeJoin(node)||!EntityManager.HasBuffer<ConnectedEdge>(node))return false;
             int roads=0;
             foreach(var entry in EntityManager.GetBuffer<ConnectedEdge>(node,true))
@@ -563,7 +577,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
-            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbLineEmissionSystem",started);}
+            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbLineEmissionSystem",started);ModDiagnostics.RuntimeCosts.Workload("MarkedRoads",_marks.Count,_pendingRoads.Count+_dirtyNodes.Count);}
         }
         private void UpdateMeasured()
 
@@ -1140,7 +1154,7 @@ namespace MedianGrassReplacement.Systems
 
             // anchors are left alone, so median/platform markings are not added.
 
-            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,road);
+            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,road)&&!AutomaticMarkingPolicy.PreservesGeometry(EntityManager,road);
             bool alley=RoadSurfacePolicy.IsAlleyForEdges(EntityManager,road);byte edgeMode=SectionEdgePolicy.Mode(EntityManager,road);
             if(edgeMode==1||Mod.Settings.AlleyWhiteEdges && alley || EntityManager.HasComponent<MGRParkingBanSides>(road))
                 anchors=ReadDecalAnchors(composition,data.m_Width,lanes);
@@ -2105,7 +2119,8 @@ namespace MedianGrassReplacement.Systems
 
                             && !EntityManager.HasComponent<Game.Tools.Temp>(connected.m_Edge)) roads.Add(connected.m_Edge);
 
-                if (roads.Count == 2 && _caps.TryGetValue(roads[0], out var aCaps) && _caps.TryGetValue(roads[1], out var bCaps))
+                bool preserveNative=AutomaticMarkingPolicy.PreservesNode(EntityManager,node);
+                if (!preserveNative && roads.Count == 2 && _caps.TryGetValue(roads[0], out var aCaps) && _caps.TryGetValue(roads[1], out var bCaps))
 
                 {
 
@@ -2155,7 +2170,7 @@ namespace MedianGrassReplacement.Systems
                 }
 
                 bool nativeHighway=NativeHighwayPathsReady(node);
-                if(!nativeHighway&&AutomaticMarkingPolicy.Allows(EntityManager,node))AddHighwayJoins(node,roads,curves);
+                if(!preserveNative&&!nativeHighway&&AutomaticMarkingPolicy.Allows(EntityManager,node))AddHighwayJoins(node,roads,curves);
                 byte nodeHidden=SegmentUpgradePolicy.Mode(EntityManager,node);
                 curves.RemoveAll(m=>!m.Protected&&SegmentUpgradePolicy.Hides(nodeHidden,m.Median,m.Curb));
                 if(CenterlineVisibility.Hidden(EntityManager,node))curves.RemoveAll(m=>m.Median&&!m.Protected);
@@ -2519,6 +2534,7 @@ namespace MedianGrassReplacement.Systems
 
             GeneratedVisualLifecycle.Track(World,entity);
 
+            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.createdByCurbside","entity="+entity+" owner="+road+" prefab="+prefab+" curbOwned="+curbOwned+" a="+curve.a+" b="+curve.b+" c="+curve.c+" d="+curve.d);
             return entity;
 
         }
@@ -2574,4 +2590,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

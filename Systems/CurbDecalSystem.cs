@@ -117,6 +117,8 @@ namespace MedianGrassReplacement.Systems
     public partial class CurbDecalSystem : GameSystemBase
 
     {
+        private static readonly ComponentType[] RoadGeometryChanges={ComponentType.ReadOnly<EdgeGeometry>(),ComponentType.ReadOnly<Composition>()};
+
 
         internal static string Status { get; private set; } = "Off";
 
@@ -201,7 +203,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
-            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbDecalSystem",started);}
+            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbDecalSystem",started);ModDiagnostics.RuntimeCosts.Workload("RoadWearRenderers",_total+(_build==null?0:_build.Cursor),_pending.Count);}
         }
         private void UpdateMeasured()
 
@@ -229,7 +231,7 @@ namespace MedianGrassReplacement.Systems
 
                 {
 
-                    _roads.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Composition>() });
+                    _roads.SetChangedVersionFilter(RoadGeometryChanges);
 
                     using (var items = _roads.ToEntityArray(Allocator.Temp)) foreach (var road in items) EnqueueRoad(road);
 
@@ -249,6 +251,7 @@ namespace MedianGrassReplacement.Systems
 
             }
 
+            if (_build == null && _pending.Count == 0) return;
             Dependency.Complete();
 
             // Allocation and projector registration are spread over frames, including paused simulation.
@@ -532,6 +535,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-
-
-

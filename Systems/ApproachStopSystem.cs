@@ -30,6 +30,8 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class ApproachStopSystem:GameSystemBase,IPreSerialize
     {
+        private static readonly ComponentType[] ApproachChanges={ComponentType.ReadOnly<Game.Net.SubLane>(),ComponentType.ReadOnly<ConnectedEdge>()};
+
         private EntityQuery _nodes,_changedRoads;
         private bool _initial=true;
         private readonly Dictionary<Entity,CarLaneFlags> _original=new Dictionary<Entity,CarLaneFlags>();
@@ -69,6 +71,11 @@ namespace MedianGrassReplacement.Systems
         }
         protected override void OnUpdate()
         {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("ApproachStopSystem",started);}
+        }
+        private void UpdatePerformanceCore()
+        {
             if(Mod.Saving)return;
             using(var roads=_changedRoads.ToEntityArray(Allocator.Temp))foreach(var road in roads)
             {
@@ -76,7 +83,7 @@ namespace MedianGrassReplacement.Systems
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_Start))_queued.Add(edge.m_Start);
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_End))_queued.Add(edge.m_End);
             }
-            if(!_initial)_nodes.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<Game.Net.SubLane>(),ComponentType.ReadOnly<ConnectedEdge>()});
+            if(!_initial)_nodes.SetChangedVersionFilter(ApproachChanges);
             using(var nodes=_nodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
             _nodes.ResetFilter();_initial=false;
             if(_queued.Count==0)return;

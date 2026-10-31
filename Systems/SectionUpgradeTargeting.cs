@@ -3,6 +3,15 @@ namespace MedianGrassReplacement.Systems
 {
     internal static class SectionUpgradeTargeting
     {
+        // Keep the actual network hit for markings/inspection. Section-only
+        // decoration targeting deliberately retains TryRoad's existing behavior.
+        internal static bool TryMarking(EntityManager em,Entity hit,Entity owner,float3 position,out Entity target)
+        {
+            target=Entity.Null;if(!math.all(math.isfinite(position)))return false;
+            if(StreetLightingSystem.TryLightTarget(em,hit,out var direct)&&em.HasComponent<Node>(direct)){target=direct;return true;}
+            if(StreetLightingSystem.TryLightTarget(em,owner,out var parent)&&em.HasComponent<Node>(parent)){target=parent;return true;}
+            return TryRoad(em,owner,position,out target)||TryRoad(em,hit,position,out target);
+        }
         internal static bool TryRoad(EntityManager em,Entity hit,float3 position,out Entity road)
         {
             road=hit;if(!math.all(math.isfinite(position)))return false;

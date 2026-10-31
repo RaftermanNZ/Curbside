@@ -48,6 +48,11 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnUpdate()
         {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("GeneratedPaintOwnerCleanupSystem",started);}
+        }
+        private void UpdatePerformanceCore()
+        {
             if (Mod.Saving) return;
             Dependency.Complete();
             _ownerStatus.Clear();

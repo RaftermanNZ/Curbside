@@ -31,6 +31,8 @@ namespace MedianGrassReplacement.Systems
     public partial class JunctionMarkingSystem : GameSystemBase, IPreSerialize
 
     {
+        private static readonly ComponentType[] LineChanges={ComponentType.ReadOnly<Curve>(),ComponentType.ReadOnly<PrefabRef>()};
+
 
         private EntityQuery _lines, _hidden, _changedNodes;
 
@@ -200,6 +202,9 @@ namespace MedianGrassReplacement.Systems
                 var marking=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
                 if(marking.CoversNativeNodePaint(owner,EntityManager.GetComponentData<Curve>(line).m_Bezier,false))return true;
             }
+            // Explicit visibility/replacement choices above still win. Leave
+            // unsolicited junction cleanup to the native game when opted in.
+            if(AutomaticMarkingPolicy.PreservesNode(EntityManager,owner))return false;
             bool highway=roads>=3;
             if(highway)foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(owner,true))if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!RoadSurfacePolicy.IsHighway(EntityManager,connection.m_Edge)){highway=false;break;}
             if(highway)return World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().OwnsHighwayNodePaint(owner,line);
@@ -261,7 +266,11 @@ namespace MedianGrassReplacement.Systems
         public void PreSerialize(Context context) { Restore(); }
 
         protected override void OnUpdate()
-
+        {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("JunctionMarkingSystem",started);}
+        }
+        private void UpdatePerformanceCore()
         {
 
             if (Mod.Saving) return;
@@ -296,7 +305,7 @@ namespace MedianGrassReplacement.Systems
 
             _lines.ResetFilter();
 
-            if (!_initial) _lines.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() });
+            if (!_initial) _lines.SetChangedVersionFilter(LineChanges);
 
             var query = _lines;
 
@@ -390,8 +399,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-
-
-
-
-

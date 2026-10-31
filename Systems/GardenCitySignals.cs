@@ -36,9 +36,10 @@ namespace MedianGrassReplacement.Systems
   }
   private static readonly HashSet<Entity> pendingNodes=new HashSet<Entity>();
   private static readonly HashSet<string> notices=new HashSet<string>();
+  internal static bool TraceEnabled=>ModDiagnostics.TraceBuffer.Enabled&&notices.Count<128;
   internal static void Trace(Entity node,string stage)
   {
-   if(!ModDiagnostics.TraceBuffer.Enabled||notices.Count>=128)return;
+   if(!TraceEnabled)return;
    string message=node+" "+stage;if(notices.Add(message))Mod.Log.Info("Signal placement: "+message);
   }
   internal static bool IsAsset(string name)=>name==AssetName||name==WireAsset||name==MastAsset;
@@ -253,7 +254,7 @@ namespace MedianGrassReplacement.Systems
    if(!pending.ContainsKey(id))
    {
     var source=p.GetPrefab<StaticObjectPrefab>(fallback);
-    if(source.m_Meshes==null||source.m_Meshes.Length==0){Trace(node,"suppression skipped: native source has no geometry");return fallback;}
+    if(source.m_Meshes==null||source.m_Meshes.Length==0){if(TraceEnabled)Trace(node,"suppression skipped: native source has no geometry");return fallback;}
     foreach(var mesh in source.m_Meshes)if(mesh==null||mesh.m_Mesh==null)return fallback;
     var prefab=(StaticObjectPrefab)source.Clone("CSG Controller Only "+(variants.Count+pending.Count));
     // Retain valid native geometry, bounds and submesh slots. Outline-only meshes
@@ -335,8 +336,8 @@ namespace MedianGrassReplacement.Systems
   }
   internal static Entity Select(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,IList<float3> supports=null,int virtualSupport=-1,IList<int2> requiredSpans=null,int sourceApproach=-1,bool includePole=true,ushort vehicleMask=0)
   {
-   pedestrianMask=originalMask;if(!Ready(p,em)){Trace(node,"module lookup not ready");return fallback;}int selected=sourceApproach>=0?sourceApproach:Nearest(original,approaches);if(selected<0||selected>=approaches.Count){Trace(node,"no source curb within 12m");return fallback;}var a=PhaseApproach(approaches[selected],vehicleMask);
-   if(!TryLayout(a.Incoming,a.Outward,placed.m_Position,out var inward,out var heads)){Trace(node,"lane fit rejected: incoming="+(a.Incoming?.Count??0)+" source="+original.m_Position+" pole="+placed.m_Position+" outward="+a.Outward);return fallback;}
+   pedestrianMask=originalMask;if(!Ready(p,em)){if(TraceEnabled)Trace(node,"module lookup not ready");return fallback;}int selected=sourceApproach>=0?sourceApproach:Nearest(original,approaches);if(selected<0||selected>=approaches.Count){if(TraceEnabled)Trace(node,"no source curb within 12m");return fallback;}var a=PhaseApproach(approaches[selected],vehicleMask);
+   if(!TryLayout(a.Incoming,a.Outward,placed.m_Position,out var inward,out var heads)){if(TraceEnabled)Trace(node,"lane fit rejected: incoming="+(a.Incoming?.Count??0)+" source="+original.m_Position+" pole="+placed.m_Position+" outward="+a.Outward);return fallback;}
    byte style=em.HasComponent<MGRSignalStyle>(node)?em.GetComponentData<MGRSignalStyle>(node).Value:(byte)0;
    var rotation=quaternion.LookRotationSafe(math.cross(inward,new float3(0,1,0)),new float3(0,1,0));var inverse=math.inverse(rotation);
    var face=quaternion.LookRotationSafe(new float3(a.Outward.x,0,a.Outward.y),new float3(0,1,0));var headRotation=math.mul(inverse,face);float3 wireSlope=new float3(1,0,0);float armReach=0,wireSpan=0,wireProjection=1;var meshes=new List<ObjectMeshInfo>();
@@ -393,12 +394,12 @@ namespace MedianGrassReplacement.Systems
    fallback=NativeSource(fallback);
    var key=new StringBuilder(p.GetPrefab<StaticObjectPrefab>(fallback).GetPrefabID().ToString()).Append('|').Append(style);
    foreach(var mesh in meshes){key.Append('|').Append(mesh.m_Mesh.name);foreach(float f in new[]{mesh.m_Position.x,mesh.m_Position.y,mesh.m_Position.z,mesh.m_Rotation.value.x,mesh.m_Rotation.value.y,mesh.m_Rotation.value.z,mesh.m_Rotation.value.w})key.Append(':').Append(math.round(f*1000).ToString(CultureInfo.InvariantCulture));}
-   string id=key.ToString();if(variants.TryGetValue(id,out var ready)){if(!Initialized(em,ready,vehicle)){Trace(node,"composite awaiting initialized signal geometry: "+ready);return fallback;}placed.m_Rotation=rotation;return ready;}
+   string id=key.ToString();if(variants.TryGetValue(id,out var ready)){if(!Initialized(em,ready,vehicle)){if(TraceEnabled)Trace(node,"composite awaiting initialized signal geometry: "+ready);return fallback;}placed.m_Rotation=rotation;return ready;}
    if(pending.ContainsKey(id)){pendingNodes.Add(node);return fallback;}
    if(variants.Count+pending.Count>=2048){if(notices.Add("variant-capacity"))Mod.Log.Warn("Signal composite capacity reached (2048). Retaining native signals for unsupported new configurations; existing prefabs are not freed. Write a snapshot for cache counts.");return fallback;}
    var prefab=(StaticObjectPrefab)p.GetPrefab<StaticObjectPrefab>(fallback).Clone("CSG Applied "+(variants.Count+pending.Count));prefab.m_Meshes=meshes.ToArray();prefab.Remove<EffectSource>();if(!vehicle){prefab.Remove<StandingObject>();var role=prefab.GetComponent<TrafficLightObject>();role.m_VehicleLeft=false;role.m_VehicleRight=false;role.m_CrossingLeft=false;role.m_CrossingRight=true;}prefab.Remove<SpawnableObject>();prefab.Remove<ObsoleteIdentifiers>();prefab.Remove<ObjectSubObjects>();prefab.Remove<SubObjectDefaultProbability>();if(prefab.TryGet<UIObject>(out var ui))ui.m_Group=null;
    // Register before the native prefab initialization pass, never during modification.
-   pending.Add(id,prefab);pendingSources[id]=fallback;pendingNodes.Add(node);Trace(node,"composite queued: style="+style+" vehicle="+vehicle+" meshes="+meshes.Count);return fallback;
+   pending.Add(id,prefab);pendingSources[id]=fallback;pendingNodes.Add(node);if(TraceEnabled)Trace(node,"composite queued: style="+style+" vehicle="+vehicle+" meshes="+meshes.Count);return fallback;
   }
  }
  public partial class SignalPrefabRegistrationSystem:Game.GameSystemBase

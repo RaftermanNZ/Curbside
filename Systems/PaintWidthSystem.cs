@@ -9,4 +9,3 @@ namespace MedianGrassReplacement.Systems
     public struct MGRPrivatePaintDefinition : IComponentData { }
 
 }
-

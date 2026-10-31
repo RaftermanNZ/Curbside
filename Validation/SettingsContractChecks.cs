@@ -38,6 +38,7 @@ class SettingsContractChecks
         Check(Attr(T.GetProperty("UnlimitedDecals"),"SettingsUIHiddenAttribute")&&Attr(T.GetProperty("CurbDecalLimit"),"SettingsUIHiddenAttribute")&&Attr(T.GetProperty("ExactDecalLimit"),"SettingsUIHiddenAttribute"),"Retired decal limit controls are visible");
         Check(!(bool)Get(s,"AlleyWhiteEdges"),"Alley edges default off");
         Check(!(bool)Get(s,"DecalsBothSides"),"Road wear must default to one roadside");
+        Check(!(bool)Get(s,"PreserveVanillaJunctionLines"),"Existing settings without the new option must retain previous marking behavior");
         Check((string)Get(s,"Version")==A.GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion.Split('+')[0],"About must report the candidate version");
         int controls=0,sliders=0,callbacks=0;
         foreach(var p in T.GetProperties(BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly))
@@ -75,15 +76,19 @@ class SettingsContractChecks
         // Persisted opt-outs must not erase chosen textures or alter unrelated controls.
         Set(s,"GlobalRoadTexture","C:/Example/road.png");Set(s,"GlobalSidewalkTexture","C:/Example/walk.png");Set(s,"SelectedTexture","grass.png");
         Set(s,"UnlimitedDecals",true);
-        foreach(string p in new[]{"DisableAutomaticMarkings","DisableAutomaticHighwayMarkings","DisableAutomaticLineAdjustments","DisableTextureReplacement"})Set(s,p,true);
+        foreach(string p in new[]{"DisableAutomaticMarkings","DisableAutomaticHighwayMarkings","DisableAutomaticLineAdjustments","DisableTextureReplacement","PreserveVanillaJunctionLines"})Set(s,p,true);
         var properties=T.GetProperties(BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly)
             .Where(p=>p.CanRead&&p.CanWrite&&!Attr(p,"ExcludeAttribute")&&(p.PropertyType==typeof(bool)||p.PropertyType==typeof(float)||p.PropertyType==typeof(int)||p.PropertyType==typeof(string))).ToArray();
         var snapshot=properties.ToDictionary(p=>p.Name,p=>p.GetValue(s));
+        Set(s,"PreserveVanillaJunctionLines",false);
+        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-out altered another saved setting");
+        Set(s,"PreserveVanillaJunctionLines",true);
+        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-in altered another saved setting");
         var json=new JavaScriptSerializer();var decoded=json.Deserialize<Dictionary<string,object>>(json.Serialize(snapshot));var loaded=Fresh();
         foreach(var p in properties)p.SetValue(loaded,decoded[p.Name]==null?null:Convert.ChangeType(decoded[p.Name],p.PropertyType));
         foreach(var p in properties)Check(Equals(p.GetValue(s),p.GetValue(loaded)),p.Name+": settings replay changed a saved value");
         Check((bool)Get(loaded,"UnlimitedDecals"),"Explicit existing unlimited choice overwritten");
-        foreach(string p in new[]{"DisableAutomaticMarkings","DisableAutomaticHighwayMarkings","DisableAutomaticLineAdjustments","DisableTextureReplacement"})Check((bool)Get(loaded,p),p+": saved opt-out lost");
+        foreach(string p in new[]{"DisableAutomaticMarkings","DisableAutomaticHighwayMarkings","DisableAutomaticLineAdjustments","DisableTextureReplacement","PreserveVanillaJunctionLines"})Check((bool)Get(loaded,p),p+": saved opt-out/opt-in lost");
         Reset(s);var defaults=Fresh();
         foreach(var p in properties)Check(Equals(p.GetValue(s),p.GetValue(defaults)),p.Name+": reset is not deterministic");
         var culture=System.Globalization.CultureInfo.CurrentCulture;

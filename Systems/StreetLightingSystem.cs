@@ -40,6 +40,8 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class StreetLightingSystem:GameSystemBase,IPreSerialize
     {
+        private static readonly ComponentType[] RoadLightingChanges={ComponentType.ReadOnly<MGRStreetLighting>(),ComponentType.ReadOnly<Edge>()};
+
         internal const string AssetName="MGR Street Lighting";
         private EntityQuery roads,hidden,changedNodes,changedRoadProps,selectedNodes;private bool initial=true;
         private static readonly HashSet<Entity> requested=new HashSet<Entity>();
@@ -167,17 +169,18 @@ namespace MedianGrassReplacement.Systems
         protected override void OnGamePreload(Purpose p,GameMode mode){base.OnGamePreload(p,mode);Restore();requested.Clear();requestedNodes.Clear();}
         protected override void OnGameLoadingComplete(Purpose p,GameMode mode){base.OnGameLoadingComplete(p,mode);initial=true;}
         protected override void OnUpdate()
-        {long started=ModDiagnostics.RuntimeCosts.Begin();try{UpdateMeasuredCore();}finally{ModDiagnostics.RuntimeCosts.End("StreetLightingSystem",started);}}
+        {long started=ModDiagnostics.RuntimeCosts.Begin();try{UpdateMeasuredCore();}finally{ModDiagnostics.RuntimeCosts.End("StreetLightingSystem",started);ModDiagnostics.RuntimeCosts.Workload("HiddenStreetLamps",owned.Count,requested.Count+requestedNodes.Count);}}
         private void UpdateMeasuredCore()
         {
-            if(Mod.Saving)return;Dependency.Complete();
+            if(Mod.Saving)return;
             try
             {
                 if(requested.Count==0&&requestedNodes.Count==0&&owned.Count==0&&roads.IsEmptyIgnoreFilter&&selectedNodes.IsEmptyIgnoreFilter)return;
+                Dependency.Complete();
                 nodeWork.Clear();
                 foreach(var node in requestedNodes)nodeWork.Add(node);requestedNodes.Clear();
                 if(initial){using(var list=roads.ToEntityArray(Allocator.Temp))foreach(var road in list)requested.Add(road);using(var nodes=selectedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)nodeWork.Add(node);initial=false;}
-                else {roads.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<MGRStreetLighting>(),ComponentType.ReadOnly<Edge>()});try{using(var list=roads.ToEntityArray(Allocator.Temp))foreach(var road in list)requested.Add(road);}finally{roads.ResetFilter();}}
+                else {roads.SetChangedVersionFilter(RoadLightingChanges);try{using(var list=roads.ToEntityArray(Allocator.Temp))foreach(var road in list)requested.Add(road);}finally{roads.ResetFilter();}}
                 using(var props=changedRoadProps.ToEntityArray(Allocator.Temp))foreach(var road in props)requested.Add(road);
                 using(var list=changedNodes.ToEntityArray(Allocator.Temp))foreach(var node in list)if(NodeMode(node)!=0||IsOwnedNode(node))nodeWork.Add(node);
                 foreach(var road in requested)if(EntityManager.Exists(road)&&!EntityManager.HasComponent<Deleted>(road)){byte mode=Mode(EntityManager,road);if(mode!=0){if(mode==1)NativeFlag(road,true);Inspect(road,road,mode==2,0);}if(EntityManager.HasComponent<Edge>(road)){var edge=EntityManager.GetComponentData<Edge>(road);nodeWork.Add(edge.m_Start);nodeWork.Add(edge.m_End);}}

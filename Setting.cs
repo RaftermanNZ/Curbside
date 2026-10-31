@@ -166,6 +166,7 @@ namespace MedianGrassReplacement
 
         private void SetDefaultValues(string textureFolder)
         {
+            _preserveVanillaJunctionLines=false;
             _disableAutomaticMarkings=false; _disableAutomaticHighwayMarkings=false; _disableAutomaticLineAdjustments=false; _disableTextureReplacement=false; _markingToolColor="Yellow"; FollowCityMarkingTheme=false;ThemeAssetEdgeColors=true; _centerLineStyle=""; AlignMedianStopBar=true; MedianEdgeLines=true; _medianLineOffset=.35f; _medianLineSetback=.05f; _medianLineStyle=""; PowerlinePoleSpacing=35f;PowerlineMinimumGap=10f;PowerlineCornerSetback=6f;PowerlineHeight=10f; SetDecalDefaults(); SetSurfaceDefaults(); _textureFolder = textureFolder; _selectedTexture = TextureCatalog.BundledValue; _uvScale = .10f; AlleyWhiteEdges=false; AlleyLineOffset=.20f; AlleyLineStopGap=0f; CurbWhiteLines = true; CurbLinesBesideParking = false; _curbLineOffset = .25f; _curbLineStyle = "NA Parking Edge Line"; _fixedParkingBayLength = 7f; _parkingIntersectionSetback = 6.5f; _stopLineCurbGap = .15f; _curbLineStopGap = .05f; _crosswalkUpgradeWidth = 2.5f; LockCurbAndStopLines = true;
         }
 
@@ -198,4 +199,3 @@ namespace MedianGrassReplacement
     }
 
 }
-

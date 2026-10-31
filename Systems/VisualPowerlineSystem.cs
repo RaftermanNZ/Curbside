@@ -191,6 +191,9 @@ namespace MedianGrassReplacement.Systems
     public partial class VisualPowerlineSystem : GameSystemBase, IPreSerialize
 
     {
+        private static readonly ComponentType[] PowerlineGeometryChanges={ComponentType.ReadOnly<EdgeGeometry>(),ComponentType.ReadOnly<Composition>()};
+        private readonly List<Entity> _nodeBatch=new List<Entity>(2);
+
 
         internal const string AssetName="MGR Visual Roadside Powerlines";
 
@@ -814,7 +817,11 @@ namespace MedianGrassReplacement.Systems
         }
 
         protected override void OnUpdate()
-
+        {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("VisualPowerlineSystem",started);}
+        }
+        private void UpdatePerformanceCore()
         {
 
             if(!_active||Mod.Saving) return;
@@ -845,7 +852,7 @@ namespace MedianGrassReplacement.Systems
 
                 {
 
-                    if(!_initial) _roads.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<EdgeGeometry>(),ComponentType.ReadOnly<Composition>()});
+                    if(!_initial) _roads.SetChangedVersionFilter(PowerlineGeometryChanges);
 
                     using(var roads=_roads.ToEntityArray(Allocator.Temp)) foreach(var road in roads) EnqueueRoad(road);
 
@@ -877,7 +884,9 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                int budget=2;var done=new List<Entity>();foreach(var node in new List<Entity>(_dirtyNodes)) {if(budget--<=0) break;if(BuildNode(node)) done.Add(node);}foreach(var node in done) _dirtyNodes.Remove(node);RetireOrphans();
+                WorkBatchPolicy.Take(_dirtyNodes,_nodeBatch,2);
+                foreach(var node in _nodeBatch)if(BuildNode(node))_dirtyNodes.Remove(node);
+                RetireOrphans();
 
             }
 
@@ -888,4 +897,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

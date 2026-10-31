@@ -91,7 +91,15 @@ namespace MedianGrassReplacement.Systems
             if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit)) return deps;
 
             deps.Complete();
-            if(HandleHoverLine(EntityManager.HasComponent<Node>(hit.m_Hit.m_HitEntity)?hit.m_Hit.m_HitEntity:hit.m_Owner,hit.m_Hit.m_HitPosition,remove))return default;
+            if(_selected?.name==RoadFeatureInspector.AssetName&&SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var inspectTarget)&&EntityManager.HasComponent<Node>(inspectTarget))
+            {
+                World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RetainPaintTarget(inspectTarget);
+                var inspectOverlay=World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>().GetBuffer(out var inspectPending);inspectPending.Complete();
+                inspectOverlay.DrawCircle(new UnityEngine.Color(.3f,.8f,1,.8f),EntityManager.GetComponentData<Node>(inspectTarget).m_Position,4f);
+                return default;
+            }
+            var markingHit=SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var markingTarget)?markingTarget:hit.m_Owner;
+            if(HandleHoverLine(markingHit,hit.m_Hit.m_HitPosition,remove))return default;
             byte edgeStyle=EdgeUpgradePolicy.Style(_selected?.name);
             byte dividerStyle=LaneDividerPolicy.Style(_selected?.name);bool dividerTool=dividerStyle!=0;
             byte nodeCenterStyle=CenterlineUpgradePolicy.Style(_selected?.name);
@@ -294,4 +302,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

@@ -18,6 +18,11 @@ namespace MedianGrassReplacement.Systems
         }
         protected override void OnUpdate()
         {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("SignalPreviewSystem",started);}
+        }
+        private void UpdatePerformanceCore()
+        {
             if(Mod.Saving)return;
             var tool=World.GetOrCreateSystemManaged<ToolSystem>().activeTool;
             if(!(tool is NetToolSystem)){Restore();return;}

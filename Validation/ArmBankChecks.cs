@@ -60,4 +60,3 @@ class ArmBankChecks
   Console.WriteLine(checks+" arm-bank checks passed across rotated narrow, wide, divided, one-way and asymmetric lane envelopes; unsupported reaches and occupied mounts checked.");
  }
 }
-

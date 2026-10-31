@@ -15,6 +15,11 @@
     "SignalBindingChecks",
     "WorkBatchChecks",
     "SettingsContractChecks",
-    "LineIsolationChecks"
+    "LineIsolationChecks",
+    "PerformanceTelemetryChecks",
+    "SignalMaintenanceChecks",
+    "NativeJunctionChecks",
+    "NativeTrafficBoundaryChecks",
+    "ActionJournalChecks"
   ]
 }

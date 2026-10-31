@@ -17,5 +17,7 @@ namespace MedianGrassReplacement.Systems
             return true;
         }
         internal static bool Adjusts(EntityManager em,Entity owner)=>Allows(em,owner)&&!Mod.Settings.DisableAutomaticLineAdjustments;
+        internal static bool PreservesNode(EntityManager em,Entity owner)=>Mod.Settings!=null&&Mod.Settings.PreserveVanillaJunctionLines&&em.HasComponent<Node>(owner);
+        internal static bool PreservesGeometry(EntityManager em,Entity owner)=>Mod.Settings!=null&&Mod.Settings.PreserveVanillaJunctionLines&&(em.HasComponent<Node>(owner)||em.HasComponent<Edge>(owner));
     }
 }

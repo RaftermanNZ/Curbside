@@ -39,7 +39,7 @@ namespace MedianGrassReplacement.Systems
         }
         private void AddHighwayNodePaint(Entity node,List<MarkCurve> output)
         {
-            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,node);
+            bool automatic=AutomaticMarkingPolicy.Allows(EntityManager,node)&&!AutomaticMarkingPolicy.PreservesNode(EntityManager,node);
             var anchors=HighwayPaintAnchors(node);
             var native=new List<MarkCurve>();var seen=new List<Colossal.Mathematics.Bezier4x3>();int count=0;
             foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))

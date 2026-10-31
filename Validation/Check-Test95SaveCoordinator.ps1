@@ -1,7 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Dll)
 $ErrorActionPreference='Stop'
-if(!$env:CURBSIDE_CECIL){throw 'Set CURBSIDE_CECIL to your installed Mono.Cecil.dll (for example from ILSpy).'}
-Add-Type -Path $env:CURBSIDE_CECIL
+Add-Type -Path 'C:/Users/Trevor/AppData/Local/Programs/ILSpy/Mono.Cecil.dll'
 $a=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Resolve-Path $Dll))
 $g=[Mono.Cecil.AssemblyDefinition]::ReadAssembly('C:/Program Files (x86)/Steam/steamapps/common/Cities Skylines II/Cities2_Data/Managed/Game.dll')
 try {
@@ -46,4 +45,3 @@ try {
  }
  'PASS Test99: five unique save registrations; 13 callbacks once in order; fence/audit once; passive serialization markers and native write-completion fence.'
 }finally{$a.Dispose();$g.Dispose()}
-

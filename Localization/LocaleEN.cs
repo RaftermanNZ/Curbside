@@ -33,6 +33,8 @@ namespace MedianGrassReplacement.Localization
             Option(nameof(Setting.DisableAutomaticMarkings),"Disable automatic road lines","Keep manual line, parking, crossing and visibility upgrades. Stop automatically added curb/median lines; saved upgrade choices remain intact. Default: off.");
             Option(nameof(Setting.DisableAutomaticHighwayMarkings),"Disable automatic highway lines","Keep vanilla highway markings and your manual upgrades; stop automatic highway additions at sections, nodes and junctions. Default: off.");
             Option(nameof(Setting.DisableAutomaticLineAdjustments),"Disable automatic line adjustments","Stop unsolicited native line recoloring and junction cleanup. Explicit manual upgrades and visibility choices remain active. Default: off.");
+            Option(nameof(Setting.PreserveVanillaJunctionLines),"Preserve vanilla road lines — recolor only","Keep the game's line paths, endpoints and dash patterns on sections, intersections, transitions, road ends and highway merges. Eligible center and median boundaries follow the marking color theme, including when Centerline style is Vanilla. Automatic offsets and extra edge/median lines do not reshape preserved paint. Manual upgrades, parking layouts and crossings retain their controls. Existing automatic-line disable settings still block recoloring. Default: off (opt-in).");
+            Option(nameof(Setting.JunctionMarkingStatus),"Road marking status","Shows whether another automatic-line setting prevents recoloring. This option never changes those settings for you.");
             Option(nameof(Setting.DisableTextureReplacement),"Disable surface texture replacements","Restore Curbside-owned road, sidewalk and grass surface changes. Keep your texture selections for re-enabling. Decorative road-wear decals are separate upgrades. Default: off.");
 
 
@@ -223,6 +225,3 @@ namespace MedianGrassReplacement.Localization
     }
 
 }
-
-
-

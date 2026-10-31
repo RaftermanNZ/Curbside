@@ -37,7 +37,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal List<Bezier4x3> EdgePreview(Entity road,bool left,byte style)
         {
-            var result=new List<Bezier4x3>();if(!TrySectionEdgePlan(road,out var paths))return result;
+            var result=new List<Bezier4x3>();if(!TrySectionEdgePlan(road,out var paths,true))return result;
             foreach(var path in paths)if(EdgeSide(road,path)==left)
             {
                 var center=ExplicitEdgeCenter(road,path,style);
@@ -54,7 +54,7 @@ namespace MedianGrassReplacement.Systems
         }
         private void AddExplicitEdges(Entity road,List<StopMark> stops,List<MarkCurve> output)
         {
-            if(!EntityManager.HasComponent<MGREdgePaint>(road)||!TrySectionEdgePlan(road,out var paths))return;
+            if(!EntityManager.HasComponent<MGREdgePaint>(road)||!TrySectionEdgePlan(road,out var paths,true))return;
             var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
             for(int side=0;side<2;side++)
             {
@@ -70,7 +70,7 @@ namespace MedianGrassReplacement.Systems
                 var single=palette.Explicit(1,EdgeUpgradePolicy.IsYellow(mode));
                 if(mode>=12){AddPassingMarks(road,false,1,EdgePreview(road,left,mode),single,output);continue;}
                 foreach(var path in EdgePreview(road,left,mode))output.Add(new MarkCurve(path,single,0,false,true));
-                if(mode<6)for(int i=0;i+1<selected.Count;i+=2)AddCaps(road,selected[i],selected[i+1],stops,0,asset);
+                if(mode<6&&!RoadSurfacePolicy.IsHighway(EntityManager,road))for(int i=0;i+1<selected.Count;i+=2)AddCaps(road,selected[i],selected[i+1],stops,0,asset);
             }
         }
         private bool CapOnSide(Entity road,JoinCap cap,bool left)=>EdgeSide(road,new Bezier4x3(cap.Point,cap.Point,cap.Point,cap.Point))==left;
@@ -79,6 +79,7 @@ namespace MedianGrassReplacement.Systems
             if(!EntityManager.HasComponent<MGREdgePaint>(road)||!EntityManager.HasComponent<Composition>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return false;
             bool left=EdgeSide(road,curve);byte mode=EdgeUpgradePolicy.Mode(EntityManager,road,left);if(mode==0)return false;
             if(mode!=EdgeUpgradePolicy.Removed&&(!_marks.TryGetValue(road,out var marks)||!marks.Curves.Exists(m=>m.Curb&&EdgeSide(road,m.Curve)==left)))return false;
+            if(NativeHighwayEditableEdges(road,out var nativeEdges)&&nativeEdges.Exists(p=>GranularHighwayLinePolicy.Matches(p,curve)))return true;
             return IsOuterEdgePaint(road,curve)||RoadSurfacePolicy.IsHighway(EntityManager,road)&&IsOpposingBoundary(road,curve);
         }
         internal void ApplyEdge(Entity target,bool node,bool left,byte style,bool remove)

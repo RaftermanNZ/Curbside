@@ -29,6 +29,8 @@ namespace MedianGrassReplacement.Systems
     public partial class RoadAttachmentTransferSystem : GameSystemBase
 
     {
+        private readonly Dictionary<Entity,Selection> _sourceSelections=new Dictionary<Entity,Selection>();
+
 
         private struct Selection { internal byte Powerlines,Decals,ParkingBans,ParkingLeft,ParkingRight,CenterStyle,DividerStyle,EdgeStyle,EdgeLeft,EdgeRight,SurfaceRoad,SurfaceWalk,HatchSides,StreetLighting,LineVisibility,HiddenLeft,HiddenRight,LightingPrevious;internal bool HideCenter,LightingOwned; }
 
@@ -38,7 +40,7 @@ namespace MedianGrassReplacement.Systems
 
         private readonly Dictionary<Entity,Commit> _commits=new Dictionary<Entity,Commit>();
 
-        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode) {base.OnGamePreload(purpose,mode);_commits.Clear();}
+        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode) {base.OnGamePreload(purpose,mode);_commits.Clear();_sourceSelections.Clear();}
 
         private Entity Original(Entity entity)
 
@@ -200,10 +202,15 @@ namespace MedianGrassReplacement.Systems
         }
 
         protected override void OnUpdate()
-
+        {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("RoadAttachmentTransferSystem",started);}
+        }
+        private void UpdatePerformanceCore()
         {
 
-            if(Mod.Saving) return;Dependency.Complete();var sources=new Dictionary<Entity,Selection>();
+            if(Mod.Saving || _previews.IsEmptyIgnoreFilter){_sourceSelections.Clear();return;}
+            Dependency.Complete();var sources=_sourceSelections;sources.Clear();
 
             using(var previews=_previews.ToEntityArray(Allocator.Temp)) foreach(var preview in previews)
 
@@ -291,4 +298,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

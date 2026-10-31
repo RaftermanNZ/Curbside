@@ -92,9 +92,17 @@ namespace MedianGrassReplacement.Systems
             AddBinding(new TriggerBinding<bool>("curbside","setOpen",SetOpen));
             AddBinding(new TriggerBinding<int>("curbside","select",Select));
             AddBinding(new TriggerBinding("curbside","leaveTool",Leave));
+            AddBinding(new TriggerBinding<bool>("curbside","startLineRecording",screenshots=>{
+                World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ResetLineRecording();
+                ModDiagnostics.ActionJournal.Start(System.IO.Path.Combine(UnityEngine.Application.persistentDataPath,"ModsData","MedianGrassReplacement","Diagnostics"),BuildIdentity.Label,screenshots);
+                _diagnostics.Update(ModDiagnostics.TraceBuffer.Enabled);_recordNext=0;_recordScreenshot=UnityEngine.Time.realtimeSinceStartup+30;_recordImages=0;
+                _noticeUntil=UnityEngine.Time.realtimeSinceStartup+30;_status.Update(ModDiagnostics.ActionJournal.Status);
+            }));
+            AddBinding(new TriggerBinding("curbside","markLineRecording",()=>{World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().MarkRecordingTarget();_noticeUntil=UnityEngine.Time.realtimeSinceStartup+10;_status.Update(ModDiagnostics.ActionJournal.Status+" — target marked (up to 16 owners). ");}));
+            AddBinding(new TriggerBinding("curbside","stopLineRecording",()=>{ModDiagnostics.ActionJournal.Stop("Stopped by player");World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ResetLineRecording();_noticeUntil=UnityEngine.Time.realtimeSinceStartup+30;_status.Update(ModDiagnostics.ActionJournal.Status);}));
             AddBinding(new TriggerBinding("curbside","saveWithoutPreview",()=>DiagnosticSave.Request(World,message=>{_noticeUntil=UnityEngine.Time.realtimeSinceStartup+30;_status.Update(message);})));
-            AddBinding(new TriggerBinding<bool>("curbside","diagnostics",v=>{ModDiagnostics.TraceBuffer.SetEnabled(v);ModDiagnostics.RuntimeCosts.Reset();_diagnostics.Update(v);_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update(v?"Diagnostics enabled. Reproduce, then write a snapshot.":"Diagnostics off.");}));
-            AddBinding(new TriggerBinding("curbside","snapshot",()=>{CompatibilityDiagnostics.Record();World.GetOrCreateSystemManaged<FarSideLightSystem>().RecordSnapshot();World.GetOrCreateSystemManaged<SignalStreetNameSystem>().ExportDiagnostics();var crossings=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.state","saving="+Mod.Saving+" tool="+_tools.activeTool?.toolID+" crossing="+crossings.CrossingStatus);var paint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.paint","singleYellow="+(paint.Explicit(1,true)!=Entity.Null)+" doubleYellow="+(paint.Explicit(2,true)!=Entity.Null)+" singleWhite="+(paint.Explicit(1,false)!=Entity.Null)+" doubleWhite="+(paint.Explicit(2,false)!=Entity.Null));ModDiagnostics.TraceBuffer.Record("snapshot.surface",GlobalSurfaceMaterialSystem.Status);ModDiagnostics.TraceBuffer.Record("snapshot.decals","status="+CurbDecalSystem.Status+" bothSides="+Mod.Settings.DecalsBothSides+" unlimited="+Mod.Settings.UnlimitedDecals);ModDiagnostics.TraceBuffer.Record("snapshot.discovery",paint.DiscoveryStatus+" divider="+(paint.Divider!=Entity.Null));World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RecordPaintSnapshot();Mod.Log.Info(GardenCitySignals.PackSystem.DiscoveryStatus);Mod.Log.Info(GardenCityLightPolicy.CacheStatus);Mod.Log.Info(World.GetOrCreateSystemManaged<SignalStreetNameSystem>().CostStatus);Mod.Log.Info(ModDiagnostics.RuntimeCosts.Snapshot());Mod.Log.Info(ModDiagnostics.TraceBuffer.Snapshot("The Curbside Mod "+BuildIdentity.Label));_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update("Diagnostic snapshot written to the existing MedianGrassReplacement log.");}));
+            AddBinding(new TriggerBinding<bool>("curbside","diagnostics",v=>{if(!v)ModDiagnostics.ActionJournal.Stop("Diagnostics disabled");ModDiagnostics.TraceBuffer.SetEnabled(v);ModDiagnostics.RuntimeCosts.Reset();_diagnostics.Update(v);_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update(v?"Diagnostics enabled. Reproduce, then write a snapshot.":"Diagnostics off.");}));
+            AddBinding(new TriggerBinding("curbside","snapshot",()=>{CompatibilityDiagnostics.Record();PerformanceDiagnostics.Record();World.GetOrCreateSystemManaged<FarSideLightSystem>().RecordSnapshot();World.GetOrCreateSystemManaged<SignalStreetNameSystem>().ExportDiagnostics();var crossings=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.state","saving="+Mod.Saving+" tool="+_tools.activeTool?.toolID+" crossing="+crossings.CrossingStatus);var paint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();ModDiagnostics.TraceBuffer.Record("snapshot.paint","singleYellow="+(paint.Explicit(1,true)!=Entity.Null)+" doubleYellow="+(paint.Explicit(2,true)!=Entity.Null)+" singleWhite="+(paint.Explicit(1,false)!=Entity.Null)+" doubleWhite="+(paint.Explicit(2,false)!=Entity.Null));ModDiagnostics.TraceBuffer.Record("snapshot.surface",GlobalSurfaceMaterialSystem.Status);ModDiagnostics.TraceBuffer.Record("snapshot.decals","status="+CurbDecalSystem.Status+" bothSides="+Mod.Settings.DecalsBothSides+" unlimited="+Mod.Settings.UnlimitedDecals);ModDiagnostics.TraceBuffer.Record("snapshot.discovery",paint.DiscoveryStatus+" divider="+(paint.Divider!=Entity.Null));World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RecordPaintSnapshot();Mod.Log.Info(GardenCitySignals.PackSystem.DiscoveryStatus);Mod.Log.Info(GardenCityLightPolicy.CacheStatus);Mod.Log.Info(World.GetOrCreateSystemManaged<SignalStreetNameSystem>().CostStatus);Mod.Log.Info(ModDiagnostics.RuntimeCosts.Snapshot());Mod.Log.Info(ModDiagnostics.TraceBuffer.Snapshot("The Curbside Mod "+BuildIdentity.Label));_noticeUntil=UnityEngine.Time.realtimeSinceStartup+4;_status.Update("Diagnostic snapshot written to the existing MedianGrassReplacement log.");}));
         }
         private PrefabBase Find(string name)=>World.GetOrCreateSystemManaged<UpgradeAssetsSystem>().FindAsset(name)??World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>().FindAsset(name);
         private bool Available(PrefabBase prefab)
@@ -143,17 +151,44 @@ namespace MedianGrassReplacement.Systems
             if(activated){_status.Update(entry.Hint);_active.Update(index);}else _status.Update("This tool could not be activated. Try again after the city finishes loading.");
         }
         private void Leave(){if(Mod.Saving)return;_tools.ActivatePrefabTool(null);_active.Update(-1);_status.Update("Tool closed. Existing upgrades are unchanged.");}
-        protected override void OnGamePreload(Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);_open=false;_active.Update(-1);_nextInspect=0;_features.Update("Choose Inspect road and hover a section.");}
+        protected override void OnGamePreload(Purpose purpose,GameMode mode){ModDiagnostics.ActionJournal.Stop("Scene preload");World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ResetLineRecording();base.OnGamePreload(purpose,mode);_open=false;_active.Update(-1);_nextInspect=0;_features.Update("Choose Inspect road and hover a section.");}
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
             try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbsidePanelSystem",started);}
         }
+        private float _recordNext,_recordScreenshot;private int _recordImages;private string _recordTool;private bool _recordSaving;private string _recordSettings;
+        protected override void OnDestroy(){ModDiagnostics.ActionJournal.Stop("UI world disposed");base.OnDestroy();}
         private string _wearStatusSource,_wearStatusText;
         private bool _wearStatusBoth;
         private void UpdateMeasured()
         {
             base.OnUpdate();
+            if(ModDiagnostics.ActionJournal.Active){
+                var mouse=UnityEngine.InputSystem.Mouse.current;
+                if(mouse!=null&&(mouse.leftButton.wasPressedThisFrame||mouse.rightButton.wasPressedThisFrame)){
+                    var ray=World.GetOrCreateSystemManaged<ToolRaycastSystem>();
+                    string hit=ray.GetRaycastResult(out var result)?" owner="+result.m_Owner+" hit="+result.m_Hit.m_HitPosition:" no world ray hit";
+                    ModDiagnostics.ActionJournal.Record("input.mouse","tool="+_tools.activeTool?.toolID+" asset="+_tools.activeTool?.GetPrefab()?.name+" left="+mouse.leftButton.wasPressedThisFrame+" right="+mouse.rightButton.wasPressedThisFrame+" pointerBlocked="+UpgradeInputPolicy.PointerBlocked+hit);
+                }
+            }
+            if(ModDiagnostics.ActionJournal.Active&&UnityEngine.Time.realtimeSinceStartup>=_recordNext){
+                _recordNext=UnityEngine.Time.realtimeSinceStartup+1;
+                try{
+                    string tool=_tools.activeTool?.toolID+" / "+_tools.activeTool?.GetPrefab()?.name;
+                    if(tool!=_recordTool){_recordTool=tool;ModDiagnostics.ActionJournal.Record("tool.observed",tool);}
+                    if(_recordSaving!=Mod.Saving){_recordSaving=Mod.Saving;ModDiagnostics.ActionJournal.Record("save.observed",Mod.Saving.ToString());}
+                    if(Mod.Settings!=null){string settings="preserve="+Mod.Settings.PreserveVanillaJunctionLines+" automaticDisabled="+Mod.Settings.DisableAutomaticMarkings+" highwayDisabled="+Mod.Settings.DisableAutomaticHighwayMarkings+" adjustmentsDisabled="+Mod.Settings.DisableAutomaticLineAdjustments+" european="+Mod.Settings.EuropeanMarkings+" yellow="+Mod.Settings.YellowCenterLines+" median="+Mod.Settings.MedianEdgeLines+" centerStyle="+Mod.Settings.CenterLineStyle;
+                        if(settings!=_recordSettings){_recordSettings=settings;ModDiagnostics.ActionJournal.Record("settings.observed",settings);}}
+                    World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().SampleRecordedLines();
+                    if(!Mod.Saving&&ModDiagnostics.ActionJournal.Screenshots&&_recordImages<40&&UnityEngine.Time.realtimeSinceStartup>=_recordScreenshot){
+                        _recordScreenshot=UnityEngine.Time.realtimeSinceStartup+30;
+                        var file=System.IO.Path.Combine(ModDiagnostics.ActionJournal.Folder,"frame-"+(++_recordImages).ToString("D3")+"-"+System.DateTime.UtcNow.ToString("HHmmss")+".png");
+                        UnityEngine.ScreenCapture.CaptureScreenshot(file,1);ModDiagnostics.ActionJournal.Record("screenshot.requested",file);
+                    }
+                    ModDiagnostics.ActionJournal.Flush();
+                }catch(System.Exception e){ModDiagnostics.ActionJournal.Stop("Recording stopped: "+e.GetType().Name);}
+            }
             if(_translationRevision != Localization.LocalizationService.Revision) { _translationRevision = Localization.LocalizationService.Revision; _translations.Update(); }
             if(!Mod.Saving&&UnityEngine.InputSystem.Keyboard.current?.escapeKey.wasPressedThisFrame==true)
             {
@@ -163,7 +198,7 @@ namespace MedianGrassReplacement.Systems
                 if(own){Leave();return;}
             }
             if(!_open)return;
-            if(!Mod.Saving&&!UpgradeInputPolicy.PointerBlocked&&UnityEngine.Time.realtimeSinceStartup>=_nextInspect){_nextInspect=UnityEngine.Time.realtimeSinceStartup+.25f;var ray=World.GetOrCreateSystemManaged<ToolRaycastSystem>();if(ray.GetRaycastResult(out var hit)&&SectionUpgradeTargeting.TryRoad(EntityManager,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))_features.Update(RoadFeatureInspector.Describe(EntityManager,road));else _features.Update("No road highlighted. Choose Inspect road and hover a section.");}
+            if(!Mod.Saving&&!UpgradeInputPolicy.PointerBlocked&&UnityEngine.Time.realtimeSinceStartup>=_nextInspect){_nextInspect=UnityEngine.Time.realtimeSinceStartup+.25f;var ray=World.GetOrCreateSystemManaged<ToolRaycastSystem>();if(ray.GetRaycastResult(out var hit)&&SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))_features.Update(RoadFeatureInspector.Describe(EntityManager,road));else _features.Update("No road highlighted. Choose Inspect road and hover a section.");}
             var current=_tools.activeTool?.GetPrefab()?.name;int selected=-1;
             for(int i=0;i<Entries.Length;i++)if(Entries[i].Asset==current){selected=i;break;}
             if(current=="Crosswalk") {var crossing=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();if(crossing.NativeLineMode)selected=0;else if(crossing.NativeInvisibleMode)selected=1;if(UnityEngine.Time.realtimeSinceStartup>=_noticeUntil)_status.Update(crossing.CrossingStatus);}
@@ -182,5 +217,3 @@ namespace MedianGrassReplacement.Systems
         }
     }
 }
-
-

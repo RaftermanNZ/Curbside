@@ -41,6 +41,21 @@ namespace MedianGrassReplacement.Systems
         private EntityQuery _sources, _originals, _paint, _definitions, _changedOwners, _changedGeometry;
 
         private static readonly ComponentType[] SourceChanges = { ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>() };
+        // Copied values only; scoped to this reconciliation pass, never borrowed buffers.
+        private readonly Dictionary<Entity,List<HighwayPaintAnchor>> _preservedAnchors=new Dictionary<Entity,List<HighwayPaintAnchor>>();
+        private readonly Dictionary<Entity,List<NativeTrafficBoundary>> _preservedTraffic=new Dictionary<Entity,List<NativeTrafficBoundary>>();
+        private byte PreservedTrafficRole(CurbLineEmissionSystem lines,Entity owner,Bezier4x3 curve)
+        {
+            if(!_preservedTraffic.TryGetValue(owner,out var lanes))_preservedTraffic[owner]=lanes=lines.NativeTrafficBoundaries(owner);
+            return NativeTrafficBoundaryPolicy.Classify(curve,lanes);
+        }
+        private bool PreservedNodeBoundary(CurbLineEmissionSystem lines,Entity node,Bezier4x3 curve)
+        {
+            if(!_preservedAnchors.TryGetValue(node,out var anchors))_preservedAnchors[node]=anchors=lines.HighwayPaintAnchors(node,false);
+            bool a=HighwayPaintAnchorPolicy.Find(anchors,curve.a,out _),b=HighwayPaintAnchorPolicy.Find(anchors,curve.d,out _);
+            // A gore can have one attached end; a median return can use one road.
+            return a||b?HighwayPaintAnchorPolicy.Yellow(curve,anchors):lines.IsYellowNativeNodeBoundary(node,curve);
+        }
         private readonly System.Diagnostics.Stopwatch _updateWatch = new System.Diagnostics.Stopwatch();
 
         private PrefabSystem _prefabs;
@@ -135,6 +150,10 @@ namespace MedianGrassReplacement.Systems
 
         }
 
+        internal void ReadRecordingReplacements(Entity owner,System.Action<Entity> read)
+        {
+            foreach(var pair in _replacements)if(EntityManager.Exists(pair.Key)&&EntityManager.HasComponent<Owner>(pair.Key)&&EntityManager.GetComponentData<Owner>(pair.Key).m_Owner==owner)foreach(var paint in pair.Value.Paint)read(paint);
+        }
         private bool Alive(Entity entity) => EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity);
 
         private void RenderChanged(Entity entity)
@@ -159,6 +178,7 @@ namespace MedianGrassReplacement.Systems
 
                 foreach (var entity in entry.Paint) if (Alive(entity)) GeneratedVisualLifecycle.Retire(World,entity);
 
+                if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.replacementRemoved","source="+source+" generated="+string.Join(",",entry.Paint));
                 _replacements.Remove(source);
 
             }
@@ -316,11 +336,29 @@ namespace MedianGrassReplacement.Systems
                 &&(EntityManager.HasComponent<Road>(owner)&&SegmentUpgradePolicy.HidesNative(EntityManager,owner)||EntityManager.HasComponent<Node>(owner)&&SegmentUpgradePolicy.HidesNode(EntityManager,owner,EntityManager.GetComponentData<Curve>(source).m_Bezier,nodeBoundary,outerEdge,true));
             bool highwayOwned=EntityManager.HasComponent<Node>(owner)&&lineSystem.OwnsHighwayNodePaint(owner,source);
             medianOwned|=nativeHidden||highwayOwned;
+            bool preserveNative=AutomaticMarkingPolicy.PreservesGeometry(EntityManager,owner)&&!crossing;
             Entity themedEdge=Entity.Null;
-            if(automatic&&!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
+            if(!preserveNative&&automatic&&!crossing&&Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors&&NodeLinePolicy.IsLineGeometry(prefab)&&prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0)
                 themedEdge=lineSystem.ThemeEquivalent(prefabEntity);
             bool adaptEdge=themedEdge!=Entity.Null&&themedEdge!=prefabEntity;
-            if (!crossing && !(center&&automatic) && !yellow && !medianOwned && !adaptEdge) { Remove(source); return; }
+            Entity nativeColor=prefabEntity;
+            if(preserveNative)
+            {
+                // Manual replacement/hiding still owns its selected path. A
+                // manual native-restore intent also wins over automatic color.
+                if(automatic&&!medianOwned&&!NodeLinePolicy.IsProtected(prefab.name)&&NodeLinePolicy.IsLineGeometry(prefab)&&!lineSystem.KeepsNativeHighwayLine(owner,source))
+                {
+                    var nativeCurve=EntityManager.GetComponentData<Curve>(source).m_Bezier;
+                    byte nativeRole=PreservedTrafficRole(lineSystem,owner,nativeCurve);
+                    bool nativeBoundary=nativeRole!=0?nativeRole==1:EntityManager.HasComponent<Node>(owner)?PreservedNodeBoundary(lineSystem,owner,nativeCurve):center||opposing;
+                    if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.nativeRoleDecision","source="+source+" owner="+owner+" prefab="+prefabEntity+" name="+prefab.name+" trafficRole="+nativeRole+" yellowBoundary="+nativeBoundary+" a="+nativeCurve.a+" b="+nativeCurve.b+" c="+nativeCurve.c+" d="+nativeCurve.d);
+                    nativeColor=lineSystem.NativeJunctionColor(prefabEntity,nativeBoundary,prefab.name.IndexOf("Edge",StringComparison.OrdinalIgnoreCase)>=0);
+                }
+                yellow=false;adaptEdge=false;
+            }
+            bool nativeColorChanged=preserveNative&&nativeColor!=prefabEntity;
+            if(preserveNative&&!medianOwned&&!nativeColorChanged){Remove(source);return;}
+            if (!crossing && !(center&&automatic) && !yellow && !medianOwned && !adaptEdge && !nativeColorChanged) { Remove(source); return; }
 
             if (!_replacements.ContainsKey(source) && EntityManager.HasComponent<Game.Tools.Hidden>(source)) { Defer(source); return; }
 
@@ -328,7 +366,7 @@ namespace MedianGrassReplacement.Systems
 
             var curve = EntityManager.GetComponentData<Curve>(source).m_Bezier;
 
-            var curves = new List<Bezier4x3>(); Entity paintPrefab = adaptEdge?themedEdge:yellow?lineSystem.ResolveCenterStyle(prefabEntity):prefabEntity;
+            var curves = new List<Bezier4x3>(); Entity paintPrefab = preserveNative?nativeColor:adaptEdge?themedEdge:yellow?lineSystem.ResolveCenterStyle(prefabEntity):prefabEntity;
 
             if(hideCenter||segmentHidden||nativeHidden||dividerOwned||removedEdge||highwayOwned){}
             else if (crossing && !invisible)
@@ -395,6 +433,7 @@ namespace MedianGrassReplacement.Systems
 
             }
 
+            else if(preserveNative&&!medianOwned){curves.Add(curve);}
             else if(adaptEdge&&!medianOwned){curves.Add(curve);}
             else if(nodeBoundary && yellow && !medianOwned) {if(paintPrefab==prefabEntity){Remove(source);return;}curves.Add(curve);}
             else if (!crossing && !medianOwned)
@@ -452,6 +491,7 @@ namespace MedianGrassReplacement.Systems
             Remove(source);
 
             next.Keys.AddRange(keys); _replacements[source] = next;
+            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.replacedByCurbside","source="+source+" owner="+owner+" sourcePrefab="+prefabEntity+" paintPrefab="+paintPrefab+" preserveNative="+preserveNative+" generated="+string.Join(",",next.Paint));
 
             EntityManager.AddComponent<MGRReplacedPaint>(source);
 
@@ -464,7 +504,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
-            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("IntersectionPaintSystem",started);}
+            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("IntersectionPaintSystem",started);ModDiagnostics.RuntimeCosts.Workload("IntersectionPaintSources",_replacements.Count,_backlog.Count);}
         }
         private void UpdateMeasured()
 
@@ -473,6 +513,8 @@ namespace MedianGrassReplacement.Systems
             if (Mod.Saving) return;
 
             if (!_active || Mod.Settings == null) return;
+            _preservedAnchors.Clear();
+            _preservedTraffic.Clear();
 
             try
 
@@ -607,10 +649,10 @@ namespace MedianGrassReplacement.Systems
             }
 
             catch (Exception error) { Restore(); Enabled = false; Mod.Log.Error("Intersection paint stopped: " + error); }
+            finally { _preservedAnchors.Clear(); _preservedTraffic.Clear(); }
 
         }
 
     }
 
 }
-

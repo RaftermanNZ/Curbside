@@ -1,7 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Dll)
 $ErrorActionPreference='Stop'
-if(!$env:CURBSIDE_CECIL){throw 'Set CURBSIDE_CECIL to your installed Mono.Cecil.dll (for example from ILSpy).'}
-Add-Type -Path $env:CURBSIDE_CECIL
+Add-Type -Path 'C:/Users/Trevor/AppData/Local/Programs/ILSpy/Mono.Cecil.dll'
 $assembly=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Resolve-Path -LiteralPath $Dll))
 try{
  $types=$assembly.MainModule.Types

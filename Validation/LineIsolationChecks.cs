@@ -1,4 +1,5 @@
 using System;
+using Unity.Entities;
 using System.Reflection;
 using Colossal.Mathematics;
 using Unity.Mathematics;
@@ -10,6 +11,33 @@ class LineIsolationChecks
  static void Check(bool ok,string message){count++;if(!ok)throw new Exception(message);}
  static void Main()
  {
+  // Connected-owner targeting: owner of the raycast is not necessarily the
+  // owner of the closest painted path at a merge boundary.
+  var choiceType=A.GetType("MedianGrassReplacement.Systems.HoverLineChoice",true);
+  var choiceListType=typeof(System.Collections.Generic.List<>).MakeGenericType(choiceType);
+  var pick=M("HoverLinePolicy","Pick");
+  var fields=BindingFlags.Instance|BindingFlags.NonPublic;
+  for(int mirror=-1;mirror<=1;mirror+=2)for(int angle=0;angle<8;angle++){
+   float radians=angle*math.PI/4;
+   float3 Rotate(float3 p)=>new float3(mirror*p.x*math.cos(radians)-p.z*math.sin(radians),p.y,mirror*p.x*math.sin(radians)+p.z*math.cos(radians));
+   var choices=(System.Collections.IList)Activator.CreateInstance(choiceListType);
+   void AddChoice(int owner,bool node,float offset){
+    var choice=Activator.CreateInstance(choiceType);
+    choiceType.GetField("Target",fields).SetValue(choice,new Entity{Index=owner,Version=2});
+    choiceType.GetField("Node",fields).SetValue(choice,node);
+    var path=new Bezier4x3(Rotate(new float3(offset,0,-10)),Rotate(new float3(offset,0,-3)),Rotate(new float3(offset,0,3)),Rotate(new float3(offset,0,10)));
+    choiceType.GetField("Paths",fields).SetValue(choice,new System.Collections.Generic.List<Bezier4x3>{path});choices.Add(choice);
+   }
+   AddChoice(100,true,0);AddChoice(200,false,8);
+   foreach(int expected in new[]{0,1}){
+    int selected=(int)pick.Invoke(null,new object[]{choices,Rotate(new float3(expected*8+.1f,0,0))});
+    Check(selected==expected,"Connected owner path is unreachable");
+    var owner=(Entity)choiceType.GetField("Target",fields).GetValue(choices[selected]);
+    Check(owner.Index==(expected==0?100:200),"Selected path routed to raycast owner instead of actual owner");
+    Check((bool)choiceType.GetField("Node",fields).GetValue(choices[selected])==(expected==0),"Node/section apply mode mismatches selected owner");
+   }
+   Check((int)pick.Invoke(null,new object[]{choices,Rotate(new float3(20,0,0))})==-1,"Distant miss edits an unrelated path");
+  }
   var matches=M("GranularHighwayLinePolicy","Matches");var valid=M("GranularHighwayLinePolicy","ValidStyle");
   var curve=new Bezier4x3(new float3(0,0,0),new float3(1,0,4),new float3(2,0,8),new float3(4,0,12));
   Check((bool)matches.Invoke(null,new object[]{curve,curve}),"Same line not matched");
@@ -82,6 +110,26 @@ class LineIsolationChecks
   var otherBoundary=new Bezier4x3(halfA.a+10,halfA.b+10,halfA.c+10,halfA.d+10);var otherEnd=new Bezier4x3(halfB.a+10,halfB.b+10,halfB.c+10,halfB.d+10);
   sectionList.Clear();Section(otherEnd,.5f,1,false);Section(halfB,.5f,1,true);Section(otherBoundary,0,.5f,false);Section(halfA,0,.5f,true);
   Check(Pair(out paired)&&paired.Count==4&&(bool)matches.Invoke(null,new object[]{halfA,paired[0]})&&(bool)matches.Invoke(null,new object[]{otherBoundary,paired[2]}),"Section side order changed or pair ownership leaked");
+  var addEditable=M("HighwaySectionPaintPolicy","AddEditable");
+  for(int mirror=-1;mirror<=1;mirror+=2)for(int rotation=0;rotation<8;rotation++)for(int reverse=0;reverse<2;reverse++)
+  {
+   var editable=new System.Collections.Generic.List<Bezier4x3>();
+   float angle=rotation*math.PI/4;
+   float3 Transform(float3 v)=>new float3(mirror*v.x*math.cos(angle)-v.z*math.sin(angle),v.y,mirror*v.x*math.sin(angle)+v.z*math.cos(angle))+new float3(100,20,-200);
+   for(int piece=0;piece<5;piece++)
+   {
+    // Odd native piece count and shortened tapers must remain editable without
+    // inventing full-width surface-interpolation paths or joining neighboring lanes.
+    float x=piece*7;var sampleCurve=new Bezier4x3(Transform(new float3(x,0,0)),Transform(new float3(x+2,0,1)),Transform(new float3(x+4,0,3)),Transform(new float3(x+6,0,4)));
+    if(reverse==1)sampleCurve=new Bezier4x3(sampleCurve.d,sampleCurve.c,sampleCurve.b,sampleCurve.a);
+    addEditable.Invoke(null,new object[]{editable,sampleCurve});
+    Check(editable.Count==piece+1&&editable[piece].a.Equals(sampleCurve.a)&&editable[piece].b.Equals(sampleCurve.b)&&editable[piece].c.Equals(sampleCurve.c)&&editable[piece].d.Equals(sampleCurve.d),"Native piece shape changed");
+    addEditable.Invoke(null,new object[]{editable,new Bezier4x3(sampleCurve.d,sampleCurve.c,sampleCurve.b,sampleCurve.a)});
+    Check(editable.Count==piece+1,"Reverse duplicate created a phantom selectable path");
+   }
+   var invalid=editable[0];invalid.b.x=float.NaN;addEditable.Invoke(null,new object[]{editable,invalid});Check(editable.Count==5,"Invalid native piece accepted");
+   var bow=editable[0];bow.b+=new float3(0,0,2);addEditable.Invoke(null,new object[]{editable,bow});Check(editable.Count==6,"Different interior sampleCurve with matching endpoints lost");
+  }
   Console.WriteLine("PASS: "+count+" line identity/style/native-reference and roadside preview/apply/remove cases. Native save and visual validation pending.");
  }
 }

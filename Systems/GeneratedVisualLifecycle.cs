@@ -84,6 +84,7 @@ namespace MedianGrassReplacement.Systems
         {
 
             var em=world.EntityManager;if(!em.Exists(entity)) return;
+            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("visual.retireRequestedByCurbside","entity="+entity+" saving="+Mod.Saving+" alreadyDeleted="+em.HasComponent<Deleted>(entity));
 
             // Use native Deleted retirement during saves as well as live edits.
             // Never rewrite the renderer's private culling records or timers.
@@ -208,4 +209,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

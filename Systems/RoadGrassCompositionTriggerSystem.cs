@@ -111,7 +111,11 @@ namespace MedianGrassReplacement.Systems
 
 
         protected override void OnUpdate()
-
+        {
+            long started=ModDiagnostics.RuntimeCosts.Begin();
+            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("RoadGrassCompositionTriggerSystem",started);}
+        }
+        private void UpdatePerformanceCore()
         {
 
             if(_gameOrEditorActive)GlobalSurfaceMaterialSystem.NotifyRenderActivity();
@@ -141,4 +145,3 @@ namespace MedianGrassReplacement.Systems
     }
 
 }
-

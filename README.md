@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-`main` and tag `source-test122` contain the Test122 update source. Earlier source tags remain available. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
+`main` and tag `source-test132` contain the Test132 update source. Earlier source tags remain available. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
 
 ## Build locally on Windows
 

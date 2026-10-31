@@ -16,6 +16,11 @@ namespace MedianGrassReplacement.Systems
     }
     internal static class HighwaySectionPaintPolicy
     {
+        internal static void AddEditable(List<Bezier4x3> paths,Bezier4x3 path)
+        {
+            if(!math.all(math.isfinite(path.a))||!math.all(math.isfinite(path.b))||!math.all(math.isfinite(path.c))||!math.all(math.isfinite(path.d)))return;
+            if(!paths.Exists(p=>GranularHighwayLinePolicy.Matches(p,path)))paths.Add(path);
+        }
         internal static HighwaySectionPath Forward(Bezier4x3 path,float start,float end,bool left)
         {
             return start<=end?new HighwaySectionPath{Curve=path,Start=start,End=end,Left=left}
@@ -86,9 +91,29 @@ namespace MedianGrassReplacement.Systems
             }
             return HighwaySectionPaintPolicy.Pairs(sourcePaths,out paths);
         }
+        internal bool NativeHighwayEditableEdges(Entity road,out List<Bezier4x3> paths,int role=2)
+        {
+            paths=new List<Bezier4x3>();
+            if(!RoadSurfacePolicy.IsHighway(EntityManager,road)||!RoadSurfacePolicy.IsPaved(EntityManager,road)||!EntityManager.HasBuffer<Game.Net.SubLane>(road))return false;
+            int count=0;
+            foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(road,true))
+            {
+                if(++count>256){paths.Clear();return false;}var source=entry.m_SubLane;
+                if(!EntityManager.HasComponent<Curve>(source)||!EntityManager.HasComponent<PrefabRef>(source)||EntityManager.HasComponent<Deleted>(source)||EntityManager.HasComponent<Game.Tools.Temp>(source)||EntityManager.HasComponent<MGRCurbMarking>(source)||EntityManager.HasComponent<MGRIntersectionPaint>(source)||_nodeDividerExternal.Contains(EntityManager,source))continue;
+                if(!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab,out var prefab)||prefab==null||!NodeLinePolicy.IsLineGeometry(prefab)||HighwayNodePaintPolicy.Role(prefab.name,false)!=role)continue;
+                var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
+                if(Valid(path))HighwaySectionPaintPolicy.AddEditable(paths,path);
+            }
+            return paths.Count>0;
+        }
         internal bool UsesNativeOneWayHighwayEdges(Entity road)
         {
             if(!NativeHighwaySectionPlan(road,2,out var paths)||paths.Count!=4)return false;
+            return IsOneWayHighway(road);
+        }
+        internal bool IsOneWayHighway(Entity road)
+        {
+            if(!RoadSurfacePolicy.IsHighway(EntityManager,road)||!EntityManager.HasComponent<Composition>(road))return false;
             var traffic=TrafficLanes(EntityManager.GetComponentData<Composition>(road).m_Edge);if(traffic.Count==0)return false;
             bool reverse=traffic[0].Reverse;foreach(var lane in traffic)if(lane.Reverse!=reverse)return false;
             return true;

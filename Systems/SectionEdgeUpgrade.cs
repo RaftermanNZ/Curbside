@@ -14,7 +14,7 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class CurbLineEmissionSystem
     {
-        internal bool TrySectionEdgePlan(Entity road,out List<Bezier4x3> paths)
+        internal bool TrySectionEdgePlan(Entity road,out List<Bezier4x3> paths,bool editing=false)
         {
             paths=new List<Bezier4x3>();
             if(!RoadSurfacePolicy.IsPaved(EntityManager,road)||!EntityManager.HasComponent<Composition>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return false;
@@ -22,6 +22,7 @@ namespace MedianGrassReplacement.Systems
             if(!EntityManager.HasComponent<NetCompositionData>(composition)||!EntityManager.HasBuffer<NetCompositionLane>(composition))return false;
             float width=EntityManager.GetComponentData<NetCompositionData>(composition).m_Width;
             if(!math.isfinite(width)||width<=0)return false;
+            if(editing&&NativeHighwayEditableEdges(road,out var editable)){paths=editable;return true;}
             if(NativeHighwaySectionPlan(road,2,out var nativeEdges)&&nativeEdges.Count==4){paths=nativeEdges;return true;}
             var geometry=EntityManager.GetComponentData<EdgeGeometry>(road);
             var lanes=EntityManager.GetBuffer<NetCompositionLane>(composition,true);var anchors=ReadCurbAnchors(composition,lanes);
