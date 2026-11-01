@@ -518,5 +518,6 @@
   "texture selection changed": "doku seçimi değiştirildi",
   "upgrades": "yükseltmeler",
   "− Applied upgrades": "− Uygulanan yükseltmeler",
-  "− Diagnostics": "− Teşhis"
+  "− Diagnostics": "− Teşhis",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Yol ve kaldırım dokularını varlıklara ve yüzeylere uygulayın (Deneysel)"
 }

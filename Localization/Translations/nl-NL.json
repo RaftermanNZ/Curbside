@@ -518,5 +518,6 @@
   "texture selection changed": "textuurselectie veranderd",
   "upgrades": "upgrades",
   "− Applied upgrades": "− Toegepaste upgrades",
-  "− Diagnostics": "− Diagnostiek"
+  "− Diagnostics": "− Diagnostiek",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Pas weg- en trottoirtekeningen toe op objecten en oppervlakken (Experimenteel)"
 }

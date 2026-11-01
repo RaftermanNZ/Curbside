@@ -518,5 +518,6 @@
   "texture selection changed": "val á áferð breytt",
   "upgrades": "uppfærslur",
   "− Applied upgrades": "− Færðar inn uppfærslur",
-  "− Diagnostics": "− Greining"
+  "− Diagnostics": "− Greining",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Nota veg- og gangstéttatextúra á eignir og yfirborð (Tilraunaútgáfa)"
 }

@@ -518,5 +518,6 @@
   "texture selection changed": "tekstuurivalinta muuttui",
   "upgrades": "päivitykset",
   "− Applied upgrades": "− Käytetyt päivitykset",
-  "− Diagnostics": "− Diagnostiikka"
+  "− Diagnostics": "− Diagnostiikka",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Käytä tie- ja jalkakäytävätekstuureja omaisuuskohteisiin ja pintoihin (Kokeellinen)"
 }

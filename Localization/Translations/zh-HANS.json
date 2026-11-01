@@ -518,5 +518,6 @@
   "texture selection changed": "纹理选择已更改",
   "upgrades": "升级",
   "− Applied upgrades": "− 已应用升级",
-  "− Diagnostics": "− 诊断"
+  "− Diagnostics": "− 诊断",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "将道路和人行道纹理应用到资产和表面 (实验性)"
 }

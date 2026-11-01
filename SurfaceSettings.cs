@@ -16,9 +16,10 @@ namespace MedianGrassReplacement
         [SettingsUIHidden]public int GlobalRoadSurface{get;set;}=1;
         [SettingsUIHidden]public int GlobalSidewalkSurface{get;set;}=1;
         private string _globalRoadTexture=SurfaceTextureCatalog.BundledRoad,_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;
-        private bool _surfaceAssets=false;
+
         [SettingsUIDropdown(typeof(Setting),nameof(GetGlobalTextureChoices))][SettingsUIValueVersion(typeof(Setting),nameof(GetSurfaceVersion))][SettingsUISection(kTexturesTab,kSurfaceGroup)]public string GlobalRoadTexture{get=>_globalRoadTexture;set{string next=value??"";if(next==_globalRoadTexture)return;_globalRoadTexture=next;GlobalSurfaceChanged();}}
         [SettingsUIDropdown(typeof(Setting),nameof(GetGlobalTextureChoices))][SettingsUIValueVersion(typeof(Setting),nameof(GetSurfaceVersion))][SettingsUISection(kTexturesTab,kSurfaceGroup)]public string GlobalSidewalkTexture{get=>_globalSidewalkTexture;set{string next=value??"";if(next==_globalSidewalkTexture)return;_globalSidewalkTexture=next;GlobalSurfaceChanged();}}
+        private bool _surfaceAssets=false;
         [SettingsUISection(kTexturesTab,kSurfaceGroup)]public bool SurfaceTexturesOnAssets{get=>_surfaceAssets;set{if(value==_surfaceAssets)return;_surfaceAssets=value;GlobalSurfaceChanged();}}
         [Exclude][SettingsUIButton][SettingsUISection(kTexturesTab,kLibraryGroup)]public bool OpenTextureFolder{set{if(value){try{string folder=System.IO.Path.GetFullPath(TextureFolder);System.IO.Directory.CreateDirectory(folder);System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo{FileName=folder,UseShellExecute=true});}catch(System.Exception error){Mod.Log.Warn("Cannot open texture folder: "+error.Message);}}}}
         public DropdownItem<string>[] GetGlobalTextureChoices()=>SurfaceTextureCatalog.WithCurrent(SurfaceTextureCatalog.Items(TextureFolder),GlobalRoadTexture,GlobalSidewalkTexture);
@@ -26,6 +27,9 @@ namespace MedianGrassReplacement
         internal void MigrateSurfaceDefaults()
         {
             if(SurfaceDefaultVersion<1){if(string.IsNullOrWhiteSpace(RoadTextureA))RoadTextureA=SurfaceTextureCatalog.BundledRoad;if(string.IsNullOrWhiteSpace(SidewalkTextureA))SidewalkTextureA=SurfaceTextureCatalog.BundledSidewalk;SurfaceDefaultVersion=1;}
+            // Require a fresh experimental opt-in when upgrading older settings.
+            // Subsequent choices persist normally; this is not a per-load reset.
+            if(SurfaceDefaultVersion<2){_surfaceAssets=false;SurfaceDefaultVersion=2;}
             if(GlobalTextureSelectionVersion>=1)return;
             _globalRoadTexture=GlobalSurfacePolicy.LegacyChoice(GlobalRoadSurface,RoadTextureA,RoadTextureB,SurfaceTextureCatalog.BundledRoad);
             _globalSidewalkTexture=GlobalSurfacePolicy.LegacyChoice(GlobalSidewalkSurface,SidewalkTextureA,SidewalkTextureB,SurfaceTextureCatalog.BundledSidewalk);
@@ -42,6 +46,6 @@ namespace MedianGrassReplacement
         [SettingsUISection(kMainTab,kParkingGroup)]public bool CloseParkingAtBuildingEntrances{get=>_closeAtAccess;set{if(value==_closeAtAccess)return;_closeAtAccess=value;ParkingPaintChanged();}}
         private bool _hatchAtAccess,_closeAtAccess;
         private void ParkingPaintChanged(){if(_runtimeEventsEnabled){ApplyAndSave();CurbLineEmissionSystem.RequestRoadRefresh();}}
-        private void SetSurfaceDefaults(){_globalRoadTexture=SurfaceTextureCatalog.BundledRoad;_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;_roadSurfaceUv=.16f;_sidewalkSurfaceTiling=1f;_surfaceAssets=false;GlobalTextureSelectionVersion=_runtimeEventsEnabled?1:0;SurfaceDefaultVersion=1;_hatchAtAccess=true;_closeAtAccess=false;if(_runtimeEventsEnabled){SurfaceTextureCatalog.Invalidate();GlobalSurfaceMaterialSystem.RequestRefresh();CurbLineEmissionSystem.RequestRoadRefresh();}}
+        private void SetSurfaceDefaults(){_globalRoadTexture=SurfaceTextureCatalog.BundledRoad;_globalSidewalkTexture=SurfaceTextureCatalog.BundledSidewalk;_roadSurfaceUv=.16f;_sidewalkSurfaceTiling=1f;_surfaceAssets=false;GlobalTextureSelectionVersion=_runtimeEventsEnabled?1:0;SurfaceDefaultVersion=2;_hatchAtAccess=true;_closeAtAccess=false;if(_runtimeEventsEnabled){SurfaceTextureCatalog.Invalidate();GlobalSurfaceMaterialSystem.RequestRefresh();CurbLineEmissionSystem.RequestRoadRefresh();}}
     }
 }

@@ -518,5 +518,6 @@
   "texture selection changed": "テクスチャ選択が変更されました",
   "upgrades": "アップグレード",
   "− Applied upgrades": "− 適用されたアップグレード",
-  "− Diagnostics": "− 診断"
+  "− Diagnostics": "− 診断",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "道路と歩道のテクスチャを資産と表面に適用します (実験的)"
 }

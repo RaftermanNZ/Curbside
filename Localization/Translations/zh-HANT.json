@@ -518,5 +518,6 @@
   "texture selection changed": "材質選擇已更改",
   "upgrades": "升級",
   "− Applied upgrades": "− 已套用升級",
-  "− Diagnostics": "− 診斷"
+  "− Diagnostics": "− 診斷",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "將道路與人行道材質應用到資產與表面 (實驗性)"
 }

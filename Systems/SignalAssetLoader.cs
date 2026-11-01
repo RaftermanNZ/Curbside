@@ -351,7 +351,3 @@ namespace GardenCitySignals
   }
  }
 }
-
-
-
-

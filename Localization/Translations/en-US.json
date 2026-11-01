@@ -518,5 +518,6 @@
   "texture selection changed": "texture selection changed",
   "upgrades": "upgrades",
   "− Applied upgrades": "− Applied upgrades",
-  "− Diagnostics": "− Diagnostics"
+  "− Diagnostics": "− Diagnostics",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Apply road and sidewalk textures to assets and surfaces (Experimental)"
 }

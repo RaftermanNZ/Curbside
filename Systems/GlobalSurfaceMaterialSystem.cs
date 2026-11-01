@@ -74,7 +74,37 @@ namespace MedianGrassReplacement.Systems
             }
             _uvPatches.Clear();
             foreach(var patch in _patches.Values)if(patch.Material!=null&&patch.Material.HasProperty(patch.Property)&&MaterialOwnership.CanRestore(true,patch.Material.GetTexture(patch.Property),patch.Applied))patch.Material.SetTexture(patch.Property,patch.Before);
-            _patches.Clear();if(dispose){foreach(var texture in _textures.Values)if(texture!=null)UnityEngine.Object.Destroy(texture);_textures.Clear();_bytes=0;_roadTexture=_walkTexture=null;_loadErrors.Clear();}
+            _patches.Clear();if(dispose)
+            {
+                // A copied material or a later third-party edit may still hold
+                // one of our textures. Never destroy it while it is referenced.
+                var retained=ReferencedTextures();var released=new List<string>();
+                foreach(var pair in _textures)if(pair.Value==null||!retained.Contains(pair.Value))
+                {if(pair.Value!=null)UnityEngine.Object.Destroy(pair.Value);released.Add(pair.Key);}
+                foreach(var key in released)_textures.Remove(key);
+                _bytes=0;foreach(var texture in _textures.Values)if(texture!=null)_bytes+=(long)texture.width*texture.height*16/3;
+                _roadTexture=_walkTexture=null;_loadErrors.Clear();
+            }
+        }
+        private void RecoverUntrackedAreas()
+        {
+            var map=Colossal.IO.AssetDatabase.AssetDatabase.global?.resources?.unityObjectsMap;
+            if(map==null)return;
+            int restored=0,unresolved=0;
+            foreach(var material in Resources.FindObjectsOfTypeAll<Material>())
+            {
+                if(material==null||material.shader==null||!material.name.StartsWith("Area batch (",StringComparison.Ordinal)
+                    ||material.shader.name.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0||!material.HasProperty("_BaseColorMap"))continue;
+                var current=material.GetTexture("_BaseColorMap");
+                if(current==null||!SurfaceRestorePolicy.IsCurbsideTexture(current.name)||_patches.ContainsKey((material,"_BaseColorMap")))continue;
+                bool hasOriginal=_vanilla.TryGetAreaOriginal(material,out var original);
+                if(!SurfaceRestorePolicy.CanRecover(true,map.ContainsObject(material),map.ContainsObject(current),false,current.name,hasOriginal,current==original))
+                {if(!hasOriginal)unresolved++;continue;}
+                material.SetTexture("_BaseColorMap",original);restored++;
+            }
+            // One summary per explicit refresh, not automatic per-surface tracing.
+            if(restored>0)Mod.Log.Info("Surface restoration recovered "+restored+" untracked Curbside area textures from prefab originals.");
+            if(unresolved>0)Mod.Log.Warn("Surface restoration: "+unresolved+" Curbside area textures have no unambiguous loaded original; left intact rather than guessing.");
         }
         private bool ApplyProperty(Material material,string property,Texture2D replacement,int role)
         {
@@ -93,11 +123,17 @@ namespace MedianGrassReplacement.Systems
             // Keep any cached image still referenced by a live material (including another mod).
             var selected=new HashSet<string>();
             foreach(var value in new[]{Mod.Settings.GlobalRoadTexture,Mod.Settings.GlobalSidewalkTexture})try{string path=SurfaceTextureCatalog.Resolve(value??"");if(string.IsNullOrWhiteSpace(path))continue;var file=new FileInfo(Path.GetFullPath(path.Trim().Trim('"')));if(file.Exists)selected.Add(file.FullName+"|"+file.Length+"|"+file.LastWriteTimeUtc.Ticks);}catch(Exception){/* Load reports the invalid selection below. */}
-            var retained=new HashSet<Texture>();
-            foreach(var material in Resources.FindObjectsOfTypeAll<Material>())if(material!=null&&material.shader!=null)foreach(var property in material.GetTexturePropertyNames()){var texture=material.GetTexture(property);if(texture!=null)retained.Add(texture);}
+            var retained=ReferencedTextures();
             var stale=new List<string>();foreach(var pair in _textures)if(pair.Value==null||!selected.Contains(pair.Key)&&!retained.Contains(pair.Value))stale.Add(pair.Key);
             foreach(var key in stale){var texture=_textures[key];if(texture!=null){_bytes-=(long)texture.width*texture.height*16/3;UnityEngine.Object.Destroy(texture);}_textures.Remove(key);}
             _bytes=0;foreach(var texture in _textures.Values)if(texture!=null)_bytes+=(long)texture.width*texture.height*16/3;
+        }
+        private static HashSet<Texture> ReferencedTextures()
+        {
+            var retained=new HashSet<Texture>();
+            foreach(var material in Resources.FindObjectsOfTypeAll<Material>())if(material!=null&&material.shader!=null)
+                foreach(var property in material.GetTexturePropertyNames()){var texture=material.GetTexture(property);if(texture!=null)retained.Add(texture);}
+            return retained;
         }
         private void RefreshTextures()
         {
@@ -159,14 +195,31 @@ namespace MedianGrassReplacement.Systems
             Status="Global surfaces: "+roads+" road and "+walks+" sidewalk material(s). Cache "+_textures.Count+" textures, "+(_bytes/1048576)+" MiB estimate (GPU/native overhead extra). "+string.Join(" ",errors);if(Status==_lastReport)return;_lastReport=Status;Mod.Log.Info(Status);
             if((road!=null&&roads==0||walk!=null&&walks==0)&&candidates.Count>0)Mod.Log.Warn("Global surface unmatched network materials: "+string.Join(", ",candidates));
         }
-        protected override void OnGamePreload(Purpose purpose,GameMode mode){Restore(true);_vanilla.Clear();_active=false;_refresh=true;_discover=false;base.OnGamePreload(purpose,mode);}
+        protected override void OnGamePreload(Purpose purpose,GameMode mode){Restore(true);_vanilla.Clear();_active=false;_disabledRestored=false;_refresh=true;_discover=false;base.OnGamePreload(purpose,mode);}
         protected override void OnGameLoadingComplete(Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_active=(mode&GameMode.GameOrEditor)!=GameMode.None;_refresh=true;}
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
             try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("GlobalSurfaceMaterialSystem",started);}
         }
-        private void UpdateMeasured(){if(!_active||Mod.Settings==null||Mod.Saving)return;if(Mod.Settings.DisableTextureReplacement){if(_patches.Count>0||_textures.Count>0)Restore(true);_refresh=true;_discover=false;_uvRefresh=false;return;}if(_refresh){_refresh=false;_discover=false;_uvRefresh=false;Restore(false);_vanilla.RefreshCatalog();RefreshAreaCatalog();RefreshTextures();Apply();}else if(_uvRefresh){_uvRefresh=false;ApplyUv();}else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}}
+        private bool _disabledRestored;
+        private void UpdateMeasured()
+        {
+            if(!_active||Mod.Settings==null||Mod.Saving)return;
+            if(Mod.Settings.DisableTextureReplacement)
+            {
+                if(!_disabledRestored){_vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(true);_disabledRestored=true;}
+                _refresh=true;_discover=false;_uvRefresh=false;return;
+            }
+            _disabledRestored=false;
+            if(_refresh)
+            {
+                _refresh=false;_discover=false;_uvRefresh=false;
+                _vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();
+            }
+            else if(_uvRefresh){_uvRefresh=false;ApplyUv();}
+            else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}
+        }
         protected override void OnDestroy(){Restore(true);_vanilla.Clear();base.OnDestroy();}
     }
 }

@@ -49,7 +49,9 @@ namespace MedianGrassReplacement.Systems
         }
         internal void AddAreaPrefab(AreaPrefab prefab)
         {
-            if(prefab==null||!VanillaSurfacePolicy.TargetArea(prefab.name)||!prefab.TryGet<RenderedArea>(out var rendered)||rendered==null)return;
+            // Catalog older replacement targets for recovery; AllowsArea still
+            // limits NEW replacements to the two approved vanilla pavements.
+            if(prefab==null||string.IsNullOrEmpty(prefab.name)||!prefab.TryGet<RenderedArea>(out var rendered)||rendered==null)return;
             var original=rendered.m_Material;
             bool usesTexture=rendered.m_Version==RenderedArea.Version.OverrideMaterial&&rendered.m_BaseColorMap!=null;
             var source=new AreaSource{Prefab=prefab,TextureAsset=usesTexture?(TextureAsset)rendered.m_BaseColorMap:null,HasTextureReference=usesTexture,
@@ -84,6 +86,22 @@ namespace MedianGrassReplacement.Systems
             if(!asset.isValid||!asset.isBuiltin||!asset.isObjectLoaded||loadedTexture==null||loadedTexture.FieldType!=typeof(Texture))return false;
             var expected=loadedTexture.GetValue(asset) as Texture;
             return expected!=null&&current==expected;
+        }
+        internal bool TryGetAreaOriginal(Material material,out Texture texture)
+        {
+            texture=null;
+            if(material==null||material.shader==null||material.shader.name.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0
+                ||!areas.TryGetValue(material.name,out var source)||source.Ambiguous||source.Prefab==null)return false;
+            // Custom areas recover their own original, never a guessed vanilla
+            // substitute. No asset loading, template mutation or native access.
+            if(source.HasTextureReference)
+            {
+                var asset=source.TextureAsset;
+                if(asset==null||!asset.isValid||!asset.isObjectLoaded||loadedTexture==null||loadedTexture.FieldType!=typeof(Texture))return false;
+                texture=loadedTexture.GetValue(asset) as Texture;
+            }
+            else texture=source.OriginalTexture;
+            return texture!=null&&!SurfaceRestorePolicy.IsCurbsideTexture(texture.name);
         }
         internal void Begin(ManagedBatchSystem system)
         {

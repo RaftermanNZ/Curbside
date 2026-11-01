@@ -518,5 +518,6 @@
   "texture selection changed": "выбор текстуры изменён",
   "upgrades": "улучшения",
   "− Applied upgrades": "− Применённые улучшения",
-  "− Diagnostics": "− Диагностика"
+  "− Diagnostics": "− Диагностика",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Применять текстуры дорог и тротуаров к объектам и поверхностям (Экспериментально)"
 }

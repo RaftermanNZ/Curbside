@@ -518,5 +518,6 @@
   "texture selection changed": "텍스처 선택이 변경됨",
   "upgrades": "업그레이드",
   "− Applied upgrades": "− 적용된 업그레이드",
-  "− Diagnostics": "− 진단"
+  "− Diagnostics": "− 진단",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "도로 및 보도 텍스처를 자산과 표면에 적용 (실험적)"
 }

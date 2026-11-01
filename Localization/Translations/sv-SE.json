@@ -518,5 +518,6 @@
   "texture selection changed": "texturval ändrat",
   "upgrades": "uppgraderingar",
   "− Applied upgrades": "− Tillämpade uppgraderingar",
-  "− Diagnostics": "− Diagnostik"
+  "− Diagnostics": "− Diagnostik",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Applicera väg- och trottoartekurer på tillgångar och ytor (Experimentell)"
 }

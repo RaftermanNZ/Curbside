@@ -518,5 +518,6 @@
   "texture selection changed": "změna výběru textury",
   "upgrades": "vylepšení",
   "− Applied upgrades": "− Aplikována vylepšení",
-  "− Diagnostics": "− Diagnostika"
+  "− Diagnostics": "− Diagnostika",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Použít textury silnic a chodníků na objekty a povrchy (Experimentální)"
 }

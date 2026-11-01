@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1-test.146 — Surface restoration update
+
+- Improved restoration of surfaces previously affected by Curbside texture replacement. Identifiable leftover replacements can now recover the surface's own available original texture, including modded surfaces.
+- Recovery runs automatically on texture refresh/loading, including when the optional replacement setting starts off. Missing or ambiguous originals are left intact and reported rather than replaced with a guessed texture.
+- Prevented cleanup from destroying cached textures still referenced by live materials.
+- Marked "Apply road and sidewalk textures to assets and surfaces" as Experimental, with updated labels in all supported languages. The option defaults off, and older settings require a fresh opt-in.
+- New optional surface replacement remains limited to the two approved vanilla pavement surfaces. Global road, sidewalk and grass replacement controls remain unchanged.
+
+Validation: 23 offline suites passed. Test sessions loaded saves and exercised texture refreshes without Curbside warnings/errors. Legacy/cross-session recovery is not fully verified; the original surface pack must be available. Pavement Surface 02 may still remain unchanged; surface tiling is unchanged. No line-planner or traffic-signal asset changes are included.
+
+
 0.5.1-test.142 — Surface replacement hotfix
 
 - "Apply road and sidewalk textures to assets and surfaces" is off by default for new/reset settings. Existing explicit preferences are retained.

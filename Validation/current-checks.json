@@ -21,6 +21,7 @@
     "NativeJunctionChecks",
     "NativeTrafficBoundaryChecks",
     "ActionJournalChecks",
-    "VanillaSurfaceChecks"
+    "VanillaSurfaceChecks",
+    "SurfaceRestoreChecks"
   ]
 }

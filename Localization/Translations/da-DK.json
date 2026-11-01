@@ -518,5 +518,6 @@
   "texture selection changed": "teksturvalg ændret",
   "upgrades": "opgraderinger",
   "− Applied upgrades": "− Anvendte opgraderinger",
-  "− Diagnostics": "− Diagnostik"
+  "− Diagnostics": "− Diagnostik",
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Anvend vej- og fortovsteksturer på aktiver og overflader (Eksperimentel)"
 }

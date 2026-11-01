@@ -20,7 +20,11 @@ class VanillaSurfaceChecks
         Check(!(bool)enabled.GetValue(setting),"New/reset defaults enabled asset replacement");
         enabled.SetValue(setting,true);type.GetProperty("SurfaceDefaultVersion").SetValue(setting,1);type.GetProperty("GlobalTextureSelectionVersion").SetValue(setting,1);
         type.GetMethod("MigrateSurfaceDefaults",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(setting,null);
-        Check((bool)enabled.GetValue(setting),"Existing explicit opt-in was reset by migration");
+        Check(!(bool)enabled.GetValue(setting),"Old enabled value bypassed fresh experimental opt-in");
+        enabled.SetValue(setting,true);
+        type.GetMethod("MigrateSurfaceDefaults",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(setting,null);
+        Check((bool)enabled.GetValue(setting),"Explicit experimental opt-in was reset on later migration");
+        Check(!Array.Exists(enabled.GetCustomAttributes(false),attribute=>attribute.GetType().Name=="ExcludeAttribute"),"Experimental surface toggle hidden");
         defaults.Invoke(setting,new object[]{System.IO.Path.GetFullPath("C:/Curbside-Surface-Fixture")});
         Check(!(bool)enabled.GetValue(setting),"Reset did not return to safe default");
         var asset=typeof(Colossal.IO.AssetDatabase.TextureAsset);
