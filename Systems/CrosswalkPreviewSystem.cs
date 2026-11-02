@@ -14,8 +14,9 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             var visual=World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();
-            Dependency.Complete();visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();
+            visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();
             if(Mod.Saving||Mod.Settings==null)return;
+            visual.InheritPreviewPaint();
             var tools=World.GetOrCreateSystemManaged<ToolSystem>();
             var choices=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
             if(!(tools.activeTool is NetToolSystem)||tools.activeTool.GetPrefab()?.name!="Crosswalk"||(!choices.NativeLineMode&&!choices.NativeInvisibleMode)||Game.Input.InputManager.instance.mouseOverUI||Game.Input.InputManager.instance.hasInputFieldFocus){lastPreview=Entity.Null;return;}
@@ -54,6 +55,6 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class CrosswalkPreviewRestoreSystem:GameSystemBase
     {
-        protected override void OnUpdate(){World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();}
+        protected override void OnUpdate(){var visual=World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();visual.RestoreInheritedPreviews();visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();}
     }
 }

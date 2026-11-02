@@ -34,7 +34,8 @@ namespace MedianGrassReplacement.Systems
 
     {
 
-        private EntityQuery _roads, _changedRoads, _changedNodes, _hidden;
+        private EntityQuery _roads, _changedRoads, _changedNodes, _hidden, _changedHidden, _revealedHidden;
+        private readonly HashSet<Entity> _visibilityWork=new HashSet<Entity>();
 
         private PrefabSystem _prefabs; private bool _active, _initial = true;
 
@@ -65,6 +66,9 @@ namespace MedianGrassReplacement.Systems
             _changedNodes.SetChangedVersionFilter(ComponentType.ReadOnly<Game.Objects.SubObject>());
 
             _hidden = GetEntityQuery(ComponentType.ReadOnly<RDCHiddenDecal>());
+            _changedHidden=GetEntityQuery(ComponentType.ReadOnly<RDCHiddenDecal>(),ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>());
+            _changedHidden.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>()});
+            _revealedHidden=GetEntityQuery(ComponentType.ReadOnly<RDCHiddenDecal>(),ComponentType.Exclude<Hidden>());
 
         }
 
@@ -232,7 +236,7 @@ namespace MedianGrassReplacement.Systems
 
         internal void Restore() { Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); }
 
-        public void PreSerialize(Context context) { Restore(); }
+        public void PreSerialize(Context context) { World.GetExistingSystemManaged<PaintPreviewVisibilitySystem>()?.Restore(); Restore(); }
 
         protected override void OnUpdate()
         {long started=ModDiagnostics.RuntimeCosts.Begin();try{UpdateMeasuredCore();}finally{ModDiagnostics.RuntimeCosts.End("DecalVisibilitySystem",started);}}
@@ -248,7 +252,15 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                Dependency.Complete(); bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();
+                // Avoid an unconditional completion/playback on idle rendering frames.
+                // IsEmpty honors changed filters; IsEmptyIgnoreFilter would not.
+                long preflightStarted=ModDiagnostics.RuntimeCosts.Begin();
+                bool idle=!_initial&&Requested.Count==0&&_deferred.Count==0&&_changedRoads.IsEmpty&&_changedNodes.IsEmpty&&_changedHidden.IsEmpty&&_revealedHidden.IsEmpty;
+                ModDiagnostics.RuntimeCosts.End("DecalVisibility.Preflight",preflightStarted);
+                if(idle)return;
+                long dependencyStarted=ModDiagnostics.RuntimeCosts.Begin();Dependency.Complete();
+                ModDiagnostics.RuntimeCosts.End("DecalVisibility.DependencyWait",dependencyStarted);
+                bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();
 
                 if (!explicitRequest && _roads.IsEmpty && _hidden.IsEmpty) { _deferred.Clear(); _initial = false; return; }
 
@@ -268,8 +280,13 @@ namespace MedianGrassReplacement.Systems
 
                 {
 
-                    using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned)
-
+                    bool repairPending=false;
+                    _visibilityWork.Clear();
+                    using(var changed=_changedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in changed)_visibilityWork.Add(obj);
+                    using(var revealed=_revealedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in revealed)_visibilityWork.Add(obj);
+                    if(_initial||_pending.Count>0)using(var owned=_hidden.ToEntityArray(Allocator.Temp))foreach(var obj in owned)
+                        if(_initial||_pending.Contains(EntityManager.GetComponentData<RDCHiddenDecal>(obj).Road))_visibilityWork.Add(obj);
+                    foreach (var obj in _visibilityWork)
                         {
 
                             var marker = EntityManager.GetComponentData<RDCHiddenDecal>(obj);
@@ -288,11 +305,11 @@ namespace MedianGrassReplacement.Systems
 
                             }
 
-                            if (!EntityManager.HasComponent<Hidden>(obj)) { repairs.AddComponent<Hidden>(obj); if (!EntityManager.HasComponent<BatchesUpdated>(obj)) repairs.AddComponent<BatchesUpdated>(obj); }
+                            if (!EntityManager.HasComponent<Hidden>(obj)) { repairPending=true;repairs.AddComponent<Hidden>(obj); if (!EntityManager.HasComponent<BatchesUpdated>(obj)) repairs.AddComponent<BatchesUpdated>(obj); }
 
                         }
 
-                    repairs.Playback(EntityManager);
+                    if(repairPending){long playbackStarted=ModDiagnostics.RuntimeCosts.Begin();repairs.Playback(EntityManager);ModDiagnostics.RuntimeCosts.End("DecalVisibility.RepairPlayback",playbackStarted);}
 
                 }
 

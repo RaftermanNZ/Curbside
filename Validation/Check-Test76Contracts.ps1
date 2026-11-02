@@ -10,7 +10,7 @@ try {
  $mod=$types | Where-Object Name -eq Mod
  $load=$mod.Methods | Where-Object Name -eq OnLoad
  $registration=@($load.Body.Instructions | Where-Object {$_.Operand -is [Mono.Cecil.GenericInstanceMethod] -and $_.Operand.Name -eq 'UpdateBefore'})
- Check (@($registration | Where-Object {$_.Operand.GenericArguments[0].Name -eq 'SignalPreviewRestoreSystem' -and $_.Operand.GenericArguments[1].Name -eq 'ApplyNetSystem'}).Count -eq 1) 'Preview does not restore native references before commit'
+ Check (@($registration | Where-Object {$_.Operand.GenericArguments[0].Name -eq 'SignalPreviewRestoreSystem' -and $_.Operand.GenericArguments[1].Name -eq 'ToolApplySystem'}).Count -eq 1) 'Preview must restore native references before object as well as network commit'
  $preview=$types | Where-Object Name -eq SignalPreviewSystem
  $update=$preview.Methods | Where-Object Name -eq OnUpdate
  foreach($forbidden in @('AddPrefab','CreateEntity','DestroyEntity','Spawn')){Check ((Calls $update $forbidden).Count -eq 0) "Preview creates persistent work: $forbidden"}

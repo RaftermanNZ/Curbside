@@ -341,6 +341,11 @@ namespace MedianGrassReplacement.Systems
             medianOwned|=removedEdge||roadLine&&lineSystem.OwnsExplicitEdge(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier);
             bool dividerOwned=roadLine&&LaneDividerPolicy.Mode(EntityManager,owner)!=0&&lineSystem.IsInteriorLanePaint(owner,EntityManager.GetComponentData<Curve>(source).m_Bezier)
                 &&(LaneDividerPolicy.Mode(EntityManager,owner)==2||lineSystem.HasDividerMarks(owner));
+            bool individualIntent=EntityManager.HasBuffer<MGRIndividualDivider>(owner);
+            bool individualOwned=individualIntent&&lineSystem.OwnsIndividualDivider(owner,source);
+            bool individualNative=individualIntent&&lineSystem.KeepsIndividualDivider(owner,source);
+            if(individualNative){Remove(source);return;}
+            dividerOwned|=individualOwned;
             medianOwned|=dividerOwned||EntityManager.HasComponent<Node>(owner)&&lineSystem.OwnsNodeDivider(owner,source);
             bool nativeHidden=!crossing&&!NodeLinePolicy.IsProtected(prefab.name)&&(NodeLinePolicy.IsLineGeometry(prefab)||NodeLinePolicy.IsPaintFill(prefab.name))
                 &&(EntityManager.HasComponent<Road>(owner)&&SegmentUpgradePolicy.HidesNative(EntityManager,owner)||EntityManager.HasComponent<Node>(owner)&&SegmentUpgradePolicy.HidesNode(EntityManager,owner,EntityManager.GetComponentData<Curve>(source).m_Bezier,nodeBoundary,outerEdge,true));
@@ -522,7 +527,7 @@ namespace MedianGrassReplacement.Systems
             if(!Alive(source)||_externalPaint.Contains(EntityManager,source)||!EntityManager.HasComponent<Owner>(source)){pending.Add(source);return;}
             Entity owner=EntityManager.GetComponentData<Owner>(source).m_Owner;
             if(!Alive(owner)){pending.Add(source);return;}
-            if(EntityManager.HasComponent<Game.Tools.Hidden>(owner))
+            if(EntityManager.HasComponent<Game.Tools.Hidden>(owner)&&!crossings.UnchangedPreview(source))
             {
                 foreach(var paint in entry.Paint)if(Alive(paint)&&!EntityManager.HasComponent<Game.Tools.Hidden>(paint))
                 {visibility.AddComponent<Game.Tools.Hidden>(paint);if(!EntityManager.HasComponent<BatchesUpdated>(paint))visibility.AddComponent<BatchesUpdated>(paint);}
@@ -570,6 +575,7 @@ namespace MedianGrassReplacement.Systems
 
                 var watch = _updateWatch; watch.Restart();
                 var crossingVisuals = World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();
+                crossingVisuals.RefreshPreviewContinuity();
 
                 var pending = _pending; pending.Clear(); foreach (var item in _backlog) pending.Add(item); _backlog.Clear();
 

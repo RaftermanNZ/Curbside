@@ -1,4 +1,56 @@
-## 0.5.1-test.154
+# Changelog
+
+## 0.5.1-test.161 — November 2, 2026
+
+Changes since 0.5.1-test.154.
+
+### Road markings and individual divider editing
+- Added individual selection of recognized native divider lines on road sections
+  and supported non-highway junctions. Style, hide or restore an eligible line
+  without automatically changing its neighboring divider lines.
+- Improved click-time selection, coincident-path detection and reuse of the
+  native line geometry. Refined dash/passing previews and section-divider
+  clipping near approach stop ranges.
+- Added saved individual-divider intent and matching during road-upgrade
+  transfers. Existing grouped-divider selections and serialized component layouts
+  are retained. Unsupported layouts keep the grouped-divider fallback.
+
+### Pier and quay textures
+- Prevent road and sidewalk replacement textures from overriding native pier
+  materials, including concrete and timber pavement surfaces.
+- Preserve the native bike-path surface on quay compositions without changing
+  the shared material used by ordinary roads and paths. The correction requires
+  both the affected 8 m bike-path surface and a recognized native quay wall.
+- Reuse one protected material copy across matching quay batches and restore
+  the original bindings during reset, disabling and unloading.
+- Retain the existing parking-road atlas handling, ordinary road/sidewalk texture
+  routing and the restricted experimental pavement-surface scope.
+
+### Maintenance and diagnostics
+- Focus hidden-item maintenance on changed or revealed objects and avoid
+  unnecessary dependency waits and empty visibility-repair playback.
+- Reuse managed work collections and unchanged visuals where supported.
+- Improve restoration of temporary visual references before tool commit,
+  saving and unloading, including cleanup after failed initialization.
+- Improve user-triggered placement, persistence and material diagnostics.
+
+### Known limitations
+- Vanilla lights or markings can still appear in placement previews, and custom
+  signals can still have preview-visibility inconsistencies. These are not fixed
+  by this update. Placement-time performance remains under investigation.
+- Individual editing depends on recognizable native divider paths. Not every
+  junction, merge, roundabout or custom road supports independent line editing.
+- Broader save/reload, road-regeneration and mod-removal coverage remains ongoing.
+
+### Validation note
+The author confirmed the pier and quay behavior in local testing. Test161 passed
+32 inherited offline suites, 19,232 quay/non-quay scope assertions and 9,610
+unchanged global material-selection comparisons. The reviewed session initialized
+and shut down without Curbside warnings/errors, and logged restoration of all
+11 quay bindings. These checks do not establish universal compatibility, measured
+FPS gains or crash freedom.
+
+## 0.5.1-test.154 — Release candidate
 
 Changes since published 0.5.1-test.146:
 
@@ -7,11 +59,10 @@ Changes since published 0.5.1-test.146:
 - Consolidated automatic marking controls around the vanilla automatic-markings switch. This disables Curbside's automatic generation, recoloring and adjustments while preserving manual upgrades. Conflicting automatic controls are disabled while vanilla mode is selected; legacy settings remain readable.
 - Replaced visible global line-shape selectors with theme choices. Single/double/dashed/passing styles remain available through the line tools.
 - Corrected paint-ownership maintenance that could leave duplicate or flickering generated markings. Parking upgrades use dedicated white single paint instead of a shared edge-line asset.
-- Improved manual median-line placement beside native paved shoulders, including parking-road medians. Single, double, dashed and passing choices use the same bounded pavement validation without moving the road or changing its lane layout.
+- Improved manual median-line placement beside native paved shoulders, including parking-road medians. Single, double, dashed and passing choices use the same bounded pavement validation without moving the road or changing its lane layout. This final correction still requires in-game confirmation.
 
 ### Parking, crossings and textures
 - Fixed the shared parking-road atlas replacement so the parking tread uses the road selection and the raised sidewalk uses the sidewalk selection. Native curb/detail strips and normal/mask UVs are preserved. The parking-atlas result has been confirmed in the author's Test153 session; wider road/configuration coverage remains ongoing.
-- Known limitation: the replacement texture can appear stretched across parking bays. This update corrects road-versus-sidewalk placement, not the parking mesh UV layout; that stretching remains unchanged.
 - Reuse one shared 2K parking atlas across matching materials, with mipmaps and no retained CPU pixel copy. Preparation uses GPU copies, respects the existing texture-cache budget and is debounced during tiling-slider changes. The shared result adds about 21 MiB of GPU texture storage, not per-road storage.
 - Preserve normal road/sidewalk replacement routing and keep experimental extra-surface replacement limited to the existing two vanilla pavement targets. Custom-surface ownership and original-texture restoration protections remain.
 - Explicit parking upgrades are no longer blocked solely by Road Builder's automatic No Markings flag. Existing parking geometry/layout checks remain; this does not add support for every angled or perpendicular custom bay layout.
@@ -24,7 +75,7 @@ Changes since published 0.5.1-test.146:
 - Optional signal-pack discovery retries at world-load completion after failed boot detection. Partially loaded packs receive bounded progress-aware grace; absent packs do not trigger perpetual scans or runtime model imports.
 - Improve manual diagnostic reports for saved upgrade intent, preference-write status, native material mappings and signal-readiness failure reasons. These reports remain user-triggered.
 
-Validation and scope: 29 offline suites plus compiled integration checks passed. Test153 parking textures were accepted in the author's test; the latest Test154 session was reviewed without Curbside exceptions or texture-copy errors. Broad geometry and save/reload coverage remains ongoing. No universal FPS/TPS, crash-free or compatibility guarantee is implied. Individual lane-by-lane editing, including separate bike-lane divider editing, is deferred. Signal models, save schemas and listing artwork/description/metadata are not changed by this candidate.
+Validation and scope: 29 offline suites plus compiled integration checks passed. Test153 parking textures were accepted in the author's test; the final median-shoulder correction is not yet visually verified. No universal FPS/TPS, crash-free or compatibility guarantee is implied. Individual lane-by-lane editing, including separate bike-lane divider editing, is deferred. Signal models, save schemas and listing artwork/description/metadata are not changed by this candidate.
 
 ## 0.5.1-test.146 — Surface restoration update
 

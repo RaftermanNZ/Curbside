@@ -58,7 +58,7 @@ namespace MedianGrassReplacement.Systems
                     if(selection==SegmentUpgradePolicy.HideAll||SegmentUpgradePolicy.Hides(selection,intents[i].Role==1,intents[i].Role==2))intents.RemoveAt(i);
             }
             if(selection==SegmentUpgradePolicy.HideAll)Remove<MGRCenterlineStyle>(target);
-            if(selection==SegmentUpgradePolicy.HideAll||selection==SegmentUpgradePolicy.HideLanes)Remove<MGRLaneDivider>(target);
+            if(selection==SegmentUpgradePolicy.HideAll||selection==SegmentUpgradePolicy.HideLanes){Remove<MGRLaneDivider>(target);if(EntityManager.HasBuffer<MGRIndividualDivider>(target))EntityManager.RemoveComponent<MGRIndividualDivider>(target);}
             if(selection==SegmentUpgradePolicy.HideAll||selection==SegmentUpgradePolicy.HideLanes||selection==SegmentUpgradePolicy.HideEdges){Remove<MGREdgePaint>(target);Remove<MGRSectionEdges>(target);Remove<MGRJunctionEdgeLines>(target);Remove<MGRRemoveJunctionEdges>(target);}
         }
         private void Refresh(Entity road,bool parking=false,bool all=false)
@@ -81,7 +81,7 @@ namespace MedianGrassReplacement.Systems
             }
             // Reset is an idempotent action, not an upgrade with an inverse.
             if(remove){UpgradeFeedback.Report(asset,"Click to restore defaults. Reset actions have no right-click inverse.");return;}
-            if(asset==SegmentUpgradePolicy.ResetLines||asset==SegmentUpgradePolicy.ResetAll){Remove<MGRCenterlineStyle>(road);Remove<MGRSectionEdges>(road);Remove<MGREdgePaint>(road);Remove<MGRLaneDivider>(road);Remove<MGRHideCenterline>(road);Remove<MGRSegmentLineVisibility>(road);}
+            if(asset==SegmentUpgradePolicy.ResetLines||asset==SegmentUpgradePolicy.ResetAll){Remove<MGRCenterlineStyle>(road);Remove<MGRSectionEdges>(road);Remove<MGREdgePaint>(road);Remove<MGRLaneDivider>(road);if(EntityManager.HasBuffer<MGRIndividualDivider>(road))EntityManager.RemoveComponent<MGRIndividualDivider>(road);Remove<MGRHideCenterline>(road);Remove<MGRSegmentLineVisibility>(road);}
             if(asset==SegmentUpgradePolicy.ResetParking||asset==SegmentUpgradePolicy.ResetAll){Remove<MGRParkingHatching>(road);Remove<MGRParkingSides>(road);Remove<MGRParkingUpgrade>(road);Remove<MGRParkingStyle>(road);Remove<MGRParkingBanSides>(road);}
             if(asset==SegmentUpgradePolicy.ResetAll)
             {
@@ -97,7 +97,7 @@ namespace MedianGrassReplacement.Systems
                         World.GetOrCreateSystemManaged<StreetLightingSystem>().ResetNode(node);
                         // Node-wide upgrades cannot be removed for only half a junction.
                         Remove<MGRSurfaceSlots>(node);
-                        if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(node);
+                        if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);if(EntityManager.HasBuffer<MGRIndividualDivider>(node))EntityManager.RemoveComponent<MGRIndividualDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(node);
                     }
                 }
             }

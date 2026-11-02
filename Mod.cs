@@ -79,7 +79,7 @@ namespace MedianGrassReplacement
 
         {
 
-            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Audit hardening candidate: native asset discovery, owned restoration, bounded diagnostics and save-queue failure recovery. Existing reader guards retained; live validation pending.");
+            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Test160 pier exclusions plus quay-only bike material isolation. Live acceptance pending.");
 
 
 
@@ -184,11 +184,15 @@ namespace MedianGrassReplacement
             updateSystem.UpdateAfter<RoadGrassCompositionTriggerSystem, BatchRendererSystem>(SystemUpdatePhase.Rendering);
 
             updateSystem.UpdateAfter<GlobalSurfaceMaterialSystem, RoadGrassCompositionTriggerSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAfter<QuayBikeMaterialSystem,GlobalSurfaceMaterialSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAfter<QuayBikeMaterialSystem,Game.Rendering.ManagedBatchSystem>(SystemUpdatePhase.Rendering);
 
             updateSystem.UpdateAfter<MedianMaterialSystem, RoadGrassCompositionTriggerSystem>(SystemUpdatePhase.Rendering);
 
             updateSystem.UpdateBefore<CrosswalkPreviewRestoreSystem,Game.Tools.ApplyNetSystem>(SystemUpdatePhase.ApplyTool);
-            updateSystem.UpdateBefore<SignalPreviewRestoreSystem,Game.Tools.ApplyNetSystem>(SystemUpdatePhase.ApplyTool);
+            // Object placement commits before ApplyNetSystem too. Restore all
+            // temporary cosmetic refs once, before the native apply phase starts.
+            updateSystem.UpdateBefore<SignalPreviewRestoreSystem,Game.Tools.ToolApplySystem>(SystemUpdatePhase.ApplyTool);
             updateSystem.UpdateBefore<SignalPreviewSystem,Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
             updateSystem.UpdateAfter<CrosswalkPreviewSystem,IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
             
@@ -203,6 +207,7 @@ namespace MedianGrassReplacement
             updateSystem.UpdateBefore<JunctionMarkingSystem, Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
             updateSystem.UpdateAfter<IntersectionPaintSystem, JunctionMarkingSystem>(SystemUpdatePhase.PreCulling);
+            updateSystem.UpdateAfter<PaintPreviewVisibilitySystem, IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
 
             
 
@@ -312,6 +317,8 @@ namespace MedianGrassReplacement
 
             });
 
+            Cleanup(() => world?.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.Restore());
+            Cleanup(() => world?.GetExistingSystemManaged<PaintPreviewVisibilitySystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalPreviewSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalWireSystem>()?.Clear());
             Cleanup(() => world?.GetExistingSystemManaged<DecalVisibilitySystem>()?.Restore());

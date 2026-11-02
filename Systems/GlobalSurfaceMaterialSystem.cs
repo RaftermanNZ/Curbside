@@ -14,9 +14,18 @@ namespace MedianGrassReplacement.Systems
             if(name==VanillaSurfacePolicy.AreaBatchName("Pavement Surface 02"))return 2;
             return 0;
         }
+        // Native surface names, not network families: excluding every material
+        // referenced by a quay-capable road would also exclude normal sidewalks.
+        internal static bool ProtectedWaterfront(string name)
+        {
+            string key=(name??"").ToLowerInvariant();
+            return key.Contains("pier")||key.Contains("quay")||key.Contains("jetty")
+                ||key.Contains("boardwalk")||key.Contains("pontoon");
+        }
         internal static int Kind(string name,string shader)
         {
             if(shader!="BH/NetCompositionMeshLitShader")return 0;
+            if(ProtectedWaterfront(name))return 0;
             string key=(name??"").ToLowerInvariant();
             foreach(var excluded in new[]{"grass","curb","kerb","marking","paint","decal","rail","gravel","dirt"})if(key.Contains(excluded))return 0;
             if(key.StartsWith("batch (road_",StringComparison.Ordinal)||key.Replace("_","").Replace(" ","").Contains("parkingroad")||key.Replace("_","").Replace(" ","").Contains("parkinglotroad"))return 3; // Native shared road/sidewalk material observed in the game log.
@@ -109,8 +118,37 @@ namespace MedianGrassReplacement.Systems
             if(restored>0)Mod.Log.Info("Surface restoration recovered "+restored+" untracked Curbside area textures from prefab originals.");
             if(unresolved>0)Mod.Log.Warn("Surface restoration: "+unresolved+" Curbside area textures have no unambiguous loaded original; left intact rather than guessing.");
         }
+        internal bool HasQuayBikePatch()
+        {
+            foreach(var patch in _patches.Values)if(patch.Role==2&&patch.Material!=null
+                &&patch.Material.name=="Batch (BikePathPavement800cm_9abfd1a7cc766d58dea7d215fcfb149c)"
+                &&HasOwnedSidewalkPatch(patch.Material))return true;
+            return false;
+        }
+        internal bool HasOwnedSidewalkPatch(Material material)=>material!=null
+            &&_patches.TryGetValue((material,"_BaseColorMap"),out var patch)
+            &&patch.Role==2&&patch.Before!=null&&material.GetTexture("_BaseColorMap")==patch.Applied;
+        internal Material CreateQuayNativeCopy(Material material)
+        {
+            if(!HasOwnedSidewalkPatch(material))return null;
+            var copy=new Material(material){name="Curbside Quay Native ("+material.name+")",hideFlags=HideFlags.HideAndDontSave};
+            try
+            {
+                foreach(var patch in _patches.Values)if(patch.Material==material&&material.GetTexture(patch.Property)==patch.Applied)
+                    copy.SetTexture(patch.Property,patch.Before);
+                foreach(var patch in _uvPatches.Values)if(patch.Material==material)
+                {
+                    if(patch.Scalar){if(material.GetFloat(patch.Property)==patch.AppliedFloat)copy.SetFloat(patch.Property,patch.BeforeFloat);}
+                    else if(material.GetTextureScale(patch.Property)==patch.AppliedScale)copy.SetTextureScale(patch.Property,patch.BeforeScale);
+                }
+                return copy;
+            }
+            catch{UnityEngine.Object.Destroy(copy);throw;}
+        }
         private bool ApplyProperty(Material material,string property,Texture2D replacement,int role)
         {
+            if(material.shader!=null&&material.shader.name=="BH/NetCompositionMeshLitShader"
+                &&GlobalSurfacePolicy.ProtectedWaterfront(material.name))return false;
             if(!material.HasProperty(property))return false;
             bool found=_patches.TryGetValue((material,property),out var patch);
             if(found)return material.GetTexture(property)==patch.Applied;
@@ -183,6 +221,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal void RecordNetworkSnapshot()
         {
+            Mod.Log.Info(World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.Status??"Quay bike isolation system unavailable.");
             int samples=0,total=0;
             _vanilla.Begin(World.GetExistingSystemManaged<Game.Rendering.ManagedBatchSystem>());
             try
@@ -215,6 +254,7 @@ namespace MedianGrassReplacement.Systems
         private bool ApplyParkingAtlas(Material material,out bool roadApplied,out bool walkApplied)
         {
             roadApplied=walkApplied=false;
+            if(GlobalSurfacePolicy.ProtectedWaterfront(material.name))return false;
             const string property="_BaseColorMap";
             if(material.shader.name!="BH/NetCompositionMeshLitShader"||!material.name.StartsWith("Batch (",StringComparison.Ordinal)||!material.HasProperty(property))return false;
             bool tracked=_patches.TryGetValue((material,property),out var patch);
@@ -253,6 +293,7 @@ namespace MedianGrassReplacement.Systems
                 ?_vanilla.BatchMaterials:(IEnumerable<Material>)Resources.FindObjectsOfTypeAll<Material>())
             {
                 if(material==null||material.shader==null)continue;
+                if(material.shader.name=="BH/NetCompositionMeshLitShader"&&GlobalSurfacePolicy.ProtectedWaterfront(material.name))continue;
                 if(ApplyParkingAtlas(material,out bool parkingRoad,out bool parkingWalk)){if(parkingRoad)roads++;if(parkingWalk)walks++;continue;}
                 int kind=material.name.StartsWith("Batch (",StringComparison.Ordinal)?GlobalSurfacePolicy.Kind(material.name,material.shader.name):0;
                 if(kind==0&&Mod.Settings.SurfaceTexturesOnAssets)kind=GlobalSurfacePolicy.AssetKind(material.name,material.shader.name);
@@ -282,14 +323,14 @@ namespace MedianGrassReplacement.Systems
             if(!_active||Mod.Settings==null||Mod.Saving)return;
             if(Mod.Settings.DisableTextureReplacement)
             {
-                if(!_disabledRestored){_vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(true);_disabledRestored=true;}
+                if(!_disabledRestored){World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.Restore();_vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(true);_disabledRestored=true;}
                 _refresh=true;_discover=false;_uvRefresh=false;return;
             }
             _disabledRestored=false;
             if(_refresh)
             {
                 _refresh=false;_discover=false;_uvRefresh=false;
-                _vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();
+                _vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.RequestRefresh();
             }
             else if(_uvRefresh)
             {
@@ -299,7 +340,7 @@ namespace MedianGrassReplacement.Systems
                 _uvRefresh=false;
                 if(mixed)_refresh=true;else ApplyUv();
             }
-            else if(_discover&&(UnityEngine.Time.realtimeSinceStartup>=_quietUntil||UnityEngine.Time.realtimeSinceStartup>=_discoverBy)){_discover=false;Apply(true);}
+            else if(_discover&&(UnityEngine.Time.realtimeSinceStartup>=_quietUntil||UnityEngine.Time.realtimeSinceStartup>=_discoverBy)){_discover=false;Apply(true);World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.RequestRefresh();}
         }
         protected override void OnDestroy(){Restore(true);_vanilla.Clear();base.OnDestroy();}
     }

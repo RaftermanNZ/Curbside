@@ -21,7 +21,7 @@ namespace MedianGrassReplacement.Systems
             }
             else if(asset==SegmentUpgradePolicy.ResetLines&&!remove)
             {
-                if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRLaneDivider>(node);Remove<MGREdgePaint>(node);Remove<MGRHideCenterline>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);
+                if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRLaneDivider>(node);if(EntityManager.HasBuffer<MGRIndividualDivider>(node))EntityManager.RemoveComponent<MGRIndividualDivider>(node);Remove<MGREdgePaint>(node);Remove<MGRHideCenterline>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);
             }
             else return;
             var emitter=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();emitter.QueueNodeRefresh(node);emitter.RefreshNodePaint(node);

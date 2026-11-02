@@ -844,7 +844,7 @@ namespace MedianGrassReplacement.Systems
 
                             if (!EntityManager.Exists(entity) || EntityManager.HasComponent<Deleted>(entity)) { intact = false; break; }
 
-                        if (intact) {QueueNativeEdges(road);continue;}
+                        if (intact) {existing.Curves.Clear();existing.Curves.AddRange(curves);QueueNativeEdges(road);continue;}
 
                     }
 
@@ -1224,7 +1224,7 @@ namespace MedianGrassReplacement.Systems
             if (EntityManager.HasComponent<MGRParkingUpgrade>(road) && EntityManager.GetComponentData<MGRParkingUpgrade>(road).Marked) AddParkingMarks(road, geometry, stops, curves, unmarked, data.m_Width);
 
             if(CenterlineVisibility.Hidden(EntityManager,road))curves.RemoveAll(m=>m.Median&&!m.Protected&&!m.CenterUpgrade);
-            AddParkingHatching(road,curves);CanonicalCenterPairs(curves);
+            AddParkingHatching(road,curves);CanonicalCenterPairs(curves);ApplyIndividualDividers(road,curves);
             // Additions after a hide action are independent; applying visibility
             // explicitly clears the matching placed intent before this rebuild.
             return curves;
@@ -2187,7 +2187,7 @@ namespace MedianGrassReplacement.Systems
                     curves=split;
                 }
                 if(nativeHighway)AddHighwayNodePaint(node,curves);else ApplyDashedEdges(node,curves,true);
-                ApplyHighwayLineIntents(node,curves);
+                ApplyHighwayLineIntents(node,curves);ApplyIndividualDividers(node,curves);
                 var reusable = new Dictionary<MarkingKey, Queue<Entity>>();
 
                 if (_joins.TryGetValue(node, out var old))

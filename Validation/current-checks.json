@@ -28,6 +28,9 @@
     "ReleaseReportChecks",
     "MarkingSettingsAuditChecks",
     "NativeNetworkFixChecks",
-    "MedianShoulderChecks"
+    "MedianShoulderChecks",
+    "PreviewVisibilityChecks",
+    "IndividualDividerChecks",
+    "PreviewContinuityChecks"
   ]
 }

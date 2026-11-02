@@ -32,7 +32,7 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<Entity,Selection> _sourceSelections=new Dictionary<Entity,Selection>();
 
 
-        private struct Selection { internal byte Powerlines,Decals,ParkingBans,ParkingLeft,ParkingRight,CenterStyle,DividerStyle,EdgeStyle,EdgeLeft,EdgeRight,SurfaceRoad,SurfaceWalk,HatchSides,StreetLighting,LineVisibility,HiddenLeft,HiddenRight,LightingPrevious;internal bool HideCenter,LightingOwned; }
+        private struct Selection { internal byte Powerlines,Decals,ParkingBans,ParkingLeft,ParkingRight,CenterStyle,DividerStyle,EdgeStyle,EdgeLeft,EdgeRight,SurfaceRoad,SurfaceWalk,HatchSides,StreetLighting,LineVisibility,HiddenLeft,HiddenRight,LightingPrevious;internal bool HideCenter,LightingOwned; internal List<MGRIndividualDivider> IndividualDividers; }
 
         private EntityQuery _previews,_targets;
 
@@ -110,6 +110,14 @@ namespace MedianGrassReplacement.Systems
             if((selection.HiddenLeft|selection.HiddenRight)!=0){var previous=EntityManager.HasComponent<RDCSideUpgrade>(road)?EntityManager.GetComponentData<RDCSideUpgrade>(road):default;if(previous.Left!=selection.HiddenLeft||previous.Right!=selection.HiddenRight||!EntityManager.HasComponent<RDCUpgrade>(road)){if(!EntityManager.HasComponent<RDCSideUpgrade>(road))EntityManager.AddComponent<RDCSideUpgrade>(road);EntityManager.SetComponentData(road,new RDCSideUpgrade{Left=selection.HiddenLeft,Right=selection.HiddenRight});if(!EntityManager.HasComponent<RDCUpgrade>(road))EntityManager.AddComponent<RDCUpgrade>(road);EntityManager.SetComponentData(road,new RDCUpgrade{Mask=(byte)(selection.HiddenLeft|selection.HiddenRight)});changed=true;}}
             if(selection.LightingPrevious!=0&&!EntityManager.HasComponent<MGRStreetLightingPrevious>(road))EntityManager.AddComponentData(road,new MGRStreetLightingPrevious{Enabled=selection.LightingPrevious==2});
             if(selection.LineVisibility!=0&&SegmentUpgradePolicy.Mode(EntityManager,road)!=selection.LineVisibility){if(!EntityManager.HasComponent<MGRSegmentLineVisibility>(road))EntityManager.AddComponent<MGRSegmentLineVisibility>(road);EntityManager.SetComponentData(road,new MGRSegmentLineVisibility{Mask=selection.LineVisibility});changed=true;}
+            if(selection.IndividualDividers!=null&&selection.IndividualDividers.Count>0)
+            {
+                bool same=EntityManager.HasBuffer<MGRIndividualDivider>(road);
+                if(same){var previous=EntityManager.GetBuffer<MGRIndividualDivider>(road,true);same=previous.Length==selection.IndividualDividers.Count;
+                    if(same)for(int i=0;i<previous.Length;i++)if(previous[i].Style!=selection.IndividualDividers[i].Style||!IndividualDividerPolicy.Matches(previous[i],IndividualDividerPolicy.Path(selection.IndividualDividers[i]))){same=false;break;}}
+                if(!same){if(!EntityManager.HasBuffer<MGRIndividualDivider>(road))EntityManager.AddBuffer<MGRIndividualDivider>(road);
+                    var values=EntityManager.GetBuffer<MGRIndividualDivider>(road);values.Clear();foreach(var value in selection.IndividualDividers)values.Add(value);changed=true;}
+            }
             return changed;
 
         }
@@ -221,6 +229,10 @@ namespace MedianGrassReplacement.Systems
                 if(!EntityManager.HasComponent<Road>(source)||!EntityManager.HasComponent<Curve>(source)) continue;
 
                 var selection=new Selection();
+                if(EntityManager.HasBuffer<MGRIndividualDivider>(source))
+                {selection.IndividualDividers=new List<MGRIndividualDivider>();int count=0;foreach(var value in EntityManager.GetBuffer<MGRIndividualDivider>(source,true))
+                    {if(++count>256)break;if(GranularHighwayLinePolicy.ValidStyle(value.Style))selection.IndividualDividers.Add(value);}}
+
 
                 if(EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(source)) selection.Powerlines=EntityManager.GetComponentData<MGRVisualPowerlineUpgrade>(source).Sides;
 
@@ -236,7 +248,7 @@ namespace MedianGrassReplacement.Systems
                 selection.EdgeLeft=EdgeUpgradePolicy.Mode(EntityManager,source,true);selection.EdgeRight=EdgeUpgradePolicy.Mode(EntityManager,source,false);
                 selection.EdgeStyle=SectionEdgePolicy.Mode(EntityManager,source);selection.DividerStyle=LaneDividerPolicy.Mode(EntityManager,source);selection.LightingOwned=EntityManager.HasComponent<MGRStreetLightingOwnedFlag>(source);
                 selection.LineVisibility=SegmentUpgradePolicy.Mode(EntityManager,source);selection.CenterStyle=CenterlineUpgradePolicy.Mode(EntityManager,source);selection.StreetLighting=StreetLightingSystem.Mode(EntityManager,source);selection.HideCenter=EntityManager.HasComponent<MGRHideCenterline>(source);
-                if((selection.SurfaceRoad|selection.SurfaceWalk|selection.HatchSides)!=0||selection.LineVisibility!=0||selection.EdgeStyle!=0||(selection.EdgeLeft|selection.EdgeRight)!=0||selection.DividerStyle!=0||selection.CenterStyle!=0||selection.StreetLighting!=0||selection.HideCenter||(selection.Powerlines|selection.Decals|selection.ParkingBans|selection.ParkingLeft|selection.ParkingRight|selection.HiddenLeft|selection.HiddenRight)!=0) sources[source]=selection;
+                if(selection.IndividualDividers!=null&&selection.IndividualDividers.Count>0||(selection.SurfaceRoad|selection.SurfaceWalk|selection.HatchSides)!=0||selection.LineVisibility!=0||selection.EdgeStyle!=0||(selection.EdgeLeft|selection.EdgeRight)!=0||selection.DividerStyle!=0||selection.CenterStyle!=0||selection.StreetLighting!=0||selection.HideCenter||(selection.Powerlines|selection.Decals|selection.ParkingBans|selection.ParkingLeft|selection.ParkingRight|selection.HiddenLeft|selection.HiddenRight)!=0) sources[source]=selection;
 
             }
 

@@ -4,7 +4,7 @@ namespace MedianGrassReplacement.Systems
 {
     internal sealed class HoverLineChoice
     {
-        internal Entity Source, Target; internal bool Node; internal byte Role; // 0 center, 1 left pavement edge, 2 right pavement edge, 3 whole node edge.
+        internal Entity Source, Target; internal bool Node, Individual; internal byte Role; // 0 center, 1 left pavement edge, 2 right pavement edge, 3 whole node edge.
         internal List<Bezier4x3> Paths,Guides;
     }
     internal static class HoverLinePolicy
@@ -49,8 +49,8 @@ namespace MedianGrassReplacement.Systems
                     if(!emitter.IsOneWayHighway(target)&&emitter.TryCenterUpgradePlan(target,centerStyle,out var pathsCenter,out _))choices.Add(new HoverLineChoice{Role=0,Paths=pathsCenter});
                 }
                 var dividerPaths=node?emitter.NodeDividerPlan(target):new List<Bezier4x3>();if(!node)emitter.TryDividerPlan(target,out dividerPaths);
-                if(dividerPaths.Count>0){var stripes=new List<Bezier4x3>();foreach(var path in dividerPaths)if(style==3||style==4||LineShapePolicy.Passing(style)){stripes.Add(NetUtils.OffsetCurveLeftSmooth(path,-emitter.EdgeSpacing(edgeStyle)));stripes.Add(NetUtils.OffsetCurveLeftSmooth(path,emitter.EdgeSpacing(edgeStyle)));}else stripes.Add(path);choices.Add(new HoverLineChoice{Role=4,Paths=stripes});}
-                foreach(var choice in choices){choice.Guides=choice.Paths;choice.Paths=visibility?choice.Paths:LineShapePolicy.Passing(style)?emitter.PassingPreview(target,node,choice.Role,choice.Paths):LineShapePolicy.Strokes(choice.Paths,style);}
+                if(!emitter.IndividualDividerChoices(target,style,visibility,choices)&&dividerPaths.Count>0){var stripes=new List<Bezier4x3>();foreach(var path in dividerPaths)if(style==3||style==4||LineShapePolicy.Passing(style)){stripes.Add(NetUtils.OffsetCurveLeftSmooth(path,-emitter.EdgeSpacing(edgeStyle)));stripes.Add(NetUtils.OffsetCurveLeftSmooth(path,emitter.EdgeSpacing(edgeStyle)));}else stripes.Add(path);choices.Add(new HoverLineChoice{Role=4,Paths=stripes});}
+                foreach(var choice in choices){if(choice.Individual)continue;choice.Guides=choice.Paths;choice.Paths=visibility?choice.Paths:LineShapePolicy.Passing(style)?emitter.PassingPreview(target,node,choice.Role,choice.Paths):LineShapePolicy.Strokes(choice.Paths,style);}
                 }
             foreach(var choice in choices){choice.Target=target;choice.Node=node;_lineHoverChoices.Add(choice);}
         }
@@ -63,7 +63,7 @@ namespace MedianGrassReplacement.Systems
             if(EntityManager.HasComponent<Deleted>(target)||EntityManager.HasComponent<Game.Tools.Temp>(target))return true;
             emitter.RetainPaintTarget(target);
             float now=UnityEngine.Time.realtimeSinceStartup;
-            if(_lineHoverTarget!=target||_lineHoverStyle!=cacheStyle||now>=_lineHoverUntil)
+            if(_lineHoverTarget!=target||_lineHoverStyle!=cacheStyle||now>=_lineHoverUntil||applyAction.WasPressedThisFrame()||remove)
             {
                 _lineHoverTarget=target;_lineHoverStyle=cacheStyle;_lineHoverUntil=now+.25f;_lineHoverChoices.Clear();
                 CollectHoverLines(target,node,style,visibility);
@@ -95,7 +95,7 @@ namespace MedianGrassReplacement.Systems
             if(selected.Source!=Entity.Null)
             {
                 byte intent=visibility?(remove?GranularHighwayLinePolicy.Native:GranularHighwayLinePolicy.Removed):remove?GranularHighwayLinePolicy.Removed:style;
-                emitter.ApplyHighwayLine(target,selected.Source,intent);UpgradeFeedback.Report(_selected.name,UpgradeFeedback.Text);_lineHoverUntil=0;return true;
+                if(selected.Individual)emitter.ApplyIndividualDivider(target,selected.Source,intent);else emitter.ApplyHighwayLine(target,selected.Source,intent);UpgradeFeedback.Report(_selected.name,UpgradeFeedback.Text);_lineHoverUntil=0;return true;
             }
             if(visibility){ApplyHoverVisibility(target,node,selected.Role,remove);_lineHoverUntil=0;return true;}
             if(selected.Role==4){if(node){emitter.ApplyNodeDividers(target,remove,dividerStyle);UpgradeFeedback.Report(_selected.name,UpgradeFeedback.Text);}else {World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(target);if(!EntityManager.HasComponent<MGRLaneDivider>(target))EntityManager.AddComponent<MGRLaneDivider>(target);EntityManager.SetComponentData(target,new MGRLaneDivider{Value=remove?(byte)2:dividerStyle});CurbLineEmissionSystem.QueueRoad(target);SegmentUpgradePolicy.QueuePaint(EntityManager,target);UpgradeFeedback.Report(_selected.name,remove?"Divider lines removed.":"Divider lines applied.");}_lineHoverUntil=0;return true;}

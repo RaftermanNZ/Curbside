@@ -34,7 +34,8 @@ namespace MedianGrassReplacement.Systems
         private static readonly ComponentType[] LineChanges={ComponentType.ReadOnly<Curve>(),ComponentType.ReadOnly<PrefabRef>()};
 
 
-        private EntityQuery _lines, _hidden, _changedNodes;
+        private EntityQuery _lines, _hidden, _changedNodes, _revealedHidden, _changedHidden;
+        private readonly System.Collections.Generic.HashSet<Entity> _visibilityWork=new System.Collections.Generic.HashSet<Entity>();
 
         private PrefabSystem _prefabs;
 
@@ -79,6 +80,9 @@ namespace MedianGrassReplacement.Systems
 
 
             _hidden = GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>());
+            _revealedHidden=GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>(),ComponentType.Exclude<Game.Tools.Hidden>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
+            _changedHidden=GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>(),ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>());
+            _changedHidden.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>()});
 
             _changedNodes = GetEntityQuery(ComponentType.ReadOnly<Game.Net.Node>(), ComponentType.ReadOnly<ConnectedEdge>(), ComponentType.ReadOnly<Game.Net.SubLane>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
 
@@ -137,6 +141,9 @@ namespace MedianGrassReplacement.Systems
             if (!EntityManager.HasComponent<Game.Net.Node>(owner)) return false;
 
             if(_externalPaint.Contains(EntityManager,line))return false;
+            if(EntityManager.HasBuffer<MGRIndividualDivider>(owner)){var individual=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
+            if(individual.KeepsIndividualDivider(owner,line))return false;
+            if(individual.OwnsIndividualDivider(owner,line))return true;}
             int roads = RoadCount(owner);
 
             // Defensive simulation guard: never hide a lane used by vehicles/pedestrians.
@@ -329,9 +336,10 @@ namespace MedianGrassReplacement.Systems
 
                 {
 
-                    using (var owned = _hidden.ToEntityArray(Allocator.Temp))
-
-                        foreach (var line in owned)
+                    _visibilityWork.Clear();
+                    using(var revealed=_revealedHidden.ToEntityArray(Allocator.Temp))foreach(var line in revealed)_visibilityWork.Add(line);
+                    using(var changed=_changedHidden.ToEntityArray(Allocator.Temp))foreach(var line in changed)_visibilityWork.Add(line);
+                        foreach (var line in _visibilityWork)
 
                         {
 
@@ -350,7 +358,7 @@ namespace MedianGrassReplacement.Systems
 
                         }
 
-                    visibility.Playback(EntityManager);
+                    if(!visibility.IsEmpty)visibility.Playback(EntityManager);
 
                 }
 
