@@ -22,6 +22,12 @@
     "NativeTrafficBoundaryChecks",
     "ActionJournalChecks",
     "VanillaSurfaceChecks",
-    "SurfaceRestoreChecks"
+    "SurfaceRestoreChecks",
+    "ManagedMaintenanceChecks",
+    "DeferredSettingsChecks",
+    "ReleaseReportChecks",
+    "MarkingSettingsAuditChecks",
+    "NativeNetworkFixChecks",
+    "MedianShoulderChecks"
   ]
 }

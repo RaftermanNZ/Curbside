@@ -30,7 +30,8 @@ namespace MedianGrassReplacement.Localization
             entries[_setting.GetOptionTabLocaleID(Setting.kHighwaysTab)]="Highway markings";
             entries[_setting.GetOptionGroupLocaleID(Setting.kCompatibilityGroup)]="Compatibility controls";
             entries[_setting.GetOptionGroupLocaleID(Setting.kHighwayControlGroup)]="Automatic highway markings";
-            Option(nameof(Setting.DisableAutomaticMarkings),"Disable automatic road lines","Keep manual line, parking, crossing and visibility upgrades. Stop automatically added curb/median lines; saved upgrade choices remain intact. Default: off.");
+            Option(nameof(Setting.AutomaticMarkingTheme),"Automatic marking theme","Map theme is the default. Applies to automatic center, median, edge and divider colors. Manual line tools keep their explicit colors and styles. Ignored while Use vanilla automatic markings is on.");
+            Option(nameof(Setting.UseVanillaAutomaticMarkings),"Use vanilla automatic markings","Stop automatically generated road lines, automatic recoloring and automatic junction cleanup. Manually placed line, parking, hatch, crossing and visibility upgrades remain active. Other automatic marking settings are ignored while this is on. Default: off.");
             Option(nameof(Setting.DisableAutomaticHighwayMarkings),"Disable automatic highway lines","Keep vanilla highway markings and your manual upgrades; stop automatic highway additions at sections, nodes and junctions. Default: off.");
             Option(nameof(Setting.DisableAutomaticLineAdjustments),"Disable automatic line adjustments","Stop unsolicited native line recoloring and junction cleanup. Explicit manual upgrades and visibility choices remain active. Default: off.");
             Option(nameof(Setting.PreserveVanillaJunctionLines),"Preserve vanilla road lines — recolor only","Keep the game's line paths, endpoints and dash patterns on sections, intersections, transitions, road ends and highway merges. Eligible center and median boundaries follow the marking color theme, including when Centerline style is Vanilla. Automatic offsets and extra edge/median lines do not reshape preserved paint. Manual upgrades, parking layouts and crossings retain their controls. Existing automatic-line disable settings still block recoloring. Default: off (opt-in).");
@@ -80,7 +81,7 @@ namespace MedianGrassReplacement.Localization
 
 
 
-            Option(nameof(Setting.MedianEdgeLines), "Show median edge lines", "Add separate lines on the pavement beside composed raised medians. Independent of white curb edge lines. No new paint in lanes marked No markings.");
+            Option(nameof(Setting.MedianEdgeLines), "Show median edge lines", "Automatically add lines beside raised medians only. Does not control lane dividers or manually placed lines. Ignored when automatic road markings are disabled or vanilla paths are preserved. Median line style changes these generated median lines only.");
 
             Option(nameof(Setting.MedianLineOffset), "Distance from median curb (m)", "Distance to the line centre, measured into the roadway. Default 0.30 m.");
 

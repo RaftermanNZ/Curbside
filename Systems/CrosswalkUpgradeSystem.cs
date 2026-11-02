@@ -324,7 +324,7 @@ namespace MedianGrassReplacement.Systems
 
             if (line) choices.Add(new MGRCrosswalkChoice { Center = MathUtils.Position(curve, .5f), Axis = math.normalizesafe(MathUtils.Tangent(curve, .5f)) });
 
-            if (source != Entity.Null) IntersectionPaintSystem.RequestSource(source); else IntersectionPaintSystem.RequestRefresh(); Mod.Debug(line ? "Selected crossing upgraded to two lines." : "Selected crossing restored to native zebra paint.");
+            if (source != Entity.Null) IntersectionPaintSystem.RequestCrossing(source); else IntersectionPaintSystem.RequestRefresh(); Mod.Debug(line ? "Selected crossing upgraded to two lines." : "Selected crossing restored to native zebra paint.");
 
         }
 

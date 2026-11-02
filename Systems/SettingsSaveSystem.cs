@@ -1,91 +1,32 @@
 using System;
-
 using System.Diagnostics;
-
 using Colossal.IO.AssetDatabase;
-
 using Game;
-
 namespace MedianGrassReplacement.Systems
-
 {
-
-    // Live settings still apply immediately. Only persistence waits for a quiet
-
-    // second; no worker thread, file watcher or custom settings file is used.
-
-    public partial class SettingsSaveSystem : GameSystemBase
-
+    public partial class SettingsSaveSystem:GameSystemBase
     {
-
-        private static Setting _pending;
-
-        private static long _due;
-
-        private static bool _saving;
-
-        private static bool _flushAfterSave;
-
-        private bool _registerOptions = true;
-
-        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); Mod.ResetSaveGuard(); }
-
-        protected override void OnGameLoadingComplete(Colossal.Serialization.Entities.Purpose purpose, GameMode mode)
-
-        {
-
-            base.OnGameLoadingComplete(purpose, mode);
-
-            _registerOptions = true;
-
-        }
-
-        internal static void Request(Setting settings) { _pending = settings; _due = Stopwatch.GetTimestamp() + Stopwatch.Frequency; }
-
+        private static readonly DeferredSettingsWrite<Setting> writes=new DeferredSettingsWrite<Setting>();
+        private bool _registerOptions=true;
+        private static double Now=>Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;
+        internal static string PersistenceStatus=>"pending="+(writes.Pending!=null)+" writing="+writes.Saving+" failures="+writes.Failures;
+        internal static void Request(Setting settings)=>writes.Request(settings,Now);
+        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);Mod.ResetSaveGuard();}
+        protected override void OnGameLoadingComplete(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_registerOptions=true;}
         protected override void OnUpdate()
-
         {
-
-            if (_registerOptions && Mod.Settings != null)
-
-            {
-
-                Mod.Settings.RegisterInOptionsUI();
-
-                _registerOptions = false;
-
-            }
-
-            if (_pending != null && !_saving && Stopwatch.GetTimestamp() >= _due) Flush();
-
+            if(_registerOptions&&Mod.Settings!=null){Mod.Settings.RegisterInOptionsUI();_registerOptions=false;}
+            if(writes.Pending!=null&&!writes.Saving)WritePending();
         }
-
-        internal static async void Flush()
-
+        // Explicit save/dispose may bypass debounce, but never wait synchronously.
+        internal static void Flush(){writes.Force(Now);WritePending();}
+        private static async void WritePending()
         {
-
-            if (_pending == null) return;
-
-            if (_saving) { _flushAfterSave = true; return; }
-
-            _pending = null; _saving = true;
-
-            try { await AssetDatabase.global.SaveSpecificSetting(nameof(Setting)); }
-
-            catch (Exception error) { Mod.Log.Warn("Settings could not be saved: " + error.Message); }
-
-            finally
-
-            {
-
-                _saving = false;
-
-                if (_flushAfterSave) { _flushAfterSave = false; Flush(); }
-
-            }
-
+            var settings=writes.Begin(Now);if(settings==null)return;
+            bool success=false;
+            try{await AssetDatabase.global.SaveSpecificSetting(nameof(Setting));success=true;}
+            catch(Exception error){Mod.Log.Warn("Settings could not be saved; pending preferences retained for bounded retry: "+error.Message);}
+            finally{writes.Complete(success,Now);}
         }
-
     }
-
 }

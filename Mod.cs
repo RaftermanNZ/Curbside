@@ -52,6 +52,7 @@ namespace MedianGrassReplacement
 
         private void SaveState(string name, string preview, bool start, bool success)
         {
+            if(start)SettingsSaveSystem.Flush();
             Saving = start;
             var world=Unity.Entities.World.DefaultGameObjectInjectionWorld;
             if(start)
@@ -272,6 +273,7 @@ namespace MedianGrassReplacement
         public void OnDispose()
 
         {
+            SettingsSaveSystem.Flush();
             AppDomain.CurrentDomain.SetData("Curbside.Active.v1",false);
 
             if(GameManager.instance != null) GameManager.instance.onGameSaveLoad -= SaveState;
@@ -360,3 +362,9 @@ namespace MedianGrassReplacement
     }
 
 }
+
+
+
+
+
+

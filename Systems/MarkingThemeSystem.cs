@@ -16,7 +16,7 @@ namespace MedianGrassReplacement.Systems
             {
                 if(World.GetOrCreateSystemManaged<PrefabSystem>().TryGetPrefab<ThemePrefab>(selected,out var definition)&&definition!=null){CityEuropean=definition.assetPrefix=="EU";theme=selected;known=true;}
             }
-            bool european=Mod.Settings.EuropeanMarkings,edges=Mod.Settings.ThemeAssetEdgeColors;
+            bool european=Mod.Settings.EuropeanMarkings,edges=Mod.Settings.AutomaticThemeEdges;
             if(lastEuropean!=european||lastEdges!=edges){lastEuropean=european;lastEdges=edges;CurbLineEmissionSystem.RequestRoadRefresh();IntersectionPaintSystem.RequestRefresh();JunctionMarkingSystem.RequestRefresh();}
         }
     }

@@ -19,7 +19,7 @@ namespace MedianGrassReplacement.Systems
             if(shader!="BH/NetCompositionMeshLitShader")return 0;
             string key=(name??"").ToLowerInvariant();
             foreach(var excluded in new[]{"grass","curb","kerb","marking","paint","decal","rail","gravel","dirt"})if(key.Contains(excluded))return 0;
-            if(key.StartsWith("batch (road_",StringComparison.Ordinal))return 3; // Native shared road/sidewalk material observed in the game log.
+            if(key.StartsWith("batch (road_",StringComparison.Ordinal)||key.Replace("_","").Replace(" ","").Contains("parkingroad")||key.Replace("_","").Replace(" ","").Contains("parkinglotroad"))return 3; // Native shared road/sidewalk material observed in the game log.
             if(key.Contains("sidewalk")||key.Contains("pavement")||key.Contains("paver")||key.Contains("footpath"))return 2;
             return key.Contains("asphalt")||key.Contains("tarmac")||key.Contains("road surface")?1:0;
         }
@@ -50,11 +50,14 @@ namespace MedianGrassReplacement.Systems
         private Texture2D _roadTexture,_walkTexture;
         private readonly List<string> _loadErrors=new List<string>();
         private readonly Dictionary<string,Texture2D> _textures=new Dictionary<string,Texture2D>(StringComparer.OrdinalIgnoreCase);
-        private long _bytes;private bool _active;private static bool _refresh=true,_discover,_uvRefresh;private static float _quietUntil;
+        private long _bytes;private bool _active;private static bool _refresh=true,_discover,_uvRefresh;private static float _quietUntil,_discoverBy;
         internal static string Status="Global surfaces: Vanilla.";
         internal static void RequestRefresh(){_refresh=true;}
-        internal static void RequestUvRefresh(){_uvRefresh=true;}
-        internal static void NotifyRenderActivity(){if(Mod.Settings==null||Mod.Settings.DisableTextureReplacement||(string.IsNullOrWhiteSpace(Mod.Settings.GlobalRoadTexture)&&string.IsNullOrWhiteSpace(Mod.Settings.GlobalSidewalkTexture)))return;_discover=true;_quietUntil=UnityEngine.Time.realtimeSinceStartup+.35f;}
+        private static int _uvRevision;
+        private int _seenUvRevision;
+        private float _uvQuietUntil;
+        internal static void RequestUvRefresh(){_uvRefresh=true;unchecked{_uvRevision++;}}
+        internal static void NotifyRenderActivity(){if(Mod.Settings==null||Mod.Settings.DisableTextureReplacement||(string.IsNullOrWhiteSpace(Mod.Settings.GlobalRoadTexture)&&string.IsNullOrWhiteSpace(Mod.Settings.GlobalSidewalkTexture)))return;float now=UnityEngine.Time.realtimeSinceStartup;if(!_discover)_discoverBy=now+2f;_discover=true;_quietUntil=now+.35f;}
         private Texture2D Load(string path)
         {
             path=SurfaceTextureCatalog.Resolve(path??"");if(string.IsNullOrWhiteSpace(path))return null;
@@ -113,6 +116,14 @@ namespace MedianGrassReplacement.Systems
             if(found)return material.GetTexture(property)==patch.Applied;
             var original=material.GetTexture(property);
             if(!_vanilla.Allows(material,property,original))return false;
+            // Shared native parking/alley atlases include curb and sidewalk bands.
+            // Leave the whole affected material native until a region-preserving
+            // replacement is validated; never flatten it to asphalt or concrete.
+            if(material.shader!=null&&material.shader.name=="BH/NetCompositionMeshLitShader"&&material.HasProperty("_BaseColorMap"))
+            {
+                var atlas=material.GetTexture("_BaseColorMap");
+                if(atlas!=null&&NetworkTextureScope.SharedParkingAtlas(atlas.name,atlas.width,atlas.height))return false;
+            }
             material.SetTexture(property,replacement);
             if(Mod.Settings.VerboseLogging)Mod.Log.Info("Global surface target: "+material.name+" property="+property+" texture="+replacement.width+"x"+replacement.height);
             _patches[(material,property)]=new Patch{Material=material,Property=property,Role=role,Before=original,Applied=replacement};return true;
@@ -164,22 +175,85 @@ namespace MedianGrassReplacement.Systems
             PruneDestroyed();
             foreach(var patch in _patches.Values)
             {
+                if(patch.Role==5)continue; // Mixed atlas: never scale native curb/normal/mask UVs.
                 if(patch.Material.GetTexture(patch.Property)!=patch.Applied)continue;
                 if(patch.Property=="_WorldspaceAlbedo")SetUv(patch.Material,"_WorldspaceUVScale",true,true);
                 else foreach(var property in new[]{"_BaseColorMap","_NormalMap","_MaskMap"})SetUv(patch.Material,property,false,patch.Role==1);
             }
         }
+        internal void RecordNetworkSnapshot()
+        {
+            int samples=0,total=0;
+            _vanilla.Begin(World.GetExistingSystemManaged<Game.Rendering.ManagedBatchSystem>());
+            try
+            {
+                foreach(var material in Resources.FindObjectsOfTypeAll<Material>())
+                {
+                    if(material==null||material.shader==null||!material.name.StartsWith("Batch (",StringComparison.Ordinal) )continue;
+                    // A snapshot budget must apply to network materials, not unrelated buildings/vehicles.
+                    if(material.shader.name!="BH/NetCompositionMeshLitShader")continue;
+                    total++;if(samples>=32)continue;samples++;
+                    int kind=GlobalSurfacePolicy.Kind(material.name,material.shader.name);
+                    bool road=material.HasProperty("_WorldspaceAlbedo"),walk=material.HasProperty("_BaseColorMap");
+                    bool roadTracked=_patches.ContainsKey((material,"_WorldspaceAlbedo")),walkTracked=_patches.ContainsKey((material,"_BaseColorMap"));
+                    bool roadAllowed=road&&_vanilla.Allows(material,"_WorldspaceAlbedo",material.GetTexture("_WorldspaceAlbedo"));
+                    bool walkAllowed=walk&&_vanilla.Allows(material,"_BaseColorMap",material.GetTexture("_BaseColorMap"));
+                    Texture Original(string property){return _patches.TryGetValue((material,property),out var saved)?saved.Before:material.HasProperty(property)?material.GetTexture(property):null;}
+                    string Describe(Texture texture)=>texture==null?"none":texture.name+" ["+texture.width+"x"+texture.height+"]";
+                    var before=Original("_BaseColorMap");
+                    string Uv(string property)=>material.HasProperty(property)?material.GetTextureScale(property)+" offset="+material.GetTextureOffset(property):"none";
+                    bool guarded=before!=null&&NetworkTextureScope.SharedParkingAtlas(before.name,before.width,before.height);
+                    Mod.Log.Info("Network mapping snapshot: material="+material.name+" sharedParkingGuard="+guarded+" normal="+Describe(material.HasProperty("_NormalMap")?material.GetTexture("_NormalMap"):null)+" mask="+Describe(material.HasProperty("_MaskMap")?material.GetTexture("_MaskMap"):null)+" normalUv="+Uv("_NormalMap")+" maskUv="+Uv("_MaskMap")+" keywords="+string.Join(",",material.shaderKeywords));
+                    Mod.Log.Info("Network atlas snapshot: material="+material.name+" originalBase="+Describe(before)+" currentBase="+Describe(walk?material.GetTexture("_BaseColorMap"):null)+" originalRoad="+Describe(Original("_WorldspaceAlbedo"))+" baseUv="+(walk?material.GetTextureScale("_BaseColorMap").ToString():"none")+" baseOffset="+(walk?material.GetTextureOffset("_BaseColorMap").ToString():"none"));
+                    Mod.Log.Info("Network texture snapshot: material="+material.name+" shader="+material.shader.name+" role="+kind+" roadProperty="+road+" roadTracked="+roadTracked+" roadOriginalVerified="+roadAllowed+" sidewalkProperty="+walk+" sidewalkTracked="+walkTracked+" sidewalkOriginalVerified="+walkAllowed);
+                }
+                Mod.Log.Info("Network texture snapshot: sampled="+samples+" total="+total+" discoveryPending="+_discover+" refreshPending="+_refresh+" masterDisabled="+Mod.Settings.DisableTextureReplacement);
+            }
+            finally{_vanilla.End();}
+        }
         private string _lastReport;
-        private void Apply()
+        private bool ApplyParkingAtlas(Material material,out bool roadApplied,out bool walkApplied)
+        {
+            roadApplied=walkApplied=false;
+            const string property="_BaseColorMap";
+            if(material.shader.name!="BH/NetCompositionMeshLitShader"||!material.name.StartsWith("Batch (",StringComparison.Ordinal)||!material.HasProperty(property))return false;
+            bool tracked=_patches.TryGetValue((material,property),out var patch);
+            var original=tracked?patch.Before:material.GetTexture(property);
+            if(original==null||!NetworkTextureScope.SharedParkingAtlas(original.name,original.width,original.height))return false;
+            if(tracked)
+            {
+                if(patch.Role==5&&material.GetTexture(property)==patch.Applied){roadApplied=_roadTexture!=null;walkApplied=_walkTexture!=null;}
+                return true; // A later competing edit is never overwritten.
+            }
+            if(!_vanilla.Allows(material,property,original))return true;
+            string key="parking-atlas|"+original.GetInstanceID()+"|"+(_roadTexture==null?0:_roadTexture.GetInstanceID())+"|"+(_walkTexture==null?0:_walkTexture.GetInstanceID())+"|"+Mod.Settings.RoadSurfaceUv.ToString("R",System.Globalization.CultureInfo.InvariantCulture)+"|"+Mod.Settings.SidewalkSurfaceTiling.ToString("R",System.Globalization.CultureInfo.InvariantCulture);
+            if(!_textures.TryGetValue(key,out var replacement)||replacement==null)
+            {
+                if(!SurfaceUpgradePolicy.FitsBudget(ParkingAtlasPolicy.Size,ParkingAtlasPolicy.Size,_bytes))return true;
+                try{replacement=ParkingAtlas.Compose(original,_roadTexture,_walkTexture,Mod.Settings.RoadSurfaceUv,Mod.Settings.SidewalkSurfaceTiling);}
+                catch(Exception e){_loadErrors.Add("Parking atlas: "+e.Message);return true;}
+                if(replacement==null)return true; // Unsupported graphics path stays native.
+                _textures[key]=replacement;_bytes+=ParkingAtlasPolicy.Bytes;
+            }
+            material.SetTexture(property,replacement);
+            _patches[(material,property)]=new Patch{Material=material,Property=property,Role=5,Before=original,Applied=replacement};
+            roadApplied=_roadTexture!=null;walkApplied=_walkTexture!=null;return true;
+        }
+        private void Apply(bool discovery=false)
         {
             var road=_roadTexture;var walk=_walkTexture;var errors=_loadErrors;
             if(road==null&&walk==null){Status="Global surfaces: Vanilla. "+string.Join(" ",errors);Mod.Log.Info(Status);return;}
             int roads=0,walks=0;var candidates=new List<string>();
             _vanilla.Begin(World.GetExistingSystemManaged<Game.Rendering.ManagedBatchSystem>());
             try{
-            foreach(var material in Resources.FindObjectsOfTypeAll<Material>())
+            // Ordinary network rediscovery reuses the renderer's managed material
+            // catalog. Full Unity-object discovery remains initial/explicit or
+            // experimental-area work; no periodic whole-object scan is added.
+            foreach(var material in discovery&&!Mod.Settings.SurfaceTexturesOnAssets&&_vanilla.HasBatchMaterials
+                ?_vanilla.BatchMaterials:(IEnumerable<Material>)Resources.FindObjectsOfTypeAll<Material>())
             {
                 if(material==null||material.shader==null)continue;
+                if(ApplyParkingAtlas(material,out bool parkingRoad,out bool parkingWalk)){if(parkingRoad)roads++;if(parkingWalk)walks++;continue;}
                 int kind=material.name.StartsWith("Batch (",StringComparison.Ordinal)?GlobalSurfacePolicy.Kind(material.name,material.shader.name):0;
                 if(kind==0&&Mod.Settings.SurfaceTexturesOnAssets)kind=GlobalSurfacePolicy.AssetKind(material.name,material.shader.name);
                 if(kind==0)continue;
@@ -217,9 +291,18 @@ namespace MedianGrassReplacement.Systems
                 _refresh=false;_discover=false;_uvRefresh=false;
                 _vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();
             }
-            else if(_uvRefresh){_uvRefresh=false;ApplyUv();}
-            else if(_discover&&UnityEngine.Time.realtimeSinceStartup>=_quietUntil){_discover=false;Apply();}
+            else if(_uvRefresh)
+            {
+                bool mixed=false;foreach(var patch in _patches.Values)if(patch.Role==5){mixed=true;break;}
+                if(mixed&&_seenUvRevision!=_uvRevision){_seenUvRevision=_uvRevision;_uvQuietUntil=UnityEngine.Time.realtimeSinceStartup+.25f;return;}
+                if(mixed&&UnityEngine.Time.realtimeSinceStartup<_uvQuietUntil)return;
+                _uvRefresh=false;
+                if(mixed)_refresh=true;else ApplyUv();
+            }
+            else if(_discover&&(UnityEngine.Time.realtimeSinceStartup>=_quietUntil||UnityEngine.Time.realtimeSinceStartup>=_discoverBy)){_discover=false;Apply(true);}
         }
         protected override void OnDestroy(){Restore(true);_vanilla.Clear();base.OnDestroy();}
     }
 }
+
+

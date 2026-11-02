@@ -34,7 +34,7 @@ namespace MedianGrassReplacement.Systems
             }
             using(var deleted=new NativeList<Entity>(entities.Length,Allocator.Temp))
             {
-                foreach(var entity in entities)if(em.Exists(entity)&&!em.HasComponent<Deleted>(entity))deleted.Add(entity);
+                foreach(var entity in entities){world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);if(em.Exists(entity)&&!em.HasComponent<Deleted>(entity))deleted.Add(entity);}
                 if(deleted.Length>0)em.AddComponent(deleted.AsArray(),ComponentType.ReadWrite<Deleted>());
             }
         }
@@ -43,6 +43,8 @@ namespace MedianGrassReplacement.Systems
 
         {
 
+            if(world.EntityManager.HasComponent<Game.Net.Lane>(entity)&&world.EntityManager.HasComponent<Owner>(entity))
+                world.GetOrCreateSystemManaged<GeneratedPaintOwnerCleanupSystem>().Track(entity,world.EntityManager.GetComponentData<Owner>(entity).m_Owner);
             if(!world.EntityManager.HasComponent<MGRPendingVisualRegistration>(entity)) world.EntityManager.AddComponent<MGRPendingVisualRegistration>(entity);
 
         }
@@ -84,6 +86,7 @@ namespace MedianGrassReplacement.Systems
         {
 
             var em=world.EntityManager;if(!em.Exists(entity)) return;
+            world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
             if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("visual.retireRequestedByCurbside","entity="+entity+" saving="+Mod.Saving+" alreadyDeleted="+em.HasComponent<Deleted>(entity));
 
             // Use native Deleted retirement during saves as well as live edits.

@@ -2,6 +2,8 @@ namespace MedianGrassReplacement.Systems
 {
     internal static class NativeJunctionColorPolicy
     {
+        internal static byte ThemedTarget(bool opposing,bool edge,bool european,bool themeEdges,bool followCity)
+            =>followCity?(european||!opposing?(byte)1:(byte)2):Target(opposing,edge,european,themeEdges);
         // 0: retain source, 1: exact white variant, 2: exact yellow variant.
         internal static byte Target(bool opposing,bool edge,bool european,bool themeEdges)
         {

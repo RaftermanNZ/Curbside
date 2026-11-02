@@ -75,6 +75,10 @@ namespace GardenCitySignals
   private bool ambiguousCatalog;
   private EffectPrefab fixtureSource;
   private bool started,stopping;
+  private bool nativePackReady;
+  private double lastNativeProgress;
+  private int bestNativeProgress;
+  private int rejectedNativeModules;
   private System.Threading.CancellationToken termination;
   private Task importTask;
   private bool CancelImport=>stopping||termination.IsCancellationRequested||GameManager.instance==null||GameManager.instance.state==GameManager.State.Quitting||GameManager.instance.state==GameManager.State.Terminated||!World.IsCreated;
@@ -129,17 +133,27 @@ namespace GardenCitySignals
    importTask=Colossal.TaskManager.instance.SharedTask("Curbside.SignalAssetImport",()=>Import(template));
   }
   protected override void OnDestroy(){stopping=true;NativeSignalCatalog.Reset(prefabs);base.OnDestroy();}
+  protected override void OnGameLoadingComplete(Purpose purpose,GameMode mode)
+  {
+   base.OnGameLoadingComplete(purpose,mode);
+   if(stopping||nativePackReady||Environment.GetEnvironmentVariable("CURBSIDE_DEVELOPER_SIGNAL_IMPORT")=="1")return;
+   // A negative boot probe is not permanent proof that a subscribed pack is
+   // absent. Retry once at the native world-load boundary, not every frame.
+   started=false;Enabled=true;preparedProbeStart=-1;nextProbe=0;nextCatalogScan=0;
+   bestNativeProgress=0;lastNativeProgress=Mod.LoadTimer.Elapsed.TotalSeconds;
+   DiscoveryStatus="Checking optional native signal pack after world load";
+  }
   private void ScanNativeCatalog()
   {
    if(Mod.LoadTimer.Elapsed.TotalSeconds<nextCatalogScan)return;
    nextCatalogScan=Mod.LoadTimer.Elapsed.TotalSeconds+1;
-   discovered.Clear();ambiguousCatalog=false;
+   discovered.Clear();ambiguousCatalog=false;rejectedNativeModules=0;
    // Query the public prefab entities. Published PrefabIDs include the pack
    // identity; a name-only lookup deliberately cannot address those IDs.
    using(var items=nativeModules.ToEntityArray(Allocator.Temp))foreach(var entity in items)
    {
     if(!prefabs.TryGetPrefab<StaticObjectPrefab>(entity,out var model)||model==null||!ExpectedNames.Contains(model.name))continue;
-    if(!Mod.PreparedPack&&!Published(model))continue;
+    if(!Mod.PreparedPack&&!Published(model)){rejectedNativeModules++;continue;}
     if(discovered.TryGetValue(model.name,out var existing)&&existing!=model){ambiguousCatalog=true;continue;}
     discovered[model.name]=model;
    }
@@ -164,15 +178,18 @@ namespace GardenCitySignals
      if(preparedProbeStart<0)preparedProbeStart=Mod.LoadTimer.Elapsed.TotalSeconds;
      DiscoveryStatus="No published signal modules detected; checking native catalog during bounded startup grace";
      if(Mod.LoadTimer.Elapsed.TotalSeconds-preparedProbeStart<30)return;
-     started=true;Enabled=false;DiscoveryStatus="Optional signal pack absent after startup grace; custom buttons hidden";
+     started=true;Enabled=false;DiscoveryStatus="Optional signal pack not detected after startup grace; ownershipRejected="+rejectedNativeModules+"; custom buttons hidden";
      AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);Mod.Log.Info(DiscoveryStatus+". No source import or loading buttons.");
     }
     return;
    }
-   var adopted=new List<Entity>();
+   var adopted=new List<Entity>();string blocked=fallback==null?"native fallback unavailable":"";
    if(fallback!=null)foreach(string name in Modules)
    {
-    if(ambiguousCatalog||!discovered.TryGetValue("CSG Module "+name,out var model)||model.m_Meshes==null||model.m_Meshes.Length!=1||model.m_Meshes[0].m_Mesh==null||!prefabs.TryGetEntity(model,out var entity)||!EntityManager.Exists(entity))break;
+    if(ambiguousCatalog){blocked="duplicate module names";break;}
+    if(!discovered.TryGetValue("CSG Module "+name,out var model)){blocked=name+": not discovered";break;}
+    if(model.m_Meshes==null||model.m_Meshes.Length!=1||model.m_Meshes[0].m_Mesh==null){blocked=name+": native mesh not ready";break;}
+    if(!prefabs.TryGetEntity(model,out var entity)||!EntityManager.Exists(entity)){blocked=name+": native prefab entity not ready";break;}
     if(!Mod.PreparedPack&&!Published(model))break; // Published modules may share declared asset-pack dependencies.
     adopted.Add(entity);
    }
@@ -180,16 +197,18 @@ namespace GardenCitySignals
    {
     NativeSignalCatalog.Register(prefabs,discovered);
     foreach(var entity in adopted)MedianGrassReplacement.Systems.SignalAssetSaveSystem.Register(entity,fallbackEntity);
-    started=true;Enabled=false;DiscoveryStatus="Ready: "+adopted.Count+" native signal modules";
+    nativePackReady=true;started=true;Enabled=false;DiscoveryStatus="Ready: "+adopted.Count+" native signal modules";
     Mod.Log.Info("Prepared signal pack adopted from native startup: modules="+adopted.Count+" uptime="+UnityEngine.Time.realtimeSinceStartup+". No FBX import, runtime database population or manual geometry loading.");
     return;
    }
-   DiscoveryStatus="Signal modules "+adopted.Count+"/"+Modules.Length+"; ambiguous="+ambiguousCatalog+"; missing="+string.Join(",",Modules.Where(n=>!discovered.ContainsKey("CSG Module "+n)).Take(8));
+   int progress=discovered.Count+adopted.Count;
+   if(progress>bestNativeProgress){bestNativeProgress=progress;lastNativeProgress=Mod.LoadTimer.Elapsed.TotalSeconds;}
+   DiscoveryStatus="Signal modules "+adopted.Count+"/"+Modules.Length+"; discovered="+discovered.Count+"; ownershipRejected="+rejectedNativeModules+"; fallback="+(fallback!=null)+"; ambiguous="+ambiguousCatalog+"; blocked="+blocked+"; missing="+string.Join(",",Modules.Where(n=>!discovered.ContainsKey("CSG Module "+n)).Take(8));
    // Native prefab boot may take longer with a large playset. A missing-pack
    // deadline must not run while the game is still registering its assets.
    if(GameManager.instance==null||GameManager.instance.state<GameManager.State.WorldReady)return;
    if(preparedProbeStart<0)preparedProbeStart=Mod.LoadTimer.Elapsed.TotalSeconds;
-   if(Mod.LoadTimer.Elapsed.TotalSeconds-preparedProbeStart<30)return;
+   if(!NativeSignalStartupPolicy.Expired(Mod.LoadTimer.Elapsed.TotalSeconds,preparedProbeStart,lastNativeProgress))return;
    started=true;Enabled=false;
    AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);
    Mod.Log.Error(DiscoveryStatus);
@@ -351,3 +370,7 @@ namespace GardenCitySignals
   }
  }
 }
+
+
+
+

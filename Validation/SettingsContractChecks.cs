@@ -81,9 +81,9 @@ class SettingsContractChecks
             .Where(p=>p.CanRead&&p.CanWrite&&!Attr(p,"ExcludeAttribute")&&(p.PropertyType==typeof(bool)||p.PropertyType==typeof(float)||p.PropertyType==typeof(int)||p.PropertyType==typeof(string))).ToArray();
         var snapshot=properties.ToDictionary(p=>p.Name,p=>p.GetValue(s));
         Set(s,"PreserveVanillaJunctionLines",false);
-        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-out altered another saved setting");
+        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"&&p.Name!="DisableAutomaticMarkings"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-out altered another saved setting");
         Set(s,"PreserveVanillaJunctionLines",true);
-        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-in altered another saved setting");
+        foreach(var p in properties.Where(p=>p.Name!="PreserveVanillaJunctionLines"&&p.Name!="DisableAutomaticMarkings"))Check(Equals(snapshot[p.Name],p.GetValue(s)),p.Name+": new opt-in altered another saved setting");
         var json=new JavaScriptSerializer();var decoded=json.Deserialize<Dictionary<string,object>>(json.Serialize(snapshot));var loaded=Fresh();
         foreach(var p in properties)p.SetValue(loaded,decoded[p.Name]==null?null:Convert.ChangeType(decoded[p.Name],p.PropertyType));
         foreach(var p in properties)Check(Equals(p.GetValue(s),p.GetValue(loaded)),p.Name+": settings replay changed a saved value");

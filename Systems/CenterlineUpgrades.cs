@@ -47,11 +47,30 @@ namespace MedianGrassReplacement.Systems
         {float difference=(pairedWidth-singleWidth)*.5f;return math.isfinite(difference)&&difference>=.05f&&difference<=.5f?difference:.15f;}
         internal static float MedianCenter(float curb,bool left,byte style,float offset,float halfSpacing)=>curb+(left?-1:1)*(offset+(Pattern(style)==2?halfSpacing:0));
         internal static float Offset(byte style,int stripe)=>Pattern(style)==2?(stripe==0?-.15f:.15f):0;
+        internal static bool MedianShoulder(float x,float left,float right,float laneX,float laneWidth)
+        {
+            if(!math.all(math.isfinite(new float4(x,left,right,laneX)))||!math.isfinite(laneWidth)||laneWidth<=0||right<=left)return false;
+            if(x<=left||x>=right||laneX<left||laneX>right)return false;
+            float distance=math.max(0,math.abs(x-laneX)-laneWidth*.5f);
+            return distance<=.5f; // Bounded native paved shoulder, never a search across lanes/islands.
+        }
         internal static bool RaisedMedian(NetPieceFlags flags,float height,float offsetY,float roadY)
             =>(flags&NetPieceFlags.BlockTraffic)!=0||(flags&NetPieceFlags.HasMesh)!=0&&math.isfinite(height)&&math.isfinite(offsetY)&&height>.08f&&offsetY+height>roadY+.08f;
     }
     public partial class CurbLineEmissionSystem
     {
+        private bool TryMedianShoulder(Entity composition,float x,List<NorthAmericanLinePolicy.Traffic> traffic,out float height)
+        {
+            height=0;if(!EntityManager.HasBuffer<NetCompositionPiece>(composition))return false;
+            foreach(var piece in EntityManager.GetBuffer<NetCompositionPiece>(composition,true))
+            {
+                if((piece.m_PieceFlags&NetPieceFlags.HasRoadLanes)==0||(piece.m_SectionFlags&(NetSectionFlags.Median|NetSectionFlags.Hidden|NetSectionFlags.Underground|NetSectionFlags.Overhead))!=0)continue;
+                float width=piece.m_Size.x;if(width<=0&&EntityManager.HasComponent<NetPieceData>(piece.m_Piece))width=EntityManager.GetComponentData<NetPieceData>(piece.m_Piece).m_Width;
+                float left=piece.m_Offset.x-width*.5f,right=piece.m_Offset.x+width*.5f;
+                foreach(var lane in traffic)if(math.isfinite(lane.Y)&&CenterlineUpgradePolicy.MedianShoulder(x,left,right,lane.X,lane.Width)){height=lane.Y;return true;}
+            }
+            return false;
+        }
         internal bool HasExplicitCenterMarks(Entity road)=>_marks.TryGetValue(road,out var marks)&&marks.Curves.Exists(m=>m.CenterUpgrade);
         internal bool TryCenterUpgradePlan(Entity road,byte style,out List<Bezier4x3> paths,out string reason)
         {
@@ -92,7 +111,11 @@ namespace MedianGrassReplacement.Systems
             {
                 // Keep the closest stripe at the median offset; a pair expands into pavement.
                 float cx=CenterlineUpgradePolicy.MedianCenter(side==0?span.x:span.y,side==0,style,Mod.Settings.MedianLineOffset,halfSpacing);
-                foreach(var lane in traffic)if(cx>lane.X-lane.Width*.5f&&cx<lane.X+lane.Width*.5f){targets.Add(new float2(cx,lane.Y));break;}
+                bool fitted=false;foreach(var lane in traffic)if(cx>lane.X-lane.Width*.5f&&cx<lane.X+lane.Width*.5f){targets.Add(new float2(cx,lane.Y));fitted=true;break;}
+                // Lane width excludes some asphalt beside parking-road medians.
+                // Use the native road-piece envelope only for that bounded gap;
+                // retain the requested single/double/dashed/passing geometry.
+                if(!fitted&&TryMedianShoulder(composition,cx,traffic,out float shoulderHeight))targets.Add(new float2(cx,shoulderHeight));
             }
             if(raised.Count==0)targets.Add(new float2(x,y));
             if(targets.Count==0){reason="No pavement beside the physical median can fit this marking.";return false;}

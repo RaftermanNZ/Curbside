@@ -179,7 +179,7 @@ namespace MedianGrassReplacement.Systems
         {
             // Only exact mesh-family color variants. Never fall back to a
             // generic solid/dashed definition or the configured center style.
-            byte target=NativeJunctionColorPolicy.Target(opposing,edge,Mod.Settings.EuropeanMarkings,Mod.Settings.ThemeAssetEdgeColors);
+            byte target=NativeJunctionColorPolicy.ThemedTarget(opposing,edge,Mod.Settings.EuropeanMarkings,Mod.Settings.AutomaticThemeEdges,Mod.Settings.FollowCityMarkingTheme);
             if(target==0)return source;
             var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
             Entity color=target==1?palette.WhiteVariant(source):target==2?palette.Variant(source):Entity.Null;
@@ -190,12 +190,8 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            if(Mod.Settings.CenterLineStyle=="Vanilla")return Mod.Settings.EuropeanMarkings?ThemeEquivalent(source):source;
-
-            if(string.IsNullOrEmpty(Mod.Settings.CenterLineStyle))return ThemeEquivalent(source);
-
-            var chosen=_nativeLineDefinitions.TryGetValue(Mod.Settings.CenterLineStyle,out var asset)?asset:source;
-            return Mod.Settings.EuropeanMarkings?ThemeEquivalent(chosen):chosen;
+            // Global selection supplies a color theme, never a manual line shape.
+            return ThemeEquivalent(source);
 
         }
 
@@ -577,7 +573,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
-            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbLineEmissionSystem",started);ModDiagnostics.RuntimeCosts.Workload("MarkedRoads",_marks.Count,_pendingRoads.Count+_dirtyNodes.Count);}
+            try{UpdateMeasured();}finally{ModDiagnostics.RuntimeCosts.End("CurbLineEmissionSystem",started);ModDiagnostics.RuntimeCosts.Workload("MarkedRoads",_marks.Count,_pendingRoads.Count+_roadWorkOrder.Count+_dirtyNodes.Count);}
         }
         private void UpdateMeasured()
 
@@ -793,7 +789,7 @@ namespace MedianGrassReplacement.Systems
                 foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
                     if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!EntityManager.HasComponent<Deleted>(connection.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(connection.m_Edge))pending.Add(connection.m_Edge);
             }
-            if (pending.Count == 0 && _dirtyNodes.Count == 0) return;
+            if (pending.Count == 0 && _roadWorkOrder.Count == 0 && _dirtyNodes.Count == 0) return;
 
             if (!ResolveLine()) { foreach (var road in pending) _pendingRoads.Add(road); return; }
 
@@ -805,11 +801,12 @@ namespace MedianGrassReplacement.Systems
 
                 var rebuildWatch=_roadWatch;rebuildWatch.Restart();int rebuilt=0;var retryRoads=_retryRoadWork;retryRoads.Clear();
 
-                foreach (var road in pending)
-
+                foreach(var requested in pending)_roadWorkOrder.Add(requested);
+                while(_roadWorkOrder.Count>0)
                 {
-
-                    if(rebuilt>=32||(rebuilt>=2&&rebuildWatch.Elapsed.TotalMilliseconds>=2)){_pendingRoads.Add(road);continue;}rebuilt++;
+                    if(rebuilt>=32||(rebuilt>=2&&rebuildWatch.Elapsed.TotalMilliseconds>=2))break;
+                    if(!_roadWorkOrder.Take(out var road))break;
+                    rebuilt++;
 
                     if (!EntityManager.Exists(road) || EntityManager.HasComponent<Deleted>(road)) { RemoveRoad(road); continue; }
 
@@ -907,7 +904,7 @@ namespace MedianGrassReplacement.Systems
 
                 foreach(var retry in retryRoads)_pendingRoads.Add(retry);
                 if(ModDiagnostics.TraceBuffer.Enabled&&UnityEngine.Time.realtimeSinceStartup>=_nextPaintTiming)
-                {_nextPaintTiming=UnityEngine.Time.realtimeSinceStartup+1;ModDiagnostics.TraceBuffer.Record("paint.timing","roads="+rebuilt+" elapsedMs="+rebuildWatch.Elapsed.TotalMilliseconds.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)+" backlog="+_pendingRoads.Count);}
+                {_nextPaintTiming=UnityEngine.Time.realtimeSinceStartup+1;ModDiagnostics.TraceBuffer.Record("paint.timing","roads="+rebuilt+" elapsedMs="+rebuildWatch.Elapsed.TotalMilliseconds.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)+" backlog="+(_pendingRoads.Count+_roadWorkOrder.Count));}
 
             }
 
@@ -941,6 +938,8 @@ namespace MedianGrassReplacement.Systems
 
 
 
+        private readonly ManagedWorkQueue<Entity> _roadWorkOrder=new ManagedWorkQueue<Entity>();
+
         private bool ResolveLine()
 
         {
@@ -967,13 +966,13 @@ namespace MedianGrassReplacement.Systems
 
                     if (!IsLineAsset(entity, out var prefab)) continue;
 
-                    if (prefab.name != Mod.Settings.CurbLineStyle) continue;
+                    if (prefab.name != "EU Highway Edge Line") continue;
 
                     var archetype = EntityManager.GetComponentData<NetLaneArchetypeData>(entity).m_LaneArchetype;
 
                     if (!archetype.Valid) continue;
 
-                    _linePrefab = Mod.Settings.EuropeanMarkings&&Mod.Settings.ThemeAssetEdgeColors?ThemeEquivalent(entity):entity;
+                    _linePrefab = Mod.Settings.EuropeanMarkings&&Mod.Settings.AutomaticThemeEdges?ThemeEquivalent(entity):entity;
 
                     _lineArchetype = archetype;
 
@@ -1356,7 +1355,7 @@ namespace MedianGrassReplacement.Systems
 
             if(!Mod.Settings.MedianEdgeLines||!EntityManager.HasBuffer<NetCompositionPiece>(composition))return;
 
-            Entity asset=AutomaticMedianAsset();if(asset==Entity.Null&&!Mod.Settings.EuropeanMarkings)asset=_solidYellow;if(!string.IsNullOrEmpty(Mod.Settings.MedianLineStyle))_nativeLineDefinitions.TryGetValue(Mod.Settings.MedianLineStyle,out asset);
+            Entity asset=AutomaticMedianAsset();if(asset==Entity.Null&&!Mod.Settings.EuropeanMarkings)asset=_solidYellow;
             if(Mod.Settings.EuropeanMarkings&&asset!=Entity.Null)asset=ThemeEquivalent(asset);
 
             if(asset==Entity.Null)return;
@@ -1836,6 +1835,8 @@ namespace MedianGrassReplacement.Systems
 
         {
 
+            var parkingPaint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,false);
+            if(parkingPaint==Entity.Null)return;
             var roadCenter = (geometry.m_Start.m_Left.d + geometry.m_Start.m_Right.d
 
                 + geometry.m_End.m_Left.a + geometry.m_End.m_Right.a) * 0.25f;
@@ -1872,7 +1873,8 @@ namespace MedianGrassReplacement.Systems
 
                 if (sideMode < 2) continue;
 
-                if (RoadMarkingPolicy.Suppressed(lateral, unmarked)) continue;
+                // A Road Builder "No Markings" lane suppresses automatic paint,
+                // not this explicitly selected, saved parking upgrade.
 
                 float2 tangent = math.normalizesafe(MathUtils.Tangent(curve.m_Bezier, 0.5f).xz);
 
@@ -1939,7 +1941,7 @@ namespace MedianGrassReplacement.Systems
                 float margin=.31f/math.max(.1f,MathUtils.Length(boundary));
                 var markers=ParkingMarkPlacement.BayMarkers(parameters,available,lower>0?lower+margin:0,upper<1?upper-margin:1);
                 foreach(var paint in ParkingMarkPlacement.BuildBayStyle(boundary,lower,upper,markers,!inwardLeft,style,width,closeStart,closeEnd,Mod.Settings.CloseParkingAtBuildingEntrances))
-                    if(Valid(paint))output.Add(new MarkCurve(paint,_linePrefab,.1f));
+                    if(Valid(paint))output.Add(new MarkCurve(paint,parkingPaint,.1f));
 
                 if ((style == ParkingBayStyle.BoundaryAndTs || style == ParkingBayStyle.CurbDividers) && markers.Count>1 && markers[0].T<=.001f && markers[markers.Count-1].T>=.999f && EntityManager.HasComponent<EdgeLane>(lane))
 
@@ -1951,7 +1953,7 @@ namespace MedianGrassReplacement.Systems
 
                     if (math.min(delta.x, delta.y) <= .001f && math.max(delta.x, delta.y) >= .999f)
 
-                        AddCaps(road, forward ? boundary : MathUtils.Invert(boundary), forward ? boundary : MathUtils.Invert(boundary), stops, 1);
+                        AddCaps(road, forward ? boundary : MathUtils.Invert(boundary), forward ? boundary : MathUtils.Invert(boundary), stops, 1,parkingPaint);
 
                 }
 
@@ -2569,6 +2571,7 @@ namespace MedianGrassReplacement.Systems
 
                 foreach (var entity in entities) GeneratedVisualLifecycle.Retire(World,entity);
 
+            _roadWorkOrder.Clear();
             _parkingDirtyRoads.Clear();
 
             _auditRoads.Clear();

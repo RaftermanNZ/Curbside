@@ -62,7 +62,7 @@ namespace MedianGrassReplacement
 
         [SettingsUISection(kMainTab, kAppearanceGroup)]
 
-        public string CurbLineStyle { get => _curbLineStyle; set { string next = string.IsNullOrWhiteSpace(value) ? "EU Highway Edge Line" : value; if (next == _curbLineStyle) return; _curbLineStyle = next; if (_runtimeEventsEnabled) ApplyAndSave(); } }
+        [SettingsUIHidden] public string CurbLineStyle { get => _curbLineStyle; set { string next = string.IsNullOrWhiteSpace(value) ? "EU Highway Edge Line" : value; if (next == _curbLineStyle) return; _curbLineStyle = next; if (_runtimeEventsEnabled) ApplyAndSave(); } }
 
         public DropdownItem<string>[] GetCurbLineChoices() => CurbLineEmissionSystem.GetLineChoices(CurbLineStyle);
 
@@ -104,7 +104,7 @@ namespace MedianGrassReplacement
 
         [SettingsUISection(kTexturesTab, kLibraryGroup)]
 
-        public string TextureFolder { get => string.IsNullOrWhiteSpace(_textureFolder) ? TextureCatalog.DefaultFolder : _textureFolder; set { var next = TextureCatalog.NormalizeFolder(value); if (string.Equals(next, _textureFolder, StringComparison.OrdinalIgnoreCase)) return; _textureFolder = next; TextureCatalog.Invalidate(); SurfaceTextureCatalog.Invalidate(); if (_runtimeEventsEnabled) { ApplyAndSave(); MedianMaterialSystem.RequestRefresh("texture folder changed"); } } }
+        public string TextureFolder { get => string.IsNullOrWhiteSpace(_textureFolder) ? TextureCatalog.DefaultFolder : _textureFolder; set { var next = TextureCatalog.NormalizeFolder(value); if (string.Equals(next, _textureFolder, StringComparison.OrdinalIgnoreCase)) return; _textureFolder = next; TextureCatalog.Invalidate(); SurfaceTextureCatalog.Invalidate(); if (_runtimeEventsEnabled) { ApplyAndSave(); MedianMaterialSystem.RequestRefresh("texture folder changed"); GlobalSurfaceMaterialSystem.RequestRefresh(); } } }
 
         [SettingsUIDropdown(typeof(Setting), nameof(GetTextureChoices))]
 
@@ -167,7 +167,7 @@ namespace MedianGrassReplacement
         private void SetDefaultValues(string textureFolder)
         {
             _preserveVanillaJunctionLines=false;
-            _disableAutomaticMarkings=false; _disableAutomaticHighwayMarkings=false; _disableAutomaticLineAdjustments=false; _disableTextureReplacement=false; _markingToolColor="Yellow"; FollowCityMarkingTheme=false;ThemeAssetEdgeColors=true; _centerLineStyle=""; AlignMedianStopBar=true; MedianEdgeLines=true; _medianLineOffset=.35f; _medianLineSetback=.05f; _medianLineStyle=""; PowerlinePoleSpacing=35f;PowerlineMinimumGap=10f;PowerlineCornerSetback=6f;PowerlineHeight=10f; SetDecalDefaults(); SetSurfaceDefaults(); _textureFolder = textureFolder; _selectedTexture = TextureCatalog.BundledValue; _uvScale = .10f; AlleyWhiteEdges=false; AlleyLineOffset=.20f; AlleyLineStopGap=0f; CurbWhiteLines = true; CurbLinesBesideParking = false; _curbLineOffset = .25f; _curbLineStyle = "NA Parking Edge Line"; _fixedParkingBayLength = 7f; _parkingIntersectionSetback = 6.5f; _stopLineCurbGap = .15f; _curbLineStopGap = .05f; _crosswalkUpgradeWidth = 2.5f; LockCurbAndStopLines = true;
+            _disableAutomaticMarkings=false; _disableAutomaticHighwayMarkings=false; _disableAutomaticLineAdjustments=false; _disableTextureReplacement=false; _markingToolColor="Yellow"; FollowCityMarkingTheme=true;ThemeAssetEdgeColors=true; _centerLineStyle=""; AlignMedianStopBar=true; MedianEdgeLines=true; _medianLineOffset=.35f; _medianLineSetback=.05f; _medianLineStyle=""; PowerlinePoleSpacing=35f;PowerlineMinimumGap=10f;PowerlineCornerSetback=6f;PowerlineHeight=10f; SetDecalDefaults(); SetSurfaceDefaults(); _textureFolder = textureFolder; _selectedTexture = TextureCatalog.BundledValue; _uvScale = .10f; AlleyWhiteEdges=false; AlleyLineOffset=.20f; AlleyLineStopGap=0f; CurbWhiteLines = true; CurbLinesBesideParking = false; _curbLineOffset = .25f; _curbLineStyle = "NA Parking Edge Line"; _fixedParkingBayLength = 7f; _parkingIntersectionSetback = 6.5f; _stopLineCurbGap = .15f; _curbLineStopGap = .05f; _crosswalkUpgradeWidth = 2.5f; LockCurbAndStopLines = true;
         }
 
         public override void SetDefaults()

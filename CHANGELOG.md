@@ -1,4 +1,30 @@
-# Changelog
+## 0.5.1-test.154
+
+Changes since published 0.5.1-test.146:
+
+### Road markings and themes
+- Fresh settings and resets follow the city's marking theme. Automatic median and center markings use European or North American colors as appropriate; explicit white/yellow tool selections keep their chosen color. Existing saved preferences are retained.
+- Consolidated automatic marking controls around the vanilla automatic-markings switch. This disables Curbside's automatic generation, recoloring and adjustments while preserving manual upgrades. Conflicting automatic controls are disabled while vanilla mode is selected; legacy settings remain readable.
+- Replaced visible global line-shape selectors with theme choices. Single/double/dashed/passing styles remain available through the line tools.
+- Corrected paint-ownership maintenance that could leave duplicate or flickering generated markings. Parking upgrades use dedicated white single paint instead of a shared edge-line asset.
+- Improved manual median-line placement beside native paved shoulders, including parking-road medians. Single, double, dashed and passing choices use the same bounded pavement validation without moving the road or changing its lane layout.
+
+### Parking, crossings and textures
+- Fixed the shared parking-road atlas replacement so the parking tread uses the road selection and the raised sidewalk uses the sidewalk selection. Native curb/detail strips and normal/mask UVs are preserved. The parking-atlas result has been confirmed in the author's Test153 session; wider road/configuration coverage remains ongoing.
+- Known limitation: the replacement texture can appear stretched across parking bays. This update corrects road-versus-sidewalk placement, not the parking mesh UV layout; that stretching remains unchanged.
+- Reuse one shared 2K parking atlas across matching materials, with mipmaps and no retained CPU pixel copy. Preparation uses GPU copies, respects the existing texture-cache budget and is debounced during tiling-slider changes. The shared result adds about 21 MiB of GPU texture storage, not per-road storage.
+- Preserve normal road/sidewalk replacement routing and keep experimental extra-surface replacement limited to the existing two vanilla pavement targets. Custom-surface ownership and original-texture restoration protections remain.
+- Explicit parking upgrades are no longer blocked solely by Road Builder's automatic No Markings flag. Existing parking geometry/layout checks remain; this does not add support for every angled or perpendicular custom bay layout.
+- Prioritize clicked crossing updates within the existing work budget. Native readiness retries remain; this does not guarantee all reported crossing delays are eliminated.
+
+### Performance, saving and optional signals
+- Replace full recurring paint-maintenance walks with affected-owner work and bounded rotating integrity checks. Reuse managed queues/indexes and target cleanup to changed/deleted networks. Initial loading and substantial network edits can still require larger work.
+- Use the renderer's material catalog for ordinary network rediscovery where available, with bounded debounce so sustained road editing does not indefinitely postpone texture updates.
+- Coalesce preference writes and retry failed writes with bounded backoff while retaining newer pending choices. City upgrade serialization formats are unchanged.
+- Optional signal-pack discovery retries at world-load completion after failed boot detection. Partially loaded packs receive bounded progress-aware grace; absent packs do not trigger perpetual scans or runtime model imports.
+- Improve manual diagnostic reports for saved upgrade intent, preference-write status, native material mappings and signal-readiness failure reasons. These reports remain user-triggered.
+
+Validation and scope: 29 offline suites plus compiled integration checks passed. Test153 parking textures were accepted in the author's test; the latest Test154 session was reviewed without Curbside exceptions or texture-copy errors. Broad geometry and save/reload coverage remains ongoing. No universal FPS/TPS, crash-free or compatibility guarantee is implied. Individual lane-by-lane editing, including separate bike-lane divider editing, is deferred. Signal models, save schemas and listing artwork/description/metadata are not changed by this candidate.
 
 ## 0.5.1-test.146 — Surface restoration update
 
@@ -9,18 +35,6 @@
 - New optional surface replacement remains limited to the two approved vanilla pavement surfaces. Global road, sidewalk and grass replacement controls remain unchanged.
 
 Validation: 23 offline suites passed. Test sessions loaded saves and exercised texture refreshes without Curbside warnings/errors. Legacy/cross-session recovery is not fully verified; the original surface pack must be available. Pavement Surface 02 may still remain unchanged; surface tiling is unchanged. No line-planner or traffic-signal asset changes are included.
-
-
-0.5.1-test.142 — Surface replacement hotfix
-
-- "Apply road and sidewalk textures to assets and surfaces" is off by default for new/reset settings. Existing explicit preferences are retained.
-- Restricted this optional replacement to verified vanilla Pavement Surface 01 (selected road texture) and Pavement Surface 02 (selected sidewalk texture), on building grounds and manually placed surfaces. Other surface types and custom textures are excluded.
-- Corrected the lookup for native rendered surface materials; shared prefab material templates remain untouched.
-- Removed temporary surface-tracing logs. Normal warnings and user-triggered diagnostics remain available.
-- No changes to road-line, parking, traffic-signal or save serialization behavior in this update.
-
-Known limitation: Pavement Surface 02 can still remain unchanged in some cases. Surface tiling is unchanged and remains a follow-up item. The surface option is opt-in.
-
 
 ## 0.5.1-test.132 — October 30, 2026
 

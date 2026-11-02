@@ -108,6 +108,8 @@ namespace MedianGrassReplacement.Systems
             batches.Clear();if(system==null)return;
             foreach(var entry in system.materials)if(entry.Value!=null)batches[entry.Value]=entry.Key;
         }
+        internal bool HasBatchMaterials=>batches.Count>0;
+        internal IEnumerable<Material> BatchMaterials=>batches.Keys;
         internal void End()=>batches.Clear();
         internal void Clear(){End();sources.Clear();areas.Clear();}
         internal bool Allows(Material material,string property,Texture current)

@@ -14,6 +14,7 @@ namespace MedianGrassReplacement.Systems
             if(!EntityManager.Exists(road)||EntityManager.HasComponent<Deleted>(road)||EntityManager.HasComponent<Temp>(road)||!EntityManager.HasComponent<Road>(road)&&!EntityManager.HasComponent<Node>(road)){ModDiagnostics.TraceBuffer.Record("snapshot.paintSources","No valid Curbside hover target retained. Hover a road or node before writing a snapshot.");return;}
             ModDiagnostics.TraceBuffer.Record("snapshot.paintTarget",road+" (current ray or last valid Curbside hover)");
             ModDiagnostics.TraceBuffer.Record("snapshot.nativeMode","preserve="+Mod.Settings.PreserveVanillaJunctionLines+" automaticRoadsDisabled="+Mod.Settings.DisableAutomaticMarkings+" automaticHighwaysDisabled="+Mod.Settings.DisableAutomaticHighwayMarkings+" adjustmentsDisabled="+Mod.Settings.DisableAutomaticLineAdjustments+" yellow="+Mod.Settings.YellowCenterLines+" european="+Mod.Settings.EuropeanMarkings);
+            ModDiagnostics.TraceBuffer.Record("snapshot.markingSettings","vanillaAutomatic="+Mod.Settings.DisableAutomaticMarkings+" theme="+Mod.Settings.AutomaticMarkingTheme+" median="+Mod.Settings.MedianEdgeLines+" legacyCenter="+Mod.Settings.CenterLineStyle+" legacyEdge="+Mod.Settings.CurbLineStyle+" legacyMedian="+Mod.Settings.MedianLineStyle);
             Dependency.Complete();int remaining=24;
             void Read(Entity owner)
             {
