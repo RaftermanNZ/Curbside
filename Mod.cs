@@ -79,7 +79,7 @@ namespace MedianGrassReplacement
 
         {
 
-            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Test160 pier exclusions plus quay-only bike material isolation. Live acceptance pending.");
+            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Published Test161 baseline plus dedicated bicycle-path texture exclusions. Live acceptance pending.");
 
 
 

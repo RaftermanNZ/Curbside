@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1-test.166 — November 3, 2026
+
+- Keep default textures on one-way and two-way bicycle paths, bicycle arch,
+  covered and cable-stayed bridges, and both bicycle quay patterns.
+- Preserve existing road bike lanes and pier/quay texture protection.
+
 ## 0.5.1-test.161 — November 2, 2026
 
 Changes since 0.5.1-test.154.

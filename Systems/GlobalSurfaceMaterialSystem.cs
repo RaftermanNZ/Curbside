@@ -22,10 +22,30 @@ namespace MedianGrassReplacement.Systems
             return key.Contains("pier")||key.Contains("quay")||key.Contains("jetty")
                 ||key.Contains("boardwalk")||key.Contains("pontoon");
         }
+        // Dedicated native bicycle PATH surfaces, shared by paths, bicycle
+        // bridges and bicycle quays. Road bicycle lanes use BikeLane150cm.
+        // Accept the renderer wrapper and optional native 128-bit surface ID;
+        // do not turn this into a broad "bike"/"path" substring exclusion.
+        internal static bool ProtectedBicyclePath(string name)
+        {
+            if(string.IsNullOrEmpty(name))return false;
+            if(name.StartsWith("Batch (",StringComparison.Ordinal)&&name.EndsWith(")",StringComparison.Ordinal))
+                name=name.Substring(7,name.Length-8);
+            int separator=name.LastIndexOf('_');
+            if(separator>=0&&name.Length-separator-1==32)
+            {
+                for(int i=separator+1;i<name.Length;i++)
+                    if(!Uri.IsHexDigit(name[i]))return false;
+                name=name.Substring(0,separator);
+            }
+            return name=="BikePathPavement300cm"||name=="BikePathPavement800cm"
+                ||name=="BikePathPavementMiddle300cm"||name=="BikePathPavementMiddle800cm"
+                ||name=="BikePathPavementSide0cm";
+        }
         internal static int Kind(string name,string shader)
         {
             if(shader!="BH/NetCompositionMeshLitShader")return 0;
-            if(ProtectedWaterfront(name))return 0;
+            if(ProtectedWaterfront(name)||ProtectedBicyclePath(name))return 0;
             string key=(name??"").ToLowerInvariant();
             foreach(var excluded in new[]{"grass","curb","kerb","marking","paint","decal","rail","gravel","dirt"})if(key.Contains(excluded))return 0;
             if(key.StartsWith("batch (road_",StringComparison.Ordinal)||key.Replace("_","").Replace(" ","").Contains("parkingroad")||key.Replace("_","").Replace(" ","").Contains("parkinglotroad"))return 3; // Native shared road/sidewalk material observed in the game log.
@@ -148,7 +168,7 @@ namespace MedianGrassReplacement.Systems
         private bool ApplyProperty(Material material,string property,Texture2D replacement,int role)
         {
             if(material.shader!=null&&material.shader.name=="BH/NetCompositionMeshLitShader"
-                &&GlobalSurfacePolicy.ProtectedWaterfront(material.name))return false;
+                &&(GlobalSurfacePolicy.ProtectedWaterfront(material.name)||GlobalSurfacePolicy.ProtectedBicyclePath(material.name)))return false;
             if(!material.HasProperty(property))return false;
             bool found=_patches.TryGetValue((material,property),out var patch);
             if(found)return material.GetTexture(property)==patch.Applied;
