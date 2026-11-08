@@ -8,7 +8,7 @@
 
     <RootNamespace>MedianGrassReplacement</RootNamespace>
 
-    <Version>0.5.1-test.166</Version>
+    <Version>0.5.1-test.204</Version>
 
     <Product>The Curbside Mod</Product>
 
@@ -102,7 +102,7 @@
     <None Include="$(ModPropsFile)" Link="Properties\Mod.props" />
     <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
   </ItemGroup>
-  <Target Name="BuildCurbsideUI" BeforeTargets="PrepareResources" Condition="'$(DesignTimeBuild)' != 'true'">
+  <Target Name="BuildCurbsideUI" BeforeTargets="PrepareResources" Condition="'$(DesignTimeBuild)' != 'true' And '$(SkipCurbsideUI)' != 'true'">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Build-UI.ps1&quot;" />
   </Target>
   <ItemGroup>

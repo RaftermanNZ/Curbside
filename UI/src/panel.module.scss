@@ -1,7 +1,7 @@
 // Gameface uses a flex layout, even for ordinary block elements.
 // Give each text/container an explicit direction and constraint.
 .root { position: relative; display: flex; flex-direction: column; align-items: flex-start; flex: 0 0 auto; pointer-events: auto; color: var(--normalTextColor); font-family: var(--fontFamily); font-size: var(--fontSizeM); }
-.root button { font-family: inherit; }
+.root button { font-family: var(--fontFamily); }
 .launcher { flex: 0 0 auto; width: 40rem; height: 40rem; margin: 0; }
 // Native info buttons start at 10rem and are 40rem tall. Leave 14rem below them.
 // Keep this direct: the previous nested var() fallback did not position in Gameface.

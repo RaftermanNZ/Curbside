@@ -236,7 +236,7 @@ namespace MedianGrassReplacement.Systems
 
             if (!EntityManager.Exists(line) || EntityManager.HasComponent<Deleted>(line) || EntityManager.HasComponent<Game.Tools.Temp>(line) || EntityManager.HasComponent<MGRCurbMarking>(line) || EntityManager.HasComponent<MGRIntersectionPaint>(line) || EntityManager.HasComponent<MGRHiddenJunctionLine>(line) || !ShouldHide(line) || EntityManager.HasComponent<Game.Tools.Hidden>(line)) return false;
 
-            EntityManager.AddComponent<MGRHiddenJunctionLine>(line); EntityManager.AddComponent<Game.Tools.Hidden>(line);
+            EntityManager.AddComponent<MGRHiddenJunctionLine>(line); EntityManager.AddComponent<Game.Tools.Hidden>(line);PreviewPaintInheritanceSystem.SourceChanged(World,line);
 
             if (!EntityManager.HasComponent<BatchesUpdated>(line)) EntityManager.AddComponent<BatchesUpdated>(line); return true;
 
@@ -252,7 +252,7 @@ namespace MedianGrassReplacement.Systems
 
             if (EntityManager.HasComponent<Game.Tools.Hidden>(line) && !parentHidden && !EntityManager.HasComponent<MGRReplacedPaint>(line)) EntityManager.RemoveComponent<Game.Tools.Hidden>(line);
 
-            EntityManager.RemoveComponent<MGRHiddenJunctionLine>(line);
+            EntityManager.RemoveComponent<MGRHiddenJunctionLine>(line);PreviewPaintInheritanceSystem.SourceChanged(World,line);
 
             if (!EntityManager.HasComponent<Deleted>(line) && !EntityManager.HasComponent<BatchesUpdated>(line)) EntityManager.AddComponent<BatchesUpdated>(line);
 

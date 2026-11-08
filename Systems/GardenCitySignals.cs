@@ -334,7 +334,7 @@ namespace MedianGrassReplacement.Systems
    var toward=math.normalizesafe(new float3(centre.x-support.x,0,centre.z-support.z));
    return quaternion.LookRotationSafe(math.cross(toward,new float3(0,1,0)),new float3(0,1,0));
   }
-  internal static Entity Select(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,IList<float3> supports=null,int virtualSupport=-1,IList<int2> requiredSpans=null,int sourceApproach=-1,bool includePole=true,ushort vehicleMask=0)
+  internal static Entity Select(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,IList<float3> supports=null,int virtualSupport=-1,IList<int2> requiredSpans=null,int sourceApproach=-1,bool includePole=true,ushort vehicleMask=0,bool includeAssembly=true,bool sharedPhaseSupport=false)
   {
    pedestrianMask=originalMask;if(!Ready(p,em)){if(TraceEnabled)Trace(node,"module lookup not ready");return fallback;}int selected=sourceApproach>=0?sourceApproach:Nearest(original,approaches);if(selected<0||selected>=approaches.Count){if(TraceEnabled)Trace(node,"no source curb within 12m");return fallback;}var a=PhaseApproach(approaches[selected],vehicleMask);
    if(!TryLayout(a.Incoming,a.Outward,placed.m_Position,out var inward,out var heads)){if(TraceEnabled)Trace(node,"lane fit rejected: incoming="+(a.Incoming?.Count??0)+" source="+original.m_Position+" pole="+placed.m_Position+" outward="+a.Outward);return fallback;}
@@ -351,18 +351,26 @@ namespace MedianGrassReplacement.Systems
     wireSpan=math.length(headDelta.xz);wireProjection=headDelta.x;
     // Use the same adjacent supports for heads and cables; never a diagonal.
     int cableTarget=WireRingNeighbor(supports,origin);if(cableTarget<0)return fallback;
-    meshes.Add(Mesh("WirePole",float3.zero,quaternion.identity));meshes.Add(Mesh("WireTimber",float3.zero,quaternion.identity));
-    if(!nativeWires&&(approaches.Count==4&&supports.Count==4||HasRequiredSpan(requiredSpans,origin,cableTarget)))AddWireSpan(meshes,math.mul(inverse,supports[cableTarget]-placed.m_Position),float3.zero);
+    if(includeAssembly){meshes.Add(Mesh("WirePole",float3.zero,quaternion.identity));meshes.Add(Mesh("WireTimber",float3.zero,quaternion.identity));}
+    if(includeAssembly&&!nativeWires&&(approaches.Count==4&&supports.Count==4||HasRequiredSpan(requiredSpans,origin,cableTarget)))AddWireSpan(meshes,math.mul(inverse,supports[cableTarget]-placed.m_Position),float3.zero);
     // A T junction's fourth support is visual geometry, owned by the first controller.
-    if(virtualSupport>=0&&origin==0){int extra=virtualSupport;var offset=math.mul(inverse,supports[extra]-placed.m_Position);meshes.Add(Mesh("WirePole",offset,quaternion.identity));meshes.Add(Mesh("WireTimber",offset,quaternion.identity));int next=WireRingNeighbor(supports,extra);if(!nativeWires&&HasRequiredSpan(requiredSpans,extra,next))AddWireSpan(meshes,math.mul(inverse,supports[next]-supports[extra]),offset);}
+    if(includeAssembly&&virtualSupport>=0&&origin==0){int extra=virtualSupport;var offset=math.mul(inverse,supports[extra]-placed.m_Position);meshes.Add(Mesh("WirePole",offset,quaternion.identity));meshes.Add(Mesh("WireTimber",offset,quaternion.identity));int next=WireRingNeighbor(supports,extra);if(!nativeWires&&HasRequiredSpan(requiredSpans,extra,next))AddWireSpan(meshes,math.mul(inverse,supports[next]-supports[extra]),offset);}
 
 
    }
    else
    {
-    int index=Size(heads[heads.Length-1]+.35f);if(index<0)return fallback;armReach=Reaches[index];
-    if(includePole)meshes.Add(Mesh(style==2?"ModularRigidPole":"ModularGardenPole",float3.zero,quaternion.identity));
-    meshes.Add(Mesh((style==2?"ModularRigidArm":"ModularGardenArm")+(index+1).ToString("00"),float3.zero,quaternion.identity));
+    float reach=heads[heads.Length-1];
+    if(sharedPhaseSupport)
+    {
+     // One arm covers the complete approach; each controller retains only its
+     // own lane heads. All phases use the same arm profile and head heights.
+     if(!TryLayout(approaches[selected].Incoming,a.Outward,placed.m_Position,out _,out var bankHeads))return fallback;
+     reach=bankHeads[bankHeads.Length-1];
+    }
+    int index=Size(reach+.35f);if(index<0)return fallback;armReach=Reaches[index];
+    if(includeAssembly&&includePole)meshes.Add(Mesh(style==2?"ModularRigidPole":"ModularGardenPole",float3.zero,quaternion.identity));
+    if(includeAssembly)meshes.Add(Mesh((style==2?"ModularRigidArm":"ModularGardenArm")+(index+1).ToString("00"),float3.zero,quaternion.identity));
    }
    string head=style==1?"HeadWire":style==2?"HeadYellow":"HeadBlack";
    foreach(float d in heads)
@@ -371,9 +379,12 @@ namespace MedianGrassReplacement.Systems
     if(nativeWires)headPosition.y-=SignalWirePolicy.Drop(wireSpan,d/wireProjection);
     meshes.Add(Mesh(head,headPosition,headRotation));
    }
-   meshes.Add(Mesh(style==2?"LowerHeadYellow":"LowerHeadBlack",math.rotate(headRotation,new float3(0,0,.42f))+new float3(0,3.8f,0),headRotation));
-   meshes.Add(Mesh("SignPlate",new float3(1.05f,5.95f,0),quaternion.identity));
-   var crossings=CrossingFaces(em,node,placed.m_Position);
+   if(includeAssembly)
+   {
+    meshes.Add(Mesh(style==2?"LowerHeadYellow":"LowerHeadBlack",math.rotate(headRotation,new float3(0,0,.42f))+new float3(0,3.8f,0),headRotation));
+    meshes.Add(Mesh("SignPlate",new float3(1.05f,5.95f,0),quaternion.identity));
+   }
+   var crossings=includeAssembly?CrossingFaces(em,node,placed.m_Position):new List<CrossingFace>();
    if(crossings.Count>0)
    {
     var crossing=crossings[0];var pedRotation=math.mul(inverse,quaternion.LookRotationSafe(crossing.Facing,new float3(0,1,0)));var pedPosition=math.mul(inverse,crossing.Facing*PedestrianOffset)+new float3(0,2.55f,0);

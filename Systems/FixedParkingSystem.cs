@@ -130,7 +130,8 @@ namespace MedianGrassReplacement.Systems
                     // Reapply this owner after the native lane jobs finish.
                     _queuedOwners.Add(owner);
 
-                    foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner, true))
+                    using(var laneSnapshot=EntityManager.GetBuffer<Game.Net.SubLane>(owner,true).ToNativeArray(Allocator.Temp))
+                    foreach(var entry in laneSnapshot)
 
                     {
 
@@ -146,7 +147,7 @@ namespace MedianGrassReplacement.Systems
 
                         if (_copies.TryGetValue(original, out var copy) && current == copy)
 
-                            EntityManager.SetComponentData(lane, new PrefabRef(original));
+                            NativeVisualInvalidation.SetPrefab(World,lane,original);
 
                     }
                 }
@@ -193,11 +194,11 @@ namespace MedianGrassReplacement.Systems
 
                     if (reverse.TryGetValue(reference.m_Prefab, out var original) && EntityManager.Exists(original))
 
-                        EntityManager.SetComponentData(entity, new PrefabRef(original));
+                        NativeVisualInvalidation.SetPrefab(World,entity,original);
 
                 }
 
-            foreach (var copy in _copies.Values) if (EntityManager.Exists(copy)) EntityManager.DestroyEntity(copy);
+            foreach(var copy in _copies.Values)if(EntityManager.Exists(copy))GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
 
             _copies.Clear();
 
@@ -350,7 +351,7 @@ namespace MedianGrassReplacement.Systems
 
                         if (_copies.TryGetValue(saved, out var privateCopy) && currentReference == privateCopy)
 
-                            EntityManager.SetComponentData(lane, new PrefabRef(saved));
+                            NativeVisualInvalidation.SetPrefab(World,lane,saved);
 
                         _originals.Remove(lane);
 
@@ -401,6 +402,7 @@ namespace MedianGrassReplacement.Systems
                 {
 
                     copy = EntityManager.Instantiate(original);
+                    EntityManager.AddComponent<MGRPrivateVisualPrefab>(copy);
 
                     // Do not register/reinitialize a managed prefab. Only
 
@@ -422,7 +424,7 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                if (current != copy) EntityManager.SetComponentData(lane, new PrefabRef(copy));
+                if (current != copy) NativeVisualInvalidation.SetPrefab(World,lane,copy);
 
                 _originals[lane] = original;
 

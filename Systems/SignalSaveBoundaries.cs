@@ -45,6 +45,10 @@ namespace MedianGrassReplacement.Systems
    Mod.Log.Info("Save coordinator: preparation started.");
    World.GetOrCreateSystemManaged<SignalSaveFenceSystem>().Update();
    if(SaveDiagnostics.DeepEnabled)World.GetOrCreateSystemManaged<GeneratedVisualSaveSystem>().AuditRetirement();
+   World.GetExistingSystemManaged<MarkingPreviewSystem>()?.Restore();
+   World.GetExistingSystemManaged<VisualLifecycleSystem>()?.FlushPending();
+   World.GetExistingSystemManaged<PreviewPaintInheritanceSystem>()?.Restore();
+   World.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>()?.Restore();
    Prepare<DecalVisibilitySystem>();
    Prepare<SignalWireSystem>();
    Prepare<FarSideLightSystem>();
@@ -58,6 +62,8 @@ namespace MedianGrassReplacement.Systems
    Prepare<ApproachStopSystem>();
    Prepare<GeneratedVisualSaveSystem>();
    Prepare<SignalAssetSaveSystem>();
+   World.GetExistingSystemManaged<VisualLifecycleSystem>()?.FlushPending();
+   World.GetExistingSystemManaged<VisualLifecycleSystem>()?.PrepareForSerialization();
    if(SaveDiagnostics.DeepEnabled)World.GetOrCreateSystemManaged<SignalSaveIndexAuditSystem>().Update();
    Mod.Log.Info("Save coordinator: preparation completed.");
   }

@@ -48,9 +48,9 @@ namespace MedianGrassReplacement.Systems
             using(var refs=_poleReferences.ToEntityArray(Allocator.Temp))foreach(var e in refs)
             {
                 var reference=EntityManager.GetComponentData<PrefabRef>(e);
-                if(reverse.TryGetValue(reference.m_Prefab,out var native)&&EntityManager.Exists(native))EntityManager.SetComponentData(e,new PrefabRef(native));
+                if(reverse.TryGetValue(reference.m_Prefab,out var native)&&EntityManager.Exists(native))NativeVisualInvalidation.SetPrefab(World,e,native);
             }
-            foreach(var copy in _scaledPoles.Values)if(EntityManager.Exists(copy))EntityManager.DestroyEntity(copy);
+            foreach(var copy in _scaledPoles.Values)if(EntityManager.Exists(copy))GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
             _scaledPoles.Clear();_pole=Entity.Null;
         }
         internal void DisposeResources(){Clear();RestorePoleDefinitions();}

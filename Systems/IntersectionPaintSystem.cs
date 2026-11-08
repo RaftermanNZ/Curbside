@@ -189,7 +189,7 @@ namespace MedianGrassReplacement.Systems
                 foreach (var entity in entry.Paint) if (Alive(entity)) GeneratedVisualLifecycle.Retire(World,entity);
 
                 if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.replacementRemoved","source="+source+" generated="+string.Join(",",entry.Paint));
-                _replacements.Remove(source);_sourceIndex.Remove(source);
+                _replacements.Remove(source);_sourceIndex.Remove(source);PreviewPaintInheritanceSystem.SourceChanged(World,source);
 
             }
 
@@ -248,6 +248,10 @@ namespace MedianGrassReplacement.Systems
             foreach(var entity in previewHiddenPaint)if(Alive(entity)&&EntityManager.HasComponent<Game.Tools.Hidden>(entity)&&(!EntityManager.HasComponent<Owner>(entity)||!EntityManager.HasComponent<Game.Tools.Hidden>(EntityManager.GetComponentData<Owner>(entity).m_Owner)))
             {EntityManager.RemoveComponent<Game.Tools.Hidden>(entity);RenderChanged(entity);}
             previewHiddenPaint.Clear();
+        }
+        internal void CollectPreviewPaint(Entity source,HashSet<Entity> output)
+        {
+            if(_replacements.TryGetValue(source,out var entry))foreach(var entity in entry.Paint)output.Add(entity);
         }
         internal void HidePreviewPaint(Entity source)
         {
@@ -510,7 +514,7 @@ namespace MedianGrassReplacement.Systems
 
             Remove(source);
 
-            next.Keys.AddRange(keys); _replacements[source] = next;_sourceIndex.Add(owner,source);
+            next.Keys.AddRange(keys); _replacements[source] = next;_sourceIndex.Add(owner,source);PreviewPaintInheritanceSystem.SourceChanged(World,source);
             if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.replacedByCurbside","source="+source+" owner="+owner+" sourcePrefab="+prefabEntity+" paintPrefab="+paintPrefab+" preserveNative="+preserveNative+" generated="+string.Join(",",next.Paint));
 
             EntityManager.AddComponent<MGRReplacedPaint>(source);
@@ -527,7 +531,7 @@ namespace MedianGrassReplacement.Systems
             if(!Alive(source)||_externalPaint.Contains(EntityManager,source)||!EntityManager.HasComponent<Owner>(source)){pending.Add(source);return;}
             Entity owner=EntityManager.GetComponentData<Owner>(source).m_Owner;
             if(!Alive(owner)){pending.Add(source);return;}
-            if(EntityManager.HasComponent<Game.Tools.Hidden>(owner)&&!crossings.UnchangedPreview(source))
+            if(EntityManager.HasComponent<Game.Tools.Hidden>(owner)&&!PreviewPaintInheritanceSystem.KeepsOriginal(World,source))
             {
                 foreach(var paint in entry.Paint)if(Alive(paint)&&!EntityManager.HasComponent<Game.Tools.Hidden>(paint))
                 {visibility.AddComponent<Game.Tools.Hidden>(paint);if(!EntityManager.HasComponent<BatchesUpdated>(paint))visibility.AddComponent<BatchesUpdated>(paint);}
@@ -575,7 +579,6 @@ namespace MedianGrassReplacement.Systems
 
                 var watch = _updateWatch; watch.Restart();
                 var crossingVisuals = World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();
-                crossingVisuals.RefreshPreviewContinuity();
 
                 var pending = _pending; pending.Clear(); foreach (var item in _backlog) pending.Add(item); _backlog.Clear();
 

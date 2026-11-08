@@ -1,19 +1,16 @@
+using System;
 using Game;
-
 using Game.Common;
-
+using Game.Net;
+using Game.Prefabs;
 using Unity.Collections;
-
 using Unity.Entities;
 
 namespace MedianGrassReplacement.Systems
-
 {
-
     public struct MGRPendingVisualRegistration : IComponentData { }
 
     internal static class GeneratedVisualLifecycle
-
     {
         internal static void RetireSaveBatch(World world,NativeArray<Entity> entities)
         {
@@ -39,116 +36,102 @@ namespace MedianGrassReplacement.Systems
             }
         }
 
-        internal static void Track(World world,Entity entity)
+        internal static ComponentType[] Tags() => new[] { ComponentType.ReadOnly<MGRCurbMarking>(), ComponentType.ReadOnly<MGRIntersectionPaint>(), ComponentType.ReadOnly<MGRVisualPowerlineRuntime>(), ComponentType.ReadOnly<MGRSignalWire>(), ComponentType.ReadOnly<MGRSignalLuminaireRuntime>() };
 
+        internal static void Track(World world, Entity entity)
         {
-
-            if(world.EntityManager.HasComponent<Game.Net.Lane>(entity)&&world.EntityManager.HasComponent<Owner>(entity))
-                world.GetOrCreateSystemManaged<GeneratedPaintOwnerCleanupSystem>().Track(entity,world.EntityManager.GetComponentData<Owner>(entity).m_Owner);
-            if(!world.EntityManager.HasComponent<MGRPendingVisualRegistration>(entity)) world.EntityManager.AddComponent<MGRPendingVisualRegistration>(entity);
-
+            if(world.EntityManager.HasComponent<Lane>(entity)&&world.EntityManager.HasComponent<Owner>(entity))world.GetOrCreateSystemManaged<GeneratedPaintOwnerCleanupSystem>().Track(entity,world.EntityManager.GetComponentData<Owner>(entity).m_Owner);
+            if (!world.EntityManager.HasComponent<MGRPendingVisualRegistration>(entity)) world.EntityManager.AddComponent<MGRPendingVisualRegistration>(entity);
         }
 
-        internal static void Unregister(World world,Entity entity)
-
+        internal static void Unregister(World world, Entity entity)
         {
-
-            // Public native writer APIs: complete readers/writers before removal.
-
-            // This also makes late-frame retirement safe before entity cleanup.
-
-            var em=world.EntityManager;
-
-            if(em.HasComponent<Game.Objects.Transform>(entity))
-
+            var manager = world.EntityManager;
+            if (!manager.Exists(entity)) return;
+            if (manager.HasComponent<Game.Objects.Transform>(entity))
             {
-
-                var system=world.GetExistingSystemManaged<Game.Objects.SearchSystem>();
-
-                if(system!=null) {var tree=system.GetStaticSearchTree(false,out var jobs);jobs.Complete();tree.TryRemove(entity);}
-
+                var search = world.GetExistingSystemManaged<Game.Objects.SearchSystem>();
+                if (search != null) { var tree = search.GetStaticSearchTree(false, out var jobs); jobs.Complete(); tree.TryRemove(entity); }
             }
-
-            if(em.HasComponent<Game.Net.Lane>(entity))
-
+            if (manager.HasComponent<Lane>(entity))
             {
-
-                var system=world.GetExistingSystemManaged<Game.Net.SearchSystem>();
-
-                if(system!=null) {var tree=system.GetLaneSearchTree(false,out var jobs);jobs.Complete();tree.TryRemove(entity);}
-
+                var search = world.GetExistingSystemManaged<Game.Net.SearchSystem>();
+                if (search != null) { var tree = search.GetLaneSearchTree(false, out var jobs); jobs.Complete(); tree.TryRemove(entity); }
             }
-
         }
 
-        internal static void Retire(World world,Entity entity)
-
+        internal static void Retire(World world, Entity entity)
         {
-
-            var em=world.EntityManager;if(!em.Exists(entity)) return;
             world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
-            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("visual.retireRequestedByCurbside","entity="+entity+" saving="+Mod.Saving+" alreadyDeleted="+em.HasComponent<Deleted>(entity));
-
-            // Use native Deleted retirement during saves as well as live edits.
-            // Never rewrite the renderer's private culling records or timers.
-            if(!em.HasComponent<Deleted>(entity)&&ModDiagnostics.TraceBuffer.Enabled&&(em.HasComponent<MGRSignalWire>(entity)||em.HasComponent<MGRSignalLuminaireRuntime>(entity)))Mod.Log.Info("Signal runtime retirement: entity="+entity+" wire="+em.HasComponent<MGRSignalWire>(entity)+" saving="+Mod.Saving);
-            bool alreadyRetired=Mod.Saving&&em.HasComponent<Deleted>(entity)&&(world.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.RetiredEarly(entity)??false);
-            if(!alreadyRetired)Unregister(world,entity);if(!em.HasComponent<Deleted>(entity))em.AddComponent<Deleted>(entity);
-
+            if(world.EntityManager.Exists(entity))world.GetExistingSystemManaged<VisualLifecycleSystem>()?.Retire(entity);
         }
 
-        internal static void RetireForSerialization(World world,Entity entity)
+        internal static void RetireDefinition(World world, Entity entity, Entity original)
         {
-            if(!world.EntityManager.Exists(entity)) return;
-            // Do not depend on the save/load event having fired before this
-            // callback. Include visuals already marked Deleted by road edits.
-            var em=world.EntityManager;
-            Retire(world,entity);
+            world.GetExistingSystemManaged<VisualLifecycleSystem>()?.RetireDefinition(entity, original);
         }
 
+        internal static void RetireForSerialization(World world, Entity entity) { RetireNow(world,entity); }
 
+        internal static void RetireNow(World world, Entity entity)
+        {
+            var manager = world.EntityManager;
+            if (!manager.Exists(entity)) return;
+            world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
+            Unregister(world, entity);
+            manager.CompleteAllTrackedJobs();
+            // A generated lane can have been picked up by a native reference
+            // pass. Remove that membership too, before the child is destroyed.
+            if (manager.HasComponent<Lane>(entity) && manager.HasComponent<Owner>(entity))
+            {
+                var owner = manager.GetComponentData<Owner>(entity).m_Owner;
+                if (manager.Exists(owner) && manager.HasBuffer<Game.Net.SubLane>(owner))
+                {
+                    var lanes = manager.GetBuffer<Game.Net.SubLane>(owner);
+                    for (int i = lanes.Length - 1; i >= 0; i--) if (lanes[i].m_SubLane == entity) lanes.RemoveAt(i);
+                }
+            }
+            if (!manager.HasComponent<Deleted>(entity)) manager.AddComponent<Deleted>(entity);
+        }
     }
 
     public partial class GeneratedVisualRegistrationSystem : GameSystemBase
-
     {
-
-        private EntityQuery _pending;
-
+        private EntityQuery pending, spatial;
         protected override void OnCreate()
-
         {
-
-            base.OnCreate();_pending=GetEntityQuery(ComponentType.ReadOnly<MGRPendingVisualRegistration>(),ComponentType.Exclude<Deleted>());RequireForUpdate(_pending);
-
+            base.OnCreate();
+            pending = GetEntityQuery(ComponentType.ReadOnly<MGRPendingVisualRegistration>(), ComponentType.Exclude<Deleted>());
+            spatial = GetEntityQuery(ComponentType.ReadOnly<MGRPendingSpatialUpdate>());
         }
 
         protected override void OnUpdate()
-
         {
-
-            if(Mod.Saving) return;Dependency.Complete();
-
-            using(var entities=_pending.ToEntityArray(Allocator.Temp)) foreach(var entity in entities)
-
+            if(Mod.Saving)return;
+            World.GetOrCreateSystemManaged<VisualLifecycleSystem>().RepairDefinitionReferences();
+            Dependency.Complete();
+            using (var entities = pending.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
             {
-
-                // A generated marking can be created after native search jobs.
-
-                // Retain insertion intent until the next actual search pass.
-
-                GeneratedVisualLifecycle.Unregister(World,entity);
-
-                if(!EntityManager.HasComponent<Created>(entity)) EntityManager.AddComponent<Created>(entity);
-
-                if(!EntityManager.HasComponent<Updated>(entity)) EntityManager.AddComponent<Updated>(entity);
-
+                if (EntityManager.HasComponent<Owner>(entity))
+                {
+                    var owner = EntityManager.GetComponentData<Owner>(entity).m_Owner;
+                    if (!EntityManager.Exists(owner) || EntityManager.HasComponent<Deleted>(owner) || !EntityManager.HasComponent<PrefabRef>(owner))
+                    {
+                        GeneratedVisualLifecycle.RetireNow(World, entity);
+                        continue;
+                    }
+                }
+                GeneratedVisualLifecycle.Unregister(World, entity);
+                if (!EntityManager.HasComponent<Created>(entity)) EntityManager.AddComponent<Created>(entity);
+                if (!EntityManager.HasComponent<Updated>(entity)) EntityManager.AddComponent<Updated>(entity);
                 EntityManager.RemoveComponent<MGRPendingVisualRegistration>(entity);
-
             }
-
+            using (var entities = spatial.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
+            {
+                if (!EntityManager.HasComponent<Deleted>(entity) && !EntityManager.HasComponent<Updated>(entity)) EntityManager.AddComponent<Updated>(entity);
+                EntityManager.RemoveComponent<MGRPendingSpatialUpdate>(entity);
+            }
         }
-
     }
 
     // Serialization can purge Deleted entities without a rendering frame. Include
@@ -183,7 +166,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            _visuals=GetEntityQuery(new EntityQueryDesc {Any=new[]{ComponentType.ReadOnly<MGRCurbMarking>(),ComponentType.ReadOnly<MGRIntersectionPaint>(),ComponentType.ReadOnly<MGRVisualPowerlineRuntime>(),ComponentType.ReadOnly<MGRSignalWire>(),ComponentType.ReadOnly<MGRSignalLuminaireRuntime>()}});
+            _visuals=GetEntityQuery(new EntityQueryDesc {Any=new[]{ComponentType.ReadOnly<MGRCurbMarking>(),ComponentType.ReadOnly<MGRIntersectionPaint>(),ComponentType.ReadOnly<MGRVisualPowerlineRuntime>(),ComponentType.ReadOnly<MGRSignalWire>(),ComponentType.ReadOnly<MGRSignalLuminaireRuntime>(),ComponentType.ReadOnly<MGRTemporaryPreviewPaint>()}});
         }
         protected override void OnUpdate(){}
         public void PreSerialize(Colossal.Serialization.Entities.Context context)
@@ -201,7 +184,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            _deleted=GetEntityQuery(new EntityQueryDesc {All=new[]{ComponentType.ReadOnly<Deleted>()},Any=new[]{ComponentType.ReadOnly<MGRCurbMarking>(),ComponentType.ReadOnly<MGRIntersectionPaint>(),ComponentType.ReadOnly<MGRVisualPowerlineRuntime>(),ComponentType.ReadOnly<MGRSignalWire>(),ComponentType.ReadOnly<MGRSignalLuminaireRuntime>()}});
+            _deleted=GetEntityQuery(new EntityQueryDesc {All=new[]{ComponentType.ReadOnly<Deleted>()},Any=new[]{ComponentType.ReadOnly<MGRCurbMarking>(),ComponentType.ReadOnly<MGRIntersectionPaint>(),ComponentType.ReadOnly<MGRVisualPowerlineRuntime>(),ComponentType.ReadOnly<MGRSignalWire>(),ComponentType.ReadOnly<MGRSignalLuminaireRuntime>(),ComponentType.ReadOnly<MGRTemporaryPreviewPaint>()}});
             RequireForUpdate(_deleted);
         }
         protected override void OnUpdate()

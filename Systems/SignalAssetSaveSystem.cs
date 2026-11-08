@@ -34,8 +34,8 @@ namespace MedianGrassReplacement.Systems
                 var custom=EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab;
                 if(!native.TryGetValue(custom,out var fallback)||!EntityManager.Exists(fallback))continue;
                 restored[actor]=new KeyValuePair<Entity,Entity>(custom,fallback);
-                EntityManager.SetComponentData(actor,new PrefabRef{m_Prefab=fallback});
-                NativeVisualInvalidation.Mark(EntityManager,actor);
+                NativeVisualInvalidation.SetPrefab(World,actor,fallback);
+                NativeVisualInvalidation.Mark(World,actor);
             }
             Mod.Log.Info("Signal save compatibility: converted "+restored.Count+" remaining custom asset references to native fallbacks before prefab serialization.");
         }
@@ -51,9 +51,7 @@ namespace MedianGrassReplacement.Systems
                 if(EntityManager.Exists(item.Key)&&!EntityManager.HasComponent<Deleted>(item.Key)&&EntityManager.HasComponent<PrefabRef>(item.Key)&&EntityManager.Exists(item.Value.Key)&&!EntityManager.HasComponent<Deleted>(item.Value.Key)&&EntityManager.GetComponentData<PrefabRef>(item.Key).m_Prefab==item.Value.Value)
                 {
                     EntityManager.SetComponentData(item.Key,new PrefabRef{m_Prefab=item.Value.Key});
-                    if(!EntityManager.HasComponent<Updated>(item.Key))EntityManager.AddComponent<Updated>(item.Key);
-                    if(!EntityManager.HasComponent<Game.Common.BatchesUpdated>(item.Key))EntityManager.AddComponent<Game.Common.BatchesUpdated>(item.Key);
-                    if(!EntityManager.HasComponent<Game.Common.EffectsUpdated>(item.Key))EntityManager.AddComponent<Game.Common.EffectsUpdated>(item.Key);
+
                 }
             restored.Clear();
         }

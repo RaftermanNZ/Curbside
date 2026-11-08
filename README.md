@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-This source package contains Test166 (0.5.1-test.166). Earlier source tags remain available. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
+This source package contains Test204 (0.5.1-test.204). Earlier source tags remain available. The detailed Test204 release notes describe preview, traffic-signal and font changes, validation and unresolved crash reports. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
 
 ## Build locally on Windows
 

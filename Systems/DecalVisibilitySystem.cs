@@ -236,7 +236,7 @@ namespace MedianGrassReplacement.Systems
 
         internal void Restore() { Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); }
 
-        public void PreSerialize(Context context) { World.GetExistingSystemManaged<PaintPreviewVisibilitySystem>()?.Restore(); Restore(); }
+        public void PreSerialize(Context context) { Restore(); }
 
         protected override void OnUpdate()
         {long started=ModDiagnostics.RuntimeCosts.Begin();try{UpdateMeasuredCore();}finally{ModDiagnostics.RuntimeCosts.End("DecalVisibilitySystem",started);}}

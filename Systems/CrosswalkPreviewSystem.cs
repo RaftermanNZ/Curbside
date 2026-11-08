@@ -14,9 +14,8 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             var visual=World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();
-            visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();
+            Dependency.Complete();visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();
             if(Mod.Saving||Mod.Settings==null)return;
-            visual.InheritPreviewPaint();
             var tools=World.GetOrCreateSystemManaged<ToolSystem>();
             var choices=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
             if(!(tools.activeTool is NetToolSystem)||tools.activeTool.GetPrefab()?.name!="Crosswalk"||(!choices.NativeLineMode&&!choices.NativeInvisibleMode)||Game.Input.InputManager.instance.mouseOverUI||Game.Input.InputManager.instance.hasInputFieldFocus){lastPreview=Entity.Null;return;}
@@ -47,7 +46,7 @@ namespace MedianGrassReplacement.Systems
             // Neutral white paint guides do not replace native valid/invalid highlighting.
             if(choices.NativeLineMode){overlay.DrawCurve(new UnityEngine.Color(1,1,1,.9f),first,width);overlay.DrawCurve(new UnityEngine.Color(1,1,1,.9f),second,width);}
             else foreach(var guide in new[]{first,second}){overlay.DrawCurve(new UnityEngine.Color(.3f,.8f,1,.8f),MathUtils.Cut(guide,new float2(0,.12f)),.08f);overlay.DrawCurve(new UnityEngine.Color(.3f,.8f,1,.8f),MathUtils.Cut(guide,new float2(.88f,1)),.08f);}
-            if(choices.NativeInvisibleMode)World.GetOrCreateSystemManaged<IntersectionPaintSystem>().HidePreviewPaint(source);
+            World.GetOrCreateSystemManaged<IntersectionPaintSystem>().HidePreviewPaint(source);
             if(!EntityManager.HasComponent<MGRReplacedPaint>(source))visual.SuppressPreview(source);
             if(lastPreview!=source&&ModDiagnostics.TraceBuffer.Enabled)ModDiagnostics.TraceBuffer.Record("crosswalk.preview",source+" road="+road+" node="+node);
             lastPreview=source;
@@ -55,6 +54,6 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class CrosswalkPreviewRestoreSystem:GameSystemBase
     {
-        protected override void OnUpdate(){var visual=World.GetOrCreateSystemManaged<CrosswalkVisualSystem>();visual.RestoreInheritedPreviews();visual.RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();}
+        protected override void OnUpdate(){World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestorePreviewReferences();World.GetOrCreateSystemManaged<IntersectionPaintSystem>().RestorePreviewPaint();}
     }
 }

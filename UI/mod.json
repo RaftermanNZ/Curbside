@@ -1,8 +1,6 @@
 {
-    "id":  "curbside",
-    "author":  "The Curbside Mod",
-    "version":  "0.5.1.166",
-    "dependencies":  [
-
-                     ]
+  "id": "curbside",
+  "author": "The Curbside Mod",
+  "version": "0.5.1.204",
+  "dependencies": []
 }

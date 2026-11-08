@@ -79,12 +79,15 @@ namespace MedianGrassReplacement
 
         {
 
-            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Published Test161 baseline plus dedicated bicycle-path texture exclusions. Live acceptance pending.");
+            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Test197 baseline plus changed-preview inheritance and cached/batched signal adaptation. Offline test build; FPS and live acceptance pending.");
 
 
 
             BundledAssets.Initialize(this);
             GardenCitySignals.Mod.Initialize(updateSystem);
+            updateSystem.UpdateBefore<VisualLifecycleSystem,Game.Common.ModificationSystem>(SystemUpdatePhase.MainLoop);
+            updateSystem.UpdateBefore<SignalLightResetSystem,Game.Rendering.InitializeLightsSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAfter<VisualLifecycleCompletionSystem,Game.Effects.CompleteEnabledSystem>(SystemUpdatePhase.Cleanup);
             updateSystem.UpdateBefore<SignalSaveCoordinatorSystem,Game.Serialization.BeginPrefabSerializationSystem>(SystemUpdatePhase.Serialize);
             updateSystem.UpdateAfter<SignalSaveNativeCompletionSystem,Game.Serialization.BeginPrefabSerializationSystem>(SystemUpdatePhase.Serialize);
             updateSystem.UpdateBefore<SignalSaveSerializerEntrySystem,Game.Serialization.SerializerSystem>(SystemUpdatePhase.Serialize);
@@ -159,7 +162,7 @@ namespace MedianGrassReplacement
 
 
             updateSystem.UpdateBefore<SignalPrefabRegistrationSystem, Game.Prefabs.PrefabInitializeSystem>(SystemUpdatePhase.PrefabUpdate);
-            updateSystem.UpdateAt<FarSideLightSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateBefore<FarSideLightSystem,GeneratedVisualRegistrationSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAfter<SignalWireSystem,FarSideLightSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAt<SignalStreetNameSystem>(SystemUpdatePhase.Modification5);
 
@@ -193,7 +196,10 @@ namespace MedianGrassReplacement
             // Object placement commits before ApplyNetSystem too. Restore all
             // temporary cosmetic refs once, before the native apply phase starts.
             updateSystem.UpdateBefore<SignalPreviewRestoreSystem,Game.Tools.ToolApplySystem>(SystemUpdatePhase.ApplyTool);
-            updateSystem.UpdateBefore<SignalPreviewSystem,Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
+            updateSystem.UpdateBefore<SignalPreviewSystem,Game.Objects.SubObjectHiddenSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateAt<CrosswalkAppearancePreviewSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<PreviewRefreshRestoreSystem,Game.Objects.SubObjectSystem>(SystemUpdatePhase.Modification2B);
+            updateSystem.UpdateBefore<PreviewPaintInheritanceSystem,Game.Net.InitializeSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAfter<CrosswalkPreviewSystem,IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
             
             updateSystem.UpdateBefore<CrosswalkVisualRestoreSystem, Game.Net.LaneSystem>(SystemUpdatePhase.Modification4);
@@ -207,7 +213,9 @@ namespace MedianGrassReplacement
             updateSystem.UpdateBefore<JunctionMarkingSystem, Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
             updateSystem.UpdateAfter<IntersectionPaintSystem, JunctionMarkingSystem>(SystemUpdatePhase.PreCulling);
-            updateSystem.UpdateAfter<PaintPreviewVisibilitySystem, IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
+            updateSystem.UpdateAfter<MarkingPreviewSystem,CrosswalkPreviewSystem>(SystemUpdatePhase.PreCulling);
+            updateSystem.UpdateBefore<MarkingPreviewRestoreSystem,Game.Tools.ToolSystem>(SystemUpdatePhase.MainLoop);
+            updateSystem.UpdateBefore<VisualMutationBoundarySystem,Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
             
 
@@ -318,8 +326,10 @@ namespace MedianGrassReplacement
             });
 
             Cleanup(() => world?.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.Restore());
-            Cleanup(() => world?.GetExistingSystemManaged<PaintPreviewVisibilitySystem>()?.Restore());
+            Cleanup(() => world?.GetExistingSystemManaged<MarkingPreviewSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalPreviewSystem>()?.Restore());
+            Cleanup(() => world?.GetExistingSystemManaged<PreviewPaintInheritanceSystem>()?.Restore());
+            Cleanup(() => world?.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalWireSystem>()?.Clear());
             Cleanup(() => world?.GetExistingSystemManaged<DecalVisibilitySystem>()?.Restore());
 
@@ -339,6 +349,7 @@ namespace MedianGrassReplacement
 
             Cleanup(() => world?.GetExistingSystemManaged<FarSideLightSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalAssetSaveSystem>()?.RevertToVanilla());
+            Cleanup(() => world?.GetExistingSystemManaged<VisualLifecycleSystem>()?.PrepareForSerialization());
             AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);
             Cleanup(() => world?.GetExistingSystemManaged<SignalStreetNameSystem>()?.Clear());
 

@@ -10,7 +10,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal static byte Parking(string name)=>name==CrosswalkUpgradeSystem.MarkedName?(byte)2:name==CrosswalkUpgradeSystem.UnmarkedName?(byte)1:name==CrosswalkUpgradeSystem.TOnlyName?(byte)3:name==CrosswalkUpgradeSystem.NotchedName?(byte)4:name==CrosswalkUpgradeSystem.FullTName?(byte)5:name==CrosswalkUpgradeSystem.DividerOnlyName?(byte)6:(byte)0;
     }
-    // Read-only geometry guides. No scene objects, prefab changes or upgrade intent.
+    // Geometry guides temporarily suppress matching paint without changing upgrade intent.
     public partial class UpgradePreviewSystem:GameSystemBase
     {
         private Entity cachedCornerNode;private float nextCornerPreview;private List<Bezier4x3> cornerPreview=new List<Bezier4x3>();
@@ -19,6 +19,11 @@ namespace MedianGrassReplacement.Systems
         private void Line(Game.Rendering.OverlayRenderSystem.Buffer buffer,float3 a,float3 b,UnityEngine.Color color,float width=.12f)=>buffer.DrawLine(color,new Line3.Segment(a,b),width,true);
         private void Cross(Game.Rendering.OverlayRenderSystem.Buffer buffer,float3 point,float size)
         {Line(buffer,point+new float3(-size,0,-size),point+new float3(size,0,size),Red);Line(buffer,point+new float3(-size,0,size),point+new float3(size,0,-size),Red);}
+        private void PaintPreview(Entity owner, Game.Rendering.OverlayRenderSystem.Buffer buffer, UnityEngine.Color color, Bezier4x3 path, float width)
+        {
+            World.GetOrCreateSystemManaged<MarkingPreviewSystem>().Request(owner, path);
+            buffer.DrawCurve(color, path, width);
+        }
         protected override void OnUpdate()
         {
             if(Mod.Saving||Mod.Settings==null||UpgradeInputPolicy.PointerBlocked)return;
@@ -45,21 +50,35 @@ namespace MedianGrassReplacement.Systems
                 return;
             }
             byte edgeStyle=EdgeUpgradePolicy.Style(name);
-            if(edgeStyle!=0){foreach(var path in emission.EdgePreview(road,left,edgeStyle))overlay.DrawCurve(EdgeUpgradePolicy.IsYellow(edgeStyle)?Yellow:White,path,.15f);return;}
+            if(edgeStyle!=0){foreach(var path in emission.EdgePreview(road,left,edgeStyle))PaintPreview(road,overlay,EdgeUpgradePolicy.IsYellow(edgeStyle)?Yellow:White,path,.15f);return;}
             byte center=CenterlineUpgradePolicy.Style(name);
-            if(LaneDividerPolicy.Style(name)!=0){if(emission.TryDividerPlan(road,out var dividers))foreach(var path in dividers)foreach(var stroke in LaneDividerPolicy.Strokes(path,LaneDividerPolicy.Style(name)))overlay.DrawCurve(LaneDividerPolicy.IsYellow(LaneDividerPolicy.Style(name))?Yellow:White,stroke,.12f);else Cross(overlay,hit.m_Hit.m_HitPosition,1);return;}
-            if(center!=0)
+            if (LaneDividerPolicy.Style(name) != 0)
             {
-                if(emission.TryCenterUpgradePlan(road,center,out var paths,out _))foreach(var path in paths)overlay.DrawCurve(CenterlineUpgradePolicy.YellowPaint(center,Mod.Settings.YellowToolPaint)?Yellow:White,path,.15f);else Cross(overlay,hit.m_Hit.m_HitPosition,1);
+                if (emission.TryDividerPlan(road, out var dividers))
+                {
+                    var preview = World.GetOrCreateSystemManaged<MarkingPreviewSystem>();
+                    foreach (var path in dividers)
+                    {
+                        preview.Request(road, path);
+                        foreach (var stroke in LaneDividerPolicy.Strokes(path, LaneDividerPolicy.Style(name)))
+                            overlay.DrawCurve(LaneDividerPolicy.IsYellow(LaneDividerPolicy.Style(name)) ? Yellow : White, stroke, .12f);
+                    }
+                }
+                else Cross(overlay, hit.m_Hit.m_HitPosition, 1);
                 return;
             }
-            if(name==ParkingHatchPolicy.AssetName||name==ParkingHatchPolicy.Yellow){foreach(var path in emission.ParkingHatchPlan(road,left))overlay.DrawCurve(name==ParkingHatchPolicy.Yellow?Yellow:White,path,.12f);return;}
+            if(center!=0)
+            {
+                if(emission.TryCenterUpgradePlan(road,center,out var paths,out _))foreach(var path in paths)PaintPreview(road,overlay,CenterlineUpgradePolicy.YellowPaint(center,Mod.Settings.YellowToolPaint)?Yellow:White,path,.15f);else Cross(overlay,hit.m_Hit.m_HitPosition,1);
+                return;
+            }
+            if(name==ParkingHatchPolicy.AssetName||name==ParkingHatchPolicy.Yellow){foreach(var path in emission.ParkingHatchPlan(road,left))PaintPreview(road,overlay,name==ParkingHatchPolicy.Yellow?Yellow:White,path,.12f);return;}
             byte parking=UpgradePreviewPolicy.Parking(name);
             if(parking!=0)
             {
                 int geometry=EntityManager.GetComponentData<EdgeGeometry>(road).GetHashCode();float now=UnityEngine.Time.realtimeSinceStartup;
                 if(cachedParkingRoad!=road||cachedParkingLeft!=left||cachedParkingMode!=parking||cachedBayLength!=Mod.Settings.FixedParkingBayLength||cachedGeometry!=geometry||now>=nextParkingPreview){parkingPreview=emission.ParkingUpgradePreview(road,left,parking);cachedParkingRoad=road;cachedParkingLeft=left;cachedParkingMode=parking;cachedBayLength=Mod.Settings.FixedParkingBayLength;cachedGeometry=geometry;nextParkingPreview=now+.25f;}
-                foreach(var path in parkingPreview)overlay.DrawCurve(parking==1?Blue:White,path,parking==1?.07f:.12f);return;
+                foreach(var path in parkingPreview)PaintPreview(road,overlay,parking==1?Blue:White,path,parking==1?.07f:.12f);return;
             }
             if(name==RoadSideUpgrades.DecalAsset)
             {
@@ -77,7 +96,7 @@ namespace MedianGrassReplacement.Systems
                 }return;
             }
             var edge=EntityManager.GetComponentData<Edge>(road);bool end=NativeCrosswalkTargeting.NearEnd(EntityManager.GetComponentData<EdgeGeometry>(road),hit.m_Hit.m_HitPosition);var node=end?edge.m_End:edge.m_Start;
-            if(name==NodeLineUpgradeTool.EdgeAssetName){if(cachedCornerNode!=node||UnityEngine.Time.realtimeSinceStartup>=nextCornerPreview){cachedCornerNode=node;nextCornerPreview=UnityEngine.Time.realtimeSinceStartup+.25f;cornerPreview=emission.JunctionEdgePreview(node);}foreach(var path in cornerPreview)overlay.DrawCurve(White,path,.15f);return;}
+            if(name==NodeLineUpgradeTool.EdgeAssetName){if(cachedCornerNode!=node||UnityEngine.Time.realtimeSinceStartup>=nextCornerPreview){cachedCornerNode=node;nextCornerPreview=UnityEngine.Time.realtimeSinceStartup+.25f;cornerPreview=emission.JunctionEdgePreview(node);}foreach(var path in cornerPreview)PaintPreview(node,overlay,White,path,.15f);return;}
             if(name==ApproachStopTool.AssetName||name==ApproachStopTool.SingleAssetName||name==ApproachStopTool.YieldAssetName||name==ApproachStopTool.SingleYieldAssetName||name==FarSideLightUpgradeTool.AssetName)
             {
                 if(!EntityManager.HasBuffer<ConnectedEdge>(node))return;var direction=ApproachStopSystem.Away(EntityManager,road,node);
