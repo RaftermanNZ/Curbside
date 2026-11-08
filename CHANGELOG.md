@@ -19,7 +19,7 @@ preview-refresh optimizations, a save-appearance redesign or an additional crash
 - No new per-frame polling or timing-mod assembly dependency is added by the
   shared-support change. No numerical FPS improvement is claimed.
 
-### Separate traffic phases, shared hardware
+### Signal-support changes (TTE duplicate issue remains)
 
 - Retains independent native phase controllers and their overhead heads.
 - Where native lane masks prove distinct, mapped lanes on the same approach,
@@ -61,6 +61,12 @@ or broad-compatibility certification. In-game font selection in every supported
 language and a full controlled TTE/crash matrix remain incomplete.
 
 ### Known limitations and follow-up
+
+**Known TTE issue:** the maintainer reports that protected left turns still
+produce duplicate lights with Test204. The offline shared-support fixtures do
+not cover that actual TTE path completely. This release does not claim to fix
+those duplicates or certify TTE compatibility. Further tracing is deferred to a
+separate build; the tested Test204 code is unchanged.
 
 Native crash reports remain under investigation. The supplied report labels its
 Curbside build Test166 and provides no usable native stack/dump; this update is

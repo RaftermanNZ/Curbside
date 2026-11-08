@@ -8,6 +8,8 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 This source package contains Test204 (0.5.1-test.204). Earlier source tags remain available. The detailed Test204 release notes describe preview, traffic-signal and font changes, validation and unresolved crash reports. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
 
+Known issue: TTE protected left turns can still produce duplicate lights in Test204. See [detailed release notes](docs/TEST204-RELEASE.md).
+
 ## Build locally on Windows
 
 1. Install Cities: Skylines II and its official modding toolchain from the game's options. Keep the toolchain-provided `CSII_TOOLPATH`, `CSII_MANAGEDPATH`, `CSII_UNITYMODPROJECTPATH` and `CSII_MODPOSTPROCESSORPATH` user environment variables.
