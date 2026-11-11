@@ -49,6 +49,7 @@ namespace MedianGrassReplacement.Systems
             if(!_copies.TryGetValue(current,out var copy))
             {
                 copy=EntityManager.Instantiate(current);
+                World.GetOrCreateSystemManaged<VisualLifecycleSystem>().TrackDefinition(copy,current,"committed-crosswalk");
                 EntityManager.AddComponent<MGRPrivateVisualPrefab>(copy);
                 if(EntityManager.HasComponent<Created>(copy))EntityManager.RemoveComponent<Created>(copy);
                 if(EntityManager.HasComponent<Updated>(copy))EntityManager.RemoveComponent<Updated>(copy);
@@ -89,7 +90,7 @@ namespace MedianGrassReplacement.Systems
             // Save/disposal only: also find references copied by native temp or
             // road regeneration jobs, not just the originally selected lanes.
             using(var refs=_references.ToEntityArray(Allocator.Temp))foreach(var entity in refs)RestoreSource(entity);
-            foreach(var copy in _copies.Values)if(EntityManager.Exists(copy))GeneratedVisualLifecycle.RetireDefinition(World, copy, _reverse[copy]);
+            foreach(var copy in _copies.Values)GeneratedVisualLifecycle.RetireDefinition(World, copy, _reverse[copy]);
             _copies.Clear();_reverse.Clear();_sources.Clear();_previewSources.Clear();_sourceOwners.Clear();_networkRestored.Clear();
         }
         protected override void OnDestroy(){RestoreAll();base.OnDestroy();}

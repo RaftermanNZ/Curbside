@@ -29,7 +29,7 @@ namespace GardenCitySignals
   internal static string Cache=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"GardenCitySignals","CS2Native-v17-capuv");
   internal static void Initialize(UpdateSystem updates)
   {
-   NativeSignalCatalog.Reset();
+   NativeSignalCatalog.Reset();FloridaNativeCatalog.Reset();
    Root=Path.Combine(Application.persistentDataPath,"ModsData","TheCurbsideMod","SignalAssets");
    PreparedPack=SignalPackPolicy.ReadLocalManifest(Path.Combine(Root,"Prepared","native-pack.json"));
    bool present=PreparedPack;
@@ -38,6 +38,7 @@ namespace GardenCitySignals
    // Native subscribed assets are loaded after code mods. Probe the native
    // catalog during boot, then stop completely if the optional pack is absent.
    updates.UpdateAt<PackSystem>(SystemUpdatePhase.PrefabUpdate);
+   updates.UpdateAt<FloridaPackSystem>(SystemUpdatePhase.PrefabUpdate);
   }
  }
  public readonly struct PackDatabase:IAssetDatabaseDescriptor<PackDatabase>
@@ -90,7 +91,7 @@ namespace GardenCitySignals
   private static bool CacheRestoreEnabled=>false;
   internal static bool ValidModuleHeight(string name,float height)
   {
-   bool fullSupport=name.StartsWith("CSGGardenArm",StringComparison.Ordinal)||name.StartsWith("CSGRigidArm",StringComparison.Ordinal)||name=="CSGWirePole";
+   bool fullSupport=name.StartsWith("CSGGardenArm",StringComparison.Ordinal)||name.StartsWith("CSGRigidArm",StringComparison.Ordinal)||name=="CSGWirePole"||name=="CSGMetalWirePole";
    return !float.IsNaN(height)&&!float.IsInfinity(height)&&height>0&&height<=10.1f&&(!fullSupport||height>=6.5f);
   }
   private readonly Dictionary<EmissiveProperties.Purpose,EmissiveProperties.LightProperties> calibration=new Dictionary<EmissiveProperties.Purpose,EmissiveProperties.LightProperties>();
@@ -294,8 +295,8 @@ namespace GardenCitySignals
      if(!ValidModuleHeight(name,height))throw new InvalidDataException(name+": unexpected import scale; registration stopped.");
      if(!render.hasGeometryAsset||render.vertexCount<=0||render.meshCount!=1||render.surfaceAssets.Count()!=1)throw new InvalidDataException(name+": incomplete geometry/material data; registration stopped.");
      if(sharedSurface==null)sharedSurface=render.surfaceAssets.ToArray();
-     // Pedestrian import bakes a different emission-layer layout; retain that surface.
-     var moduleSurface=name=="CSGWireTimber"||name=="CSGPedHead"||name=="CSGLampArm"||name.EndsWith("Luminaire",StringComparison.Ordinal)?render.surfaceAssets.ToArray():sharedSurface;
+     // Finish atlases and pedestrian layers differ; retain each imported surface.
+     var moduleSurface=render.surfaceAssets.ToArray();
      await WaitForSave();if(CancelImport)return;
      foreach(var p in group.OfType<RenderPrefab>())
      {

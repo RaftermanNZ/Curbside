@@ -30,9 +30,20 @@ try {
  if($fence.Count -ne 1 -or $audit.Count -ne 1 -or $fence[0].Offset -ge $calls[0].Offset -or $audit[0].Offset -le $calls[-1].Offset){throw 'Fence/audit must execute once around preparation'}
  $prepare=($types|Where-Object Name -eq SignalSaveCoordinatorSystem).Methods|Where-Object Name -eq Prepare
  if(@($prepare.Body.Instructions|Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'PreSerialize'}).Count -ne 1){throw 'Coordinator does not call native save callback exactly once'}
+ # Test211 uses these existing Serialize-only boundaries for one paired scope.
+ # Reject any unrelated work; all five registrations and coordinator order above
+ # remain the original contract. This replaces only the old passive-marker rule.
  foreach($name in @('SignalSaveSerializerEntrySystem','SignalSaveSerializerExitSystem')){
   $method=($types|Where-Object Name -eq $name).Methods|Where-Object Name -eq OnUpdate
-  if(@($method.Body.Instructions|Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -ne 'Info' -and $_.Operand.Name -ne 'get_Log'}).Count){throw "Tracing marker has side effects: $name"}
+  $hook=if($name -eq 'SignalSaveSerializerEntrySystem'){'BeginMarkingSerializationScope'}else{'RestoreMarkingSerializationScope'}
+  $refs=@($method.Body.Instructions|Where-Object {$_.Operand -is [Mono.Cecil.MethodReference]}|ForEach-Object Operand)
+  if(@($refs|Where-Object Name -eq $hook).Count -ne 1){throw "Expected one paired serialization hook: $name"}
+  foreach($reference in $refs){
+   if($reference.Name -in @('Info','get_Log','get_World')){continue}
+   if($reference.Name -eq 'GetExistingSystemManaged' -and $reference -is [Mono.Cecil.GenericInstanceMethod] -and $reference.GenericArguments[0].FullName -eq 'MedianGrassReplacement.Systems.GeneratedVisualSaveSystem'){continue}
+   if($reference.Name -eq $hook -and $reference.DeclaringType.FullName -eq 'MedianGrassReplacement.Systems.GeneratedVisualSaveSystem'){continue}
+   throw "Unreviewed serialization-boundary work: $name $reference"
+  }
  }
  $f=($types|Where-Object Name -eq SignalSaveFenceSystem).Methods|Where-Object Name -eq OnUpdate
  if(-not ($f.Body.Instructions|Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'GetEnabledData'})){throw 'Native effect dependency fence missing'}
@@ -43,5 +54,5 @@ try {
  foreach($forbidden in @('WriteBytes','Dispose','AddBuffer','Schedule','SetComponentData','CreateEntity','DestroyEntity')){
   if(@($writer.Body.Instructions|Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq $forbidden}).Count){throw "Write fence modifies native state: $forbidden"}
  }
- 'PASS Test99: five unique save registrations; 13 callbacks once in order; fence/audit once; passive serialization markers and native write-completion fence.'
+ 'PASS Test211: five unique save registrations; 13 callbacks once in order; fence/audit once; paired marking-exclusion boundary hooks only; native write-completion fence.'
 }finally{$a.Dispose();$g.Dispose()}

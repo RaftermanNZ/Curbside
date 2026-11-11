@@ -50,7 +50,9 @@ namespace MedianGrassReplacement.Systems
             foreach(var item in restored)
                 if(EntityManager.Exists(item.Key)&&!EntityManager.HasComponent<Deleted>(item.Key)&&EntityManager.HasComponent<PrefabRef>(item.Key)&&EntityManager.Exists(item.Value.Key)&&!EntityManager.HasComponent<Deleted>(item.Value.Key)&&EntityManager.GetComponentData<PrefabRef>(item.Key).m_Prefab==item.Value.Value)
                 {
-                    EntityManager.SetComponentData(item.Key,new PrefabRef{m_Prefab=item.Value.Key});
+                    // Restore through the same native light-buffer reset and
+                    // visual lifecycle contract as an ordinary appearance edit.
+                    NativeVisualInvalidation.SetPrefab(World,item.Key,item.Value.Key);
 
                 }
             restored.Clear();

@@ -220,7 +220,7 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        public void PreSerialize(Context context) { Restore(); World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestoreAll(); }
+        public void PreSerialize(Context context) { PrepareRetainedSourcesForSerialization(); }
 
         private void FindWhite()
 

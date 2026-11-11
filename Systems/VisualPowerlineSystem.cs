@@ -872,7 +872,17 @@ namespace MedianGrassReplacement.Systems
 
                 _initial=false;
 
-                using(var nodes=_nodes.ToEntityArray(Allocator.Temp)) foreach(var node in nodes) {_dirtyNodes.Add(node);foreach(var edge in EntityManager.GetBuffer<ConnectedEdge>(node,true)) if(EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(edge.m_Edge)) EnqueueRoad(edge.m_Edge);}
+                using(var nodes=_nodes.ToEntityArray(Allocator.Temp)) foreach(var node in nodes)
+                {
+                    bool relevant=_joins.ContainsKey(node);
+                    foreach(var edge in EntityManager.GetBuffer<ConnectedEdge>(node,true))
+                        if(EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(edge.m_Edge))
+                        { EnqueueRoad(edge.m_Edge); relevant=true; }
+                    // Existing joins still need cleanup after the last upgrade
+                    // disappears. Unrelated node-chunk changes have no powerline
+                    // geometry to build or retire and must not fill this queue.
+                    if(relevant)_dirtyNodes.Add(node);
+                }
 
                 if(_pending.Count>0)
 

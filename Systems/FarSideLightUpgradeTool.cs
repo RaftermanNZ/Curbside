@@ -97,9 +97,15 @@ namespace MedianGrassReplacement.Systems
             if(ModDiagnostics.TraceBuffer.Enabled)ModDiagnostics.TraceBuffer.Record("signal.click",_selected.name+" node="+node+" remove="+remove);
             Mod.Log.Info("Signal request: "+_selected.name+" node="+node+" remove="+remove);
 
+            bool plainFromCustom=!remove&&!GardenCityLightPolicy.IsAsset(_selected.name)&&EntityManager.HasComponent<MGRGardenCitySignals>(node);
+            if(plainFromCustom)
+            {
+                EntityManager.RemoveComponent<MGRGardenCitySignals>(node);
+                if(EntityManager.HasComponent<MGRSignalStyle>(node))EntityManager.RemoveComponent<MGRSignalStyle>(node);
+            }
             if(GardenCityLightPolicy.IsAsset(_selected.name))
             {
-                if(!remove&&!GardenCityLightPolicy.Ready(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager)){UpgradeFeedback.Report(_selected.name,"Garden City signal assets are not ready.");return default;}
+                if(!remove&&!GardenCityLightPolicy.ReadyStyle(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager,_selected.name)){UpgradeFeedback.Report(_selected.name,"The selected signal assets are not ready.");return default;}
                 if(!remove)
                 {if(!EntityManager.HasComponent<MGRGardenCitySignals>(node))EntityManager.AddComponent<MGRGardenCitySignals>(node);var style=new MGRSignalStyle{Value=GardenCityLightPolicy.Style(_selected.name)};if(EntityManager.HasComponent<MGRSignalStyle>(node))EntityManager.SetComponentData(node,style);else EntityManager.AddComponentData(node,style);}
 
@@ -107,21 +113,32 @@ namespace MedianGrassReplacement.Systems
             if(remove) { if(EntityManager.HasComponent<MGRGardenCitySignals>(node))EntityManager.RemoveComponent<MGRGardenCitySignals>(node); if(EntityManager.HasComponent<MGRSignalStyle>(node))EntityManager.RemoveComponent<MGRSignalStyle>(node); }
             bool has=EntityManager.HasComponent<MGRFarSideLights>(node);
 
-            bool nativeChange=remove||!EntityManager.HasComponent<TrafficLights>(node)||GardenCityLightPolicy.IsAsset(_selected.name);
+            bool customStyle=GardenCityLightPolicy.IsAsset(_selected.name);
+            bool nativeChange=SignalUpgradePolicy.NeedsNativeRebuild(remove,EntityManager.HasComponent<TrafficLights>(node));
 
-            if(nativeChange)
+            // Preserve the explicit native enable/remove intent for subsequent
+            // edits and saves, without requesting generation for a style change.
+            if(nativeChange||customStyle||plainFromCustom)
 
             {
 
-                var upgrade=EntityManager.HasComponent<Upgraded>(node)?EntityManager.GetComponentData<Upgraded>(node):default;
+                bool hadUpgrade=EntityManager.HasComponent<Upgraded>(node);
+                var upgrade=hadUpgrade?EntityManager.GetComponentData<Upgraded>(node):default;
+                var previousFlags=upgrade.m_Flags;
 
                 if(remove){upgrade.m_Flags.m_General&=~CompositionFlags.General.TrafficLights;upgrade.m_Flags.m_General|=CompositionFlags.General.RemoveTrafficLights;}
 
                 else{upgrade.m_Flags.m_General|=CompositionFlags.General.TrafficLights;upgrade.m_Flags.m_General&=~CompositionFlags.General.RemoveTrafficLights;}
 
-                if(!EntityManager.HasComponent<Upgraded>(node))EntityManager.AddComponent<Upgraded>(node);
+                if(!hadUpgrade)EntityManager.AddComponent<Upgraded>(node);
 
-                EntityManager.SetComponentData(node,upgrade);
+                if(!hadUpgrade||!upgrade.m_Flags.Equals(previousFlags))EntityManager.SetComponentData(node,upgrade);
+
+            }
+
+            if(nativeChange)
+
+            {
 
                 using(var edges=EntityManager.GetBuffer<ConnectedEdge>(node,true).ToNativeArray(Allocator.Temp))foreach(var entry in edges)
 
@@ -135,7 +152,7 @@ namespace MedianGrassReplacement.Systems
 
             else if(!has)EntityManager.AddComponent<MGRFarSideLights>(node);
 
-            else if(!nativeChange&&!GardenCityLightPolicy.IsAsset(_selected.name))return default;
+            else if(!SignalUpgradePolicy.NeedsVisualRefresh(nativeChange,customStyle,plainFromCustom,has))return default;
 
             FarSideLightSystem.Queue(node);
             UpgradeFeedback.Report(_selected.name,remove?"Traffic lights removed from junction.":"Signal upgrade applied to junction; placement queued.");

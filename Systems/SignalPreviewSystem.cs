@@ -36,7 +36,7 @@ namespace MedianGrassReplacement.Systems
         private struct Binding
         {
             internal Entity Source, Node, Role;
-            internal ushort Mask;
+            internal ushort Mask, PedestrianMask;
             internal int Slot;
             internal bool Secondary;
             internal int Revision;
@@ -54,6 +54,8 @@ namespace MedianGrassReplacement.Systems
             internal bool Valid;
             internal Entity Prefab;
             internal Transform Native, Applied;
+            internal bool MasksRead, MasksValid;
+            internal ushort NativeVehicleMask, NativePedestrianMask;
         }
 
         private EntityQuery changes;
@@ -69,6 +71,8 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<Entity, HashSet<Entity>> claims = new Dictionary<Entity, HashSet<Entity>>();
         private readonly Stack<HashSet<Entity>> claimPool = new Stack<HashSet<Entity>>();
         private long passes, cacheBuilds, cacheHits, visualWrites;
+
+        internal bool HasRefreshWork => saved.Count != 0 || writes.Count != 0;
 
         protected override void OnCreate()
         {
@@ -93,13 +97,31 @@ namespace MedianGrassReplacement.Systems
                 ? GardenCityLightPolicy.NativeSource(manager.GetComponentData<PrefabRef>(source).m_Prefab) : Entity.Null;
             ushort mask = manager.Exists(source) && manager.HasComponent<Game.Objects.TrafficLight>(source)
                 ? manager.GetComponentData<Game.Objects.TrafficLight>(source).m_GroupMask0 : (ushort)0;
-            foreach (var pair in system.bindings)
+            system.InvalidateNode(node);
+            if (node != Entity.Null)
+                // The source may have changed owners since a cache was built.
+                // The source cache is already bounded to 32 nodes; invalidate
+                // its old nodes too, without scanning every preview binding.
+                foreach (var cached in system.nodes)
+                {
+                    if (cached.Key == node) continue;
+                    foreach (var item in cached.Value.Items)
+                        if (item.Source == source) { system.InvalidateNode(cached.Key); break; }
+                }
+            if (node == Entity.Null && source == Entity.Null)
+            { system.callbackActors.Clear(); system.callbackActors.AddRange(system.bindings.Keys); }
+            else system.bindingOwners.Select(new[] { node, source }, system.callbackActors);
+            foreach (var actor in system.callbackActors)
+            {
+                if (!system.bindings.TryGetValue(actor, out var value)) continue;
+                var pair = new KeyValuePair<Entity, Binding>(actor, value);
                 if ((pair.Value.Source == source || pair.Value.Source == Entity.Null && pair.Value.Node == node
                         && pair.Value.Role == role && SignalPreviewIdentityPolicy.CompatibleMask(pair.Value.Mask, mask))
                     && system.EntityManager.Exists(pair.Key)
                     && system.EntityManager.HasComponent<Temp>(pair.Key) && !system.EntityManager.HasComponent<Deleted>(pair.Key)
                     && !system.EntityManager.HasComponent<MGRSignalPreviewRequest>(pair.Key))
                     system.EntityManager.AddComponent<MGRSignalPreviewRequest>(pair.Key);
+            }
         }
 
         protected override void OnUpdate()
@@ -116,7 +138,7 @@ namespace MedianGrassReplacement.Systems
                     if (!EntityManager.Exists(entry.Key) || !EntityManager.HasComponent<Temp>(entry.Key)
                         || EntityManager.HasComponent<Deleted>(entry.Key)) stale.Add(entry.Key);
                 RestoreRetiredIdentities(stale);
-                foreach (var actor in stale) { bindings.Remove(actor); saved.Remove(actor); }
+                foreach (var actor in stale) { ForgetBinding(actor); ForgetSaved(actor); }
                 var signals = World.GetOrCreateSystemManaged<FarSideLightSystem>();
                 using (var actors = changes.ToEntityArray(Allocator.Temp))
                 {
@@ -134,11 +156,12 @@ namespace MedianGrassReplacement.Systems
                         if (EntityManager.HasComponent<MGRSignalPreviewRequest>(actor)) EntityManager.RemoveComponent<MGRSignalPreviewRequest>(actor);
                         if (EntityManager.HasComponent<Deleted>(actor)) continue;
                         var temp = EntityManager.GetComponentData<Temp>(actor);
-                        if (!PreviewVisualPolicy.Active(temp.m_Flags)) { RestoreActor(actor); bindings.Remove(actor); continue; }
+                        if (!PreviewVisualPolicy.Active(temp.m_Flags)) { RestoreActor(actor); ForgetBinding(actor); continue; }
                         var current = EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab;
                         if (!EntityManager.HasComponent<TrafficLightData>(current) && !EntityManager.HasComponent<StreetLightData>(current)) continue;
-                        ushort mask = EntityManager.HasComponent<Game.Objects.TrafficLight>(actor)
-                            ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(actor).m_GroupMask0 : (ushort)0;
+                        var light = EntityManager.HasComponent<Game.Objects.TrafficLight>(actor)
+                            ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(actor) : default;
+                        ushort mask = light.m_GroupMask0, pedestrianMask = light.m_GroupMask1;
                         bool secondary = EntityManager.HasComponent<Game.Objects.Secondary>(actor);
                         int slot = secondary ? -1 : Slot(actor);
                         var node = FindNode(actor);
@@ -150,7 +173,7 @@ namespace MedianGrassReplacement.Systems
                             // Return our temporary fields before handing an
                             // actor to a different owner. Its new owner/pose
                             // remains authoritative; do not carry an old match.
-                            RestoreActor(actor); bindings.Remove(actor); continue;
+                            RestoreActor(actor); ForgetBinding(actor); continue;
                         }
                         var generated = EntityManager.GetComponentData<Transform>(actor);
                         if (tracked && prior.Linked && temp.m_Original == prior.LinkedOriginal
@@ -166,15 +189,15 @@ namespace MedianGrassReplacement.Systems
                             // original owner/type/role. Its link is preview-only
                             // and the exact native identity is restored on apply.
                             if (node == Entity.Null || !AllowsAppearanceFallback(source, node, role, secondary))
-                            { RestoreActor(actor); bindings.Remove(actor); continue; }
-                            if (bindings.TryGetValue(actor, out var bound) && bound.Mask == mask && bound.Role == role
-                                && bound.Node == node && bound.Secondary == secondary && bound.Revision == signals.PreviewRevision
+                            { RestoreActor(actor); ForgetBinding(actor); continue; }
+                            if (bindings.TryGetValue(actor, out var bound) && bound.Mask == mask && bound.PedestrianMask == pedestrianMask && bound.Role == role
+                                && bound.Node == node && bound.Secondary == secondary && bound.Revision == NodeRevision(node)
                                 && bound.Generated.Equals(generated) && (secondary || bound.Slot == slot && SignalPreviewIdentityPolicy.SameSlot(slot, Slot(bound.Source)))
                                 && EntityManager.HasComponent<Owner>(bound.Source)
                                 && EntityManager.GetComponentData<Owner>(bound.Source).m_Owner == bound.Node
                                 && EntityManager.HasComponent<Game.Objects.Secondary>(bound.Source) == secondary
                                 && Available(actor, bound.Source)
-                                && SignalPreviewIdentityPolicy.CompatibleMask(mask, Mask(bound.Source))
+                                && SameFallbackBinding(signals, bound.Source, mask, pedestrianMask)
                                 && ReadVisual(signals, bound.Source, out _, out _, out _))
                             { source = bound.Source; cacheHits++; }
                             else source = FindSource(actor, current, generated, signals);
@@ -186,17 +209,17 @@ namespace MedianGrassReplacement.Systems
                             // A source may finish registration after this batch.
                             // A real source-change callback can retry this owner;
                             // no periodic check or city-wide search is needed.
-                            bindings[actor] = new Binding { Source = Entity.Null, Node = node, Role = role, Mask = mask, Slot = slot,
-                                Secondary = secondary, Revision = signals.PreviewRevision, Generated = generated };
+                            SetBinding(actor, new Binding { Source = Entity.Null, Node = node, Role = role, Mask = mask, PedestrianMask = pedestrianMask, Slot = slot,
+                                Secondary = secondary, Revision = NodeRevision(node), Generated = generated });
                             continue;
                         }
-                        bindings[actor] = new Binding { Source = source, Node = node, Role = role, Mask = mask, Slot = slot,
-                            Secondary = secondary, Revision = signals.PreviewRevision, Generated = generated };
+                        SetBinding(actor, new Binding { Source = source, Node = node, Role = role, Mask = mask, PedestrianMask = pedestrianMask, Slot = slot,
+                            Secondary = secondary, Revision = NodeRevision(node), Generated = generated });
                         Claim(actor, source);
                         bool link = temp.m_Original != source;
                         if (PreviewVisualPolicy.Delta(current, default, visual, default, false) == 0 && !link) continue;
                         if (!TemporaryPreviewWrites.Ready(EntityManager, actor, visual)) continue;
-                        saved[actor] = new Saved
+                        SetSaved(actor, new Saved
                         {
                             Original = tracked && current == prior.Applied ? prior.Original : current,
                             Applied = visual,
@@ -205,7 +228,7 @@ namespace MedianGrassReplacement.Systems
                             GeneratedPose = generated,
                             InheritedPose = inherited,
                             Owner = previewOwner
-                        };
+                        }, node);
                         // Native ObjectInterpolateSystem handles secondary road
                         // objects; RelativeObjectSystem handles attached objects.
                         // Both consume original identity. No preview pose repair.
@@ -222,6 +245,24 @@ namespace MedianGrassReplacement.Systems
 
         private ushort Mask(Entity actor) => EntityManager.Exists(actor) && EntityManager.HasComponent<Game.Objects.TrafficLight>(actor)
             ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(actor).m_GroupMask0 : (ushort)0;
+
+        private bool SameFallbackBinding(FarSideLightSystem signals, Entity source, ushort vehicle, ushort pedestrian)
+        {
+            if (!ReadVisual(signals, source, out _, out _, out _)) return false;
+            var appearance = appearances[source];
+            // All preview candidates in this changed batch may inspect the same
+            // source. Read its native binding once, alongside the existing
+            // appearance snapshot. OnUpdate clears these snapshots each batch.
+            if (!appearance.MasksRead)
+            {
+                appearance.MasksValid = signals.TryPreviewMasks(source,
+                    out appearance.NativeVehicleMask, out appearance.NativePedestrianMask);
+                appearance.MasksRead = true;
+                appearances[source] = appearance;
+            }
+            return appearance.MasksValid && SignalPreviewIdentityPolicy.SameFallbackBinding(vehicle, pedestrian,
+                appearance.NativeVehicleMask, appearance.NativePedestrianMask);
+        }
 
         private bool Available(Entity actor, Entity source)
         {
@@ -312,11 +353,11 @@ namespace MedianGrassReplacement.Systems
             var node = FindNode(actor);
             if (node == Entity.Null || !EntityManager.HasBuffer<Game.Objects.SubObject>(node)) return Entity.Null;
             bool firstVisit = checkedNodes.Add(node);
-            if (!nodes.TryGetValue(node, out var cache) || cache.Revision != signals.PreviewRevision
+            if (!nodes.TryGetValue(node, out var cache) || cache.Revision != NodeRevision(node)
                 || firstVisit && EntityManager.HasComponent<Updated>(node))
             {
                 if (nodes.Count >= 32 && !nodes.ContainsKey(node)) nodes.Clear();
-                cache = new NodeCache { Revision = signals.PreviewRevision };
+                cache = new NodeCache { Revision = NodeRevision(node) };
                 foreach (var item in EntityManager.GetBuffer<Game.Objects.SubObject>(node, true))
                 {
                     if (!ReadVisual(signals, item.m_SubObject, out var visual, out var native, out _)) continue;
@@ -337,8 +378,8 @@ namespace MedianGrassReplacement.Systems
             int slot = secondary ? -1 : Slot(actor);
             float best = float.MaxValue;
             bool tied = false;
-            ushort requested = EntityManager.HasComponent<Game.Objects.TrafficLight>(actor)
-                ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(actor).m_GroupMask0 : (ushort)0;
+            var light = EntityManager.HasComponent<Game.Objects.TrafficLight>(actor)
+                ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(actor) : default;
             foreach (var candidate in cache.Items)
             {
                 if (candidate.Role != role || !EntityManager.Exists(candidate.Source) || EntityManager.HasComponent<Deleted>(candidate.Source)) continue;
@@ -346,9 +387,7 @@ namespace MedianGrassReplacement.Systems
                 if (candidate.Secondary != secondary || EntityManager.HasComponent<Game.Objects.Secondary>(candidate.Source) != secondary
                     || !EntityManager.HasComponent<Owner>(candidate.Source)
                     || EntityManager.GetComponentData<Owner>(candidate.Source).m_Owner != node) continue;
-                ushort currentMask = EntityManager.HasComponent<Game.Objects.TrafficLight>(candidate.Source)
-                    ? EntityManager.GetComponentData<Game.Objects.TrafficLight>(candidate.Source).m_GroupMask0 : (ushort)0;
-                if (!SignalPreviewIdentityPolicy.CompatibleMask(requested, currentMask)) continue;
+                if (!SameFallbackBinding(signals, candidate.Source, light.m_GroupMask0, light.m_GroupMask1)) continue;
                 if (secondary)
                 {
                     if (!SignalPreviewIdentityPolicy.TrySecondaryScore(generated, candidate.Native, out var score)) continue;
@@ -374,7 +413,7 @@ namespace MedianGrassReplacement.Systems
             foreach (var pair in saved)
                 QueueRestore(pair.Key, pair.Value);
             visualWrites += TemporaryPreviewWrites.Apply(World, writes);
-            saved.Clear();
+            saved.Clear(); savedOwners.Clear();
         }
 
         private void RestoreRetiredIdentities(List<Entity> actors)
@@ -428,7 +467,7 @@ namespace MedianGrassReplacement.Systems
 
         private void RestoreActor(Entity actor)
         {
-            if (saved.TryGetValue(actor, out var value)) { QueueRestore(actor, value); saved.Remove(actor); }
+            if (saved.TryGetValue(actor, out var value)) { QueueRestore(actor, value); ForgetSaved(actor); }
         }
 
         internal void Restore()
@@ -436,7 +475,7 @@ namespace MedianGrassReplacement.Systems
             RestoreForRefresh();
             foreach (var actor in bindings.Keys)
                 if (EntityManager.Exists(actor) && EntityManager.HasComponent<MGRSignalPreviewRequest>(actor)) EntityManager.RemoveComponent<MGRSignalPreviewRequest>(actor);
-            bindings.Clear(); nodes.Clear(); checkedNodes.Clear(); appearances.Clear(); ClearClaims(); claimPool.Clear();
+            bindings.Clear(); bindingOwners.Clear(); nodeRevisions.Clear(); revisionBase = unchecked(++revisionSerial); nodes.Clear(); checkedNodes.Clear(); appearances.Clear(); ClearClaims(); claimPool.Clear();
         }
 
         internal void RecordSnapshot()
@@ -458,6 +497,7 @@ namespace MedianGrassReplacement.Systems
             World.GetExistingSystemManaged<SignalPreviewSystem>()?.Restore();
             World.GetExistingSystemManaged<PreviewPaintInheritanceSystem>()?.Restore();
             World.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>()?.Restore();
+            World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore();
             World.GetExistingSystemManaged<CrosswalkVisualSystem>()?.RestorePreviewReferences();
             World.GetExistingSystemManaged<VisualLifecycleSystem>()?.FlushPending();
         }
@@ -468,6 +508,8 @@ namespace MedianGrassReplacement.Systems
     // presentation frame. No permanent road/light reference is changed here.
     public partial class PreviewRefreshRestoreSystem : GameSystemBase
     {
+        private EntityQuery ownerChanges, temporaryObjectOwners, objectEvents;
+        private readonly PreviewRefreshScope scope = new PreviewRefreshScope();
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -485,14 +527,49 @@ namespace MedianGrassReplacement.Systems
                 Any = new[] { ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Node>() }
             });
             RequireForUpdate(networkChanges);
+            var desc = new List<EntityQueryDesc>();
+            foreach (var changed in new[] { ComponentType.ReadOnly<Created>(), ComponentType.ReadOnly<Updated>(), ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Game.Areas.ChangedDistrict>() })
+                desc.Add(new EntityQueryDesc { All = new[] { changed },
+                    Any = new[] { ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Node>(), ComponentType.ReadOnly<Game.Objects.SubObject>(), ComponentType.ReadOnly<Game.Net.SubLane>() } });
+            ownerChanges = GetEntityQuery(desc.ToArray());
+            temporaryObjectOwners = GetEntityQuery(new EntityQueryDesc {
+                All = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Game.Objects.Object>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Updated>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>() } });
+            objectEvents = GetEntityQuery(new EntityQueryDesc {
+                All = new[] { ComponentType.ReadOnly<Event>() },
+                Any = new[] { ComponentType.ReadOnly<Game.Objects.SubObjectsUpdated>(), ComponentType.ReadOnly<Game.Buildings.RentersUpdated>() } });
         }
 
         protected override void OnUpdate()
         {
             if (Mod.Saving) return;
-            World.GetExistingSystemManaged<SignalPreviewSystem>()?.RestoreForRefresh();
-            World.GetExistingSystemManaged<PreviewPaintInheritanceSystem>()?.RestoreForRefresh();
-            World.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>()?.RestoreForRefresh();
+            var signals = World.GetExistingSystemManaged<SignalPreviewSystem>();
+            var paint = World.GetExistingSystemManaged<PreviewPaintInheritanceSystem>();
+            var crossings = World.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>();
+            var decals = World.GetExistingSystemManaged<DecalHoverPreviewSystem>();
+            if (!(signals?.HasRefreshWork ?? false) && !(paint?.HasRefreshWork ?? false)
+                && !(crossings?.HasRefreshWork ?? false) && !(decals?.HasRefreshWork ?? false)) return;
+            scope.Clear();
+            if (signals != null) scope.Include(signals.RefreshOwners);
+            if (paint != null) scope.Include(paint.RefreshOwners);
+            if (crossings != null) scope.Include(crossings.RefreshOwners);
+            if (decals != null) scope.Include(decals.RefreshOwners);
+            using (var owners = ownerChanges.ToEntityArray(Allocator.Temp))
+                foreach (var owner in owners) scope.Add(EntityManager, owner);
+            using (var objects = temporaryObjectOwners.ToEntityArray(Allocator.Temp))
+                foreach (var actor in objects) scope.AddObjectOwner(EntityManager, actor);
+            using (var events = objectEvents.ToEntityArray(Allocator.Temp))
+                foreach (var item in events)
+                {
+                    if (EntityManager.HasComponent<Game.Objects.SubObjectsUpdated>(item))
+                        scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Objects.SubObjectsUpdated>(item).m_Owner);
+                    if (EntityManager.HasComponent<Game.Buildings.RentersUpdated>(item))
+                        scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Buildings.RentersUpdated>(item).m_Property);
+                }
+            signals?.RestoreForOwners(scope);
+            paint?.RestoreForOwners(scope);
+            crossings?.RestoreForOwners(scope);
+            decals?.RestoreForOwners(scope);
         }
     }
 }

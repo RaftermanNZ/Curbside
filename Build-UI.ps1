@@ -4,9 +4,9 @@ $ui=Join-Path $PSScriptRoot 'UI'
 
 [xml]$project=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MedianGrassReplacement.csproj') -Raw
 $versionText=($project.Project.PropertyGroup.Version|Where-Object {$_}|Select-Object -First 1)
-if($versionText -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-test\.(\d+))?$'){throw 'Expected a release version or a version with a numeric test build.'}
+if($versionText -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-test\.(\d+))?(?:\+[A-Za-z0-9.-]+)?$'){throw 'Expected a release version or a version with a numeric test build.'}
 $revision=if($Matches[4]){$Matches[4]}else{'0'}
-$moduleVersion="$($Matches[1]).$($Matches[2]).$($Matches[3]).$revision"
+$moduleVersion=if($Matches[4]){"$($Matches[1]).$($Matches[2]).$($Matches[3]).$revision"}else{"$($Matches[1]).$($Matches[2]).$($Matches[3])"}
 $metadataPath=Join-Path $ui 'mod.json';$metadata=Get-Content -LiteralPath $metadataPath -Raw|ConvertFrom-Json
 if($metadata.version -ne $moduleVersion){$metadata.version=$moduleVersion;$metadata|ConvertTo-Json -Depth 4|Set-Content -LiteralPath $metadataPath}
 

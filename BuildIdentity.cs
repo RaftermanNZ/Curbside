@@ -1,12 +1,15 @@
-using System;
 using System.Reflection;
+
 namespace MedianGrassReplacement
 {
     internal static class BuildIdentity
     {
-        internal static readonly string Version=(typeof(Mod).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion??"0.0.0-test.0").Split(new[]{'+'})[0];
-        internal static readonly int Number=ReadNumber();
-        internal static string Label=>"Test"+Number;
-        private static int ReadNumber(){var parts=Version.Split(new[]{'.'});return int.TryParse(parts[parts.Length-1],out var value)?value:0;}
+        // Asset manifests use this monotonically increasing compatibility level.
+        // It must remain independent of the public major.minor.patch version.
+        internal const int Number = 240;
+        internal static readonly string Version =
+            (typeof(Mod).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "0.6.0").Split('+')[0];
+        internal static string Label => Version;
     }
 }

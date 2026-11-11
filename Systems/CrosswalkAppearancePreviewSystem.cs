@@ -22,6 +22,10 @@ namespace MedianGrassReplacement.Systems
         {
             internal Entity Road, Node, Source;
             internal bool Dirty = true;
+            internal bool Unchanged;
+            internal Entity SourceOwner, SourcePrefab, PreviewOwner, Native;
+            internal Colossal.Mathematics.Bezier4x3 SourceCurve, PreviewCurve;
+            internal byte Appearance;
             internal readonly List<Entity> PaintSources = new List<Entity>();
         }
 
@@ -38,6 +42,8 @@ namespace MedianGrassReplacement.Systems
         private readonly List<Entity> scratch = new List<Entity>();
         private readonly List<Entity> legacySources = new List<Entity>();
         private readonly ExternalPaintOwnership external = new ExternalPaintOwnership();
+
+        internal bool HasRefreshWork => aliases.Count != 0 || writes.Count != 0;
 
         protected override void OnCreate()
         {
@@ -184,8 +190,10 @@ namespace MedianGrassReplacement.Systems
                     if (EntityManager.HasComponent<MGRCrosswalkPreviewRequest>(lane)) EntityManager.RemoveComponent<MGRCrosswalkPreviewRequest>(lane);
                     if (!Alive(lane) || !PreviewVisualPolicy.Active(EntityManager.GetComponentData<Temp>(lane).m_Flags)
                         || (EntityManager.GetComponentData<PedestrianLane>(lane).m_Flags & PedestrianLaneFlags.Crosswalk) == 0
-                        || external.Contains(EntityManager, lane)
-                        || !Resolve(lane, choices, out var road, out var node, out var source))
+                        || external.Contains(EntityManager, lane))
+                    { Remove(lane); continue; }
+                    if (TryKeepCommittedCrosswalk(lane, choices)) continue;
+                    if (!Resolve(lane, choices, out var road, out var node, out var source))
                     { Remove(lane); continue; }
                     byte appearance = choices.CommittedAppearance(road, node);
                     // Legacy individually selected crossings retain their own
@@ -220,9 +228,12 @@ namespace MedianGrassReplacement.Systems
                     }
                     else binding.PaintSources.Clear();
                     binding.Dirty = false;
+                    RememberCommittedCrosswalk(lane, binding, native, appearance);
                     bindings[lane] = binding;
                     aliases[lane] = native;
-                    writes[lane] = new TemporaryPreviewWrite { Prefab = HiddenDefinition(native) };
+                    var previewOwner = EntityManager.GetComponentData<Owner>(lane).m_Owner;
+                    aliasOwners.Track(lane, previewOwner, road, node);
+                    TemporaryPreviewWrites.QueueLanePrefab(writes, lane, current, HiddenDefinition(native));
                 }
             retained.Clear();
             foreach (var binding in bindings.Values)
@@ -235,7 +246,8 @@ namespace MedianGrassReplacement.Systems
         private Entity HiddenDefinition(Entity native)
         {
             if (definitions.TryGetValue(native, out var copy) && EntityManager.Exists(copy)) return copy;
-            copy = EntityManager.Instantiate(native); // Definition only, never a routed lane/paint actor.
+            copy = EntityManager.Instantiate(native);
+            World.GetOrCreateSystemManaged<VisualLifecycleSystem>().TrackDefinition(copy, native, "crosswalk-preview"); // Definition only, never a routed lane/paint actor.
             EntityManager.AddComponent<MGRPrivateVisualPrefab>(copy);
             if (EntityManager.HasComponent<Created>(copy)) EntityManager.RemoveComponent<Created>(copy);
             if (EntityManager.HasComponent<Updated>(copy)) EntityManager.RemoveComponent<Updated>(copy);
@@ -254,6 +266,7 @@ namespace MedianGrassReplacement.Systems
 
         private void RestoreAlias(Entity lane)
         {
+            aliasOwners.Remove(lane);
             if (!aliases.TryGetValue(lane, out var native)) return;
             if (Alive(lane) && EntityManager.HasComponent<Temp>(lane) && EntityManager.HasComponent<PrefabRef>(lane)
                 && reverse.TryGetValue(EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab, out var original) && original == native)
@@ -279,7 +292,7 @@ namespace MedianGrassReplacement.Systems
             using (var requests = restoreRequests.ToEntityArray(Allocator.Temp))
                 foreach (var entity in requests) EntityManager.RemoveComponent<MGRCrosswalkRestoreRequest>(entity);
             foreach (var copy in definitions.Values)
-                if (EntityManager.Exists(copy)) GeneratedVisualLifecycle.RetireDefinition(World, copy, reverse[copy]);
+                GeneratedVisualLifecycle.RetireDefinition(World, copy, reverse[copy]);
             definitions.Clear(); reverse.Clear();
         }
 

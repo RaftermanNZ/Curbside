@@ -4,6 +4,13 @@ namespace MedianGrassReplacement.Systems
 {
     internal static class SignalSupportGroupPolicy
     {
+        internal static bool FullyMapped(ushort phase, IList<ushort> lanes)
+        {
+            if (phase == 0 || lanes == null) return false;
+            ushort mapped = 0;
+            foreach (ushort lane in lanes) mapped |= lane;
+            return (mapped & phase) == phase;
+        }
         // Phase controllers remain separate entities. Only their visual support
         // may be shared, after native lane assignments prove their heads distinct.
         internal static bool CanShare(FarSideLightPolicy.Approach road, IList<ushort> phases)
@@ -16,10 +23,10 @@ namespace MedianGrassReplacement.Systems
             foreach (ushort phase in phases)
             {
                 if (phase == 0 || (phase & used) != 0) return false;
-                bool mapped = false;
-                foreach (ushort lane in road.LaneMasks)
-                    if ((lane & phase) != 0) mapped = true;
-                if (!mapped) return false;
+                // Every movement in a combined phase must be accounted for.
+                // A partial overlap cannot prove that two heads may share a
+                // support. Preserve their separate native actors if uncertain.
+                if (!FullyMapped(phase, road.LaneMasks)) return false;
                 used |= phase;
             }
 

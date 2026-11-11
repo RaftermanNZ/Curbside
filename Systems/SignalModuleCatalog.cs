@@ -10,6 +10,8 @@ namespace GardenCitySignals
    "CSGHeadBlack","CSGHeadYellow","CSGHeadWire","CSGPedHead","CSGWirePole",
    "CSGLampArm","CSGSignPlate","CSGGardenLuminaire","CSGRigidLuminaire",
    "CSGWireLuminaire","CSGWireTimber","CSGLowerHeadBlack","CSGLowerHeadYellow",
+   "CSGLowerHeadWire","CSGPedHeadWire",
+   "CSGMetalWirePole","CSGMetalWireLuminaire",
    "CSGModularGardenPole","CSGModularRigidPole"
   }.Concat(Enumerable.Range(1,19).SelectMany(i=>new[]{
    "CSGModularGardenArm"+i.ToString("00"),"CSGModularRigidArm"+i.ToString("00")

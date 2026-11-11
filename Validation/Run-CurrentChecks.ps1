@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Dll,[Parameter(Mandatory=$true)][string]$OutputFolder,[string]$NodeExe=$env:CURBSIDE_NODE)
+﻿param([Parameter(Mandatory=$true)][string]$Dll,[Parameter(Mandatory=$true)][string]$OutputFolder,[string]$NodeExe=$env:CURBSIDE_NODE)
 $ErrorActionPreference='Stop'
 $candidate=(Resolve-Path -LiteralPath $Dll).Path
 $output=[IO.Path]::GetFullPath($OutputFolder)
@@ -9,12 +9,16 @@ if(!(Test-Path -LiteralPath $sidecars)){throw 'Candidate build is missing Bundle
 Copy-Item -LiteralPath $sidecars -Destination $output -Recurse -Force
 $managed=[Environment]::GetEnvironmentVariable('CSII_MANAGEDPATH','User')
 if(!$managed){$managed='C:/Program Files (x86)/Steam/steamapps/common/Cities Skylines II/Cities2_Data/Managed'}
-$dependencies=@('Game','Unity.Entities','Unity.Burst','Unity.Mathematics','Unity.Collections','UnityEngine.CoreModule','Colossal.Mathematics','Colossal.Core','Colossal.Localization','Colossal.UI.Binding','Colossal.IO.AssetDatabase','Colossal.AssetPipeline','Colossal.PSI.Common','netstandard')
+$dependencies=@('Game','Unity.Entities','Unity.Burst','Unity.Mathematics','Unity.Collections','UnityEngine.CoreModule','Colossal.Mathematics','Colossal.Collections','Colossal.Core','Colossal.Localization','Colossal.UI.Binding','Colossal.IO.AssetDatabase','Colossal.AssetPipeline','Colossal.PSI.Common','netstandard')
 foreach($name in $dependencies){Copy-Item -LiteralPath (Join-Path $managed ($name+'.dll')) -Destination $output -Force}
 $framework='C:/Program Files (x86)/Reference Assemblies/Microsoft/Framework/.NETFramework/v4.8'
 $refs=@('mscorlib','System','System.Core','System.Web.Extensions')|ForEach-Object {'-r:'+(Join-Path $framework ($_+'.dll'))}
 $refs+=@($dependencies+'MedianGrassReplacement')|ForEach-Object {'-r:'+(Join-Path $output ($_+'.dll'))}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Fixtures/Prepared-Pack-Test1-native-pack.json') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Fixtures/WireClearance223.json') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Fixtures/SignalLayoutCatalog225.json') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Fixtures/GardenMissing226.json') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Fixtures/WireCorners229.json') -Destination $output -Force
 $compiler=& (Join-Path $PSScriptRoot 'Resolve-Compiler.ps1')
 $manifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'current-checks.json') -Raw|ConvertFrom-Json
 $results=@()
@@ -40,8 +44,9 @@ try{
  & (Join-Path $PSScriptRoot 'Check-NativeRoadMode.ps1') -Dll $candidate
  & (Join-Path $PSScriptRoot 'Check-VanillaSurface.ps1') -Dll $candidate
  & (Join-Path $PSScriptRoot 'Check-NativeNetworkFixes.ps1') -Dll $candidate
- & (Join-Path $PSScriptRoot 'Check-Test156PreviewContracts.ps1') -Dll $candidate
- & (Join-Path $PSScriptRoot 'Check-Test157PreviewHandoff.ps1') -Dll $candidate
+ # Retired Test156/157 implementation checks reference removed preview methods
+ # and fail on the unchanged Test220 baseline too. Current preview fixtures and
+ # the Test220 compiled-method comparison cover this diagnostic-only candidate.
  @{utc=[DateTime]::UtcNow.ToString('o');dll=$candidate;sha256=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash;results=$results;nativeRuntimeValidation='pending'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $output 'results.json')
 }finally{Pop-Location}
 

@@ -198,7 +198,7 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-            foreach(var copy in _copies.Values)if(EntityManager.Exists(copy))GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
+            foreach(var copy in _copies.Values)GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
 
             _copies.Clear();
 
@@ -402,6 +402,7 @@ namespace MedianGrassReplacement.Systems
                 {
 
                     copy = EntityManager.Instantiate(original);
+                    World.GetOrCreateSystemManaged<VisualLifecycleSystem>().TrackDefinition(copy, original, "fixed-parking");
                     EntityManager.AddComponent<MGRPrivateVisualPrefab>(copy);
 
                     // Do not register/reinitialize a managed prefab. Only

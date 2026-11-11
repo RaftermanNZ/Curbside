@@ -15,7 +15,7 @@ class AuditHardeningChecks
   foreach(long bytes in new long[]{1,65536,553081,2097152})Check((bool)length.Invoke(null,new object[]{bytes}),"Valid native file-catalog manifest rejected");
   foreach(long bytes in new long[]{-1,0,2097153,long.MaxValue})Check(!(bool)length.Invoke(null,new object[]{bytes}),"Invalid native manifest length accepted");
   var catalog=(string[])A.GetType("GardenCitySignals.SignalModuleCatalog",true).GetField("Names",BindingFlags.NonPublic|BindingFlags.Static).GetValue(null);
-  Check(catalog.Length==61&&catalog.Distinct().Count()==61,"Module catalog incomplete");
+  Check(catalog.Length==65&&catalog.Distinct().Count()==65,"Module catalog incomplete");
   var fixturePath=System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Prepared-Pack-Test1-native-pack.json");
   var fixtureText=System.IO.File.ReadAllText(fixturePath);
   var fixture=(System.Collections.Generic.Dictionary<string,object>)new System.Web.Script.Serialization.JavaScriptSerializer{MaxJsonLength=2097152}.DeserializeObject(fixtureText);
@@ -23,7 +23,7 @@ class AuditHardeningChecks
   var fixtureModules=((object[])fixture["modules"]).Select(x=>(string)x).ToArray();
   var pack=Method("GardenCitySignals.SignalPackPolicy","ValidManifest");
   Func<string,int,string[],bool> valid=(format,min,names)=>(bool)pack.Invoke(null,new object[]{format,min,names});
-  Check(valid((string)fixture["format"],(int)fixture["minimumCurbsideBuild"],fixtureModules),"Actual installed native manifest header/catalog rejected");
+  Check(!valid((string)fixture["format"],(int)fixture["minimumCurbsideBuild"],fixtureModules),"Old 61-module manifest incorrectly accepted as complete for the R9 update");
   Check(valid("Curbside.NativeSignalPack.v1",103,catalog),"Existing prepared pack rejected");
   Check(valid("Curbside.NativeSignalPack.v1",103,catalog.Reverse().ToArray()),"Catalog order incorrectly constrained");
   Check(!valid("foreign",103,catalog),"Foreign format accepted");Check(!valid("Curbside.NativeSignalPack.v1",int.MaxValue,catalog),"Future build accepted");
@@ -36,7 +36,7 @@ class AuditHardeningChecks
   Func<int,CarLaneFlags> flags=n=>((n&1)!=0?CarLaneFlags.Stop:0)|((n&2)!=0?CarLaneFlags.Yield:0)|((n&4)!=0?CarLaneFlags.RightOfWay:0);
   for(int a=0;a<8;a++)for(int b=0;b<8;b++)Check((bool)owns.Invoke(null,new object[]{flags(a)|CarLaneFlags.TurnLeft|CarLaneFlags.Highway,flags(b)})==(a==b),"Restoration ignored later external priority or compared unrelated flags");
   var paths=(string[])Method("GardenCitySignals.PackSystem","SourceImportPaths").Invoke(null,null);
-  Check(paths.Length==61&&paths.Distinct().Count()==61&&paths.All(p=>p.StartsWith("ProjectFiles/CSG",StringComparison.Ordinal)&&!p.Contains("..")),"Integrated import catalog drifted");
+  Check(paths.Length==65&&paths.Distinct().Count()==65&&paths.All(p=>p.StartsWith("ProjectFiles/CSG",StringComparison.Ordinal)&&!p.Contains("..")),"Integrated import catalog drifted");
   var header=Method("MedianGrassReplacement.Systems.FileTextureLoader","PngHeaderFits");
   byte[] png={137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,16,0,0,0,16,0};
   Check((bool)header.Invoke(null,new object[]{png,4096}),"4K boundary rejected");png[18]=32;

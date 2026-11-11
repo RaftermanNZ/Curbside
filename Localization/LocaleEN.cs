@@ -27,6 +27,9 @@ namespace MedianGrassReplacement.Localization
             void Option(string id, string label, string help) { entries.Add(_setting.GetOptionLabelLocaleID(id), label); entries.Add(_setting.GetOptionDescLocaleID(id), help); }
 
             void Asset(string id, string label, string help) { entries["Assets.NAME[" + id + "]"]=label; entries["Assets.DESCRIPTION[" + id + "]"]=help; }
+            Asset(Systems.DedicatedSurfaceSystem.Roadway, "Curbside roadway", "Paint an area with Curbside's included roadway texture using the surface tool.");
+            Asset(Systems.DedicatedSurfaceSystem.Sidewalk, "Curbside sidewalk", "Paint an area with Curbside's included sidewalk texture using the surface tool.");
+            Asset(Systems.DedicatedSurfaceSystem.FallbackCategory, "Surfaces", "Paint decorative surface areas, including Curbside sidewalk and roadway textures.");
             entries[_setting.GetOptionTabLocaleID(Setting.kHighwaysTab)]="Highway markings";
             entries[_setting.GetOptionGroupLocaleID(Setting.kCompatibilityGroup)]="Compatibility controls";
             entries[_setting.GetOptionGroupLocaleID(Setting.kHighwayControlGroup)]="Automatic highway markings";
@@ -47,7 +50,7 @@ namespace MedianGrassReplacement.Localization
 
             Group(Setting.kSurfaceGroup,"Road and sidewalk surfaces");
             Option(nameof(Setting.RoadSurfaceUv),"Road texture tiling","World-space UV scale for the selected global road texture. Higher values repeat the texture more often. Default 0.16. Updates cached materials without loading images again. Vanilla restores the native scale.");
-            Option(nameof(Setting.SidewalkSurfaceTiling),"Sidewalk texture tiling","Multiplier for the native sidewalk texture tiling. Higher values repeat the texture more often. Default 1.00. Retained normal/mask maps follow the same multiplier. Applies only with a global sidewalk texture selected.");
+            Option(nameof(Setting.SidewalkSurfaceTiling),"Sidewalk texture repeats","Whole-image repeats from 1 to 10. Higher values make the selected sidewalk colour texture smaller. Default 1. Native curb, normal and mask textures remain unchanged. Applies only with a global sidewalk texture selected.");
             Option(nameof(Setting.GlobalRoadSurface),"Global road surface","Replace supported road/highway asphalt and asset pavement/parking surfaces throughout the city with slot A or B. Vanilla restores materials still owned by Curbside. Rendering only; networks and saves are unchanged.");
             Option(nameof(Setting.GlobalSidewalkSurface),"Global sidewalk surface","Replace supported network and asset sidewalk materials throughout the city. Building facades, curbs and grass are kept. Vanilla restores Curbside-owned changes.");
             Option(nameof(Setting.GlobalRoadTexture),"Global road surface","Choose a texture from the shared texture library. Vanilla restores the native road material. This selector is independent of sidewalk and grass textures.");

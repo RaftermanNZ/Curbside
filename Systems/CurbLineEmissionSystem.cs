@@ -544,7 +544,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-        public void PreSerialize(Colossal.Serialization.Entities.Context context) { ClearOwned(); _initial = true; }
+        public void PreSerialize(Colossal.Serialization.Entities.Context context) { PrepareRetainedMarkingsForSerialization(); }
 
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; _diagnosticPaintTarget=Entity.Null; _nodeDividerExternal.Clear(); _externalPaint.Clear(); ClearOwned(); _catalogRequested=true; _definitionCount=-1; }
 

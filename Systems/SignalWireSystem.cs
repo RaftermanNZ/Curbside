@@ -40,7 +40,7 @@ namespace MedianGrassReplacement.Systems
                 if(!notified)
                 {
                     notified=true;
-                    using(var nodes=styles.ToEntityArray(Allocator.Temp))foreach(var node in nodes)if(EntityManager.GetComponentData<MGRSignalStyle>(node).Value==1)FarSideLightSystem.Queue(node);
+                    using(var nodes=styles.ToEntityArray(Allocator.Temp))foreach(var node in nodes)if(GardenCityLightPolicy.IsWireStyle(EntityManager.GetComponentData<MGRSignalStyle>(node).Value))FarSideLightSystem.Queue(node);
                 }
                 return;
             }
@@ -127,7 +127,7 @@ namespace MedianGrassReplacement.Systems
             if(Mod.Saving||entries.Count==0||UnityEngine.Time.realtimeSinceStartup<next)return;next=UnityEngine.Time.realtimeSinceStartup+1;
             Dependency.Complete();removed.Clear();foreach(var item in entries)
             {
-                var node=item.Key;if(!EntityManager.Exists(node)||EntityManager.HasComponent<Deleted>(node)||!EntityManager.HasComponent<TrafficLights>(node)||!EntityManager.HasComponent<MGRGardenCitySignals>(node)||!EntityManager.HasComponent<MGRSignalStyle>(node)||EntityManager.GetComponentData<MGRSignalStyle>(node).Value!=1)removed.Add(node);
+                var node=item.Key;if(!EntityManager.Exists(node)||EntityManager.HasComponent<Deleted>(node)||!EntityManager.HasComponent<TrafficLights>(node)||!EntityManager.HasComponent<MGRGardenCitySignals>(node)||!EntityManager.HasComponent<MGRSignalStyle>(node)||!GardenCityLightPolicy.IsWireStyle(EntityManager.GetComponentData<MGRSignalStyle>(node).Value))removed.Add(node);
             }
             foreach(var node in removed)Remove(node);
         }

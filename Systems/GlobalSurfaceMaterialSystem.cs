@@ -5,7 +5,7 @@ namespace MedianGrassReplacement.Systems
     {
         internal static string LegacyChoice(int mode,string first,string second,string fallback)=>mode==0?"":string.IsNullOrWhiteSpace(mode==1?first:second)?fallback:mode==1?first:second;
         internal static float RoadUv(float value)=>float.IsNaN(value)||float.IsInfinity(value)?.16f:Math.Max(.01f,Math.Min(1f,value));
-        internal static float SidewalkTiling(float value)=>float.IsNaN(value)||float.IsInfinity(value)?1f:Math.Max(.1f,Math.Min(10f,value));
+        internal static float SidewalkTiling(float value)=>SidewalkRepeatPolicy.Repeats(value);
         internal static int AssetKind(string name,string shader)
         {
             if(string.IsNullOrEmpty(shader)||shader.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0)return 0;
@@ -84,6 +84,8 @@ namespace MedianGrassReplacement.Systems
         internal static void RequestRefresh(){_refresh=true;}
         private static int _uvRevision;
         private int _seenUvRevision;
+        private int _appliedSidewalkRepeats = 1;
+        private readonly HashSet<string> _repeatFailures = new HashSet<string>();
         private float _uvQuietUntil;
         internal static void RequestUvRefresh(){_uvRefresh=true;unchecked{_uvRevision++;}}
         internal static void NotifyRenderActivity(){if(Mod.Settings==null||Mod.Settings.DisableTextureReplacement||(string.IsNullOrWhiteSpace(Mod.Settings.GlobalRoadTexture)&&string.IsNullOrWhiteSpace(Mod.Settings.GlobalSidewalkTexture)))return;float now=UnityEngine.Time.realtimeSinceStartup;if(!_discover)_discoverBy=now+2f;_discover=true;_quietUntil=now+.35f;}
@@ -182,9 +184,40 @@ namespace MedianGrassReplacement.Systems
                 var atlas=material.GetTexture("_BaseColorMap");
                 if(atlas!=null&&NetworkTextureScope.SharedParkingAtlas(atlas.name,atlas.width,atlas.height))return false;
             }
+            if (material.shader != null && SidewalkRepeatPolicy.NeedsBake(material.shader.name, role))
+            {
+                replacement = RepeatedSidewalk(replacement);
+                if (replacement == null) return false;
+            }
             material.SetTexture(property,replacement);
             if(Mod.Settings.VerboseLogging)Mod.Log.Info("Global surface target: "+material.name+" property="+property+" texture="+replacement.width+"x"+replacement.height);
             _patches[(material,property)]=new Patch{Material=material,Property=property,Role=role,Before=original,Applied=replacement};return true;
+        }
+        private Texture2D RepeatedSidewalk(Texture2D source)
+        {
+            int repeats = SidewalkRepeatPolicy.Repeats(Mod.Settings.SidewalkSurfaceTiling);
+            if (repeats == 1) return source;
+            string key = "sidewalk-repeat|" + source.GetInstanceID() + "|" + repeats;
+            if (_textures.TryGetValue(key, out var cached) && cached != null) return cached;
+            if (_repeatFailures.Contains(key)) return null;
+            try
+            {
+                if (!SurfaceUpgradePolicy.FitsBudget(source.width, source.height, _bytes))
+                    throw new InvalidOperationException("Texture cache budget reached.");
+                var result = SidewalkRepeatTexture.Create(source, repeats);
+                if (result == null) throw new InvalidOperationException("GPU texture copying is unavailable.");
+                _textures[key] = result;
+                _bytes += SidewalkRepeatPolicy.Bytes(result.width, result.height);
+                return result;
+            }
+            catch (Exception error)
+            {
+                _repeatFailures.Add(key);
+                string message = "Sidewalk repeats: " + error.Message + " Native texture retained.";
+                _loadErrors.Add(message);
+                Mod.Log.Warn(message);
+                return null;
+            }
         }
         private void ReleaseUnusedTextures()
         {
@@ -206,7 +239,7 @@ namespace MedianGrassReplacement.Systems
         }
         private void RefreshTextures()
         {
-            var settings=Mod.Settings;_roadTexture=_walkTexture=null;_loadErrors.Clear();ReleaseUnusedTextures();
+            var settings=Mod.Settings;_roadTexture=_walkTexture=null;_loadErrors.Clear();_repeatFailures.Clear();ReleaseUnusedTextures();
             Mod.Log.Info("Global surface selection: road="+(string.IsNullOrWhiteSpace(settings.GlobalRoadTexture)?"Vanilla":Path.GetFileName(settings.GlobalRoadTexture))+" sidewalk="+(string.IsNullOrWhiteSpace(settings.GlobalSidewalkTexture)?"Vanilla":Path.GetFileName(settings.GlobalSidewalkTexture)));
             try{_roadTexture=Load(settings.GlobalRoadTexture);}catch(Exception e){_loadErrors.Add("Road: "+e.Message);}
             try{_walkTexture=Load(settings.GlobalSidewalkTexture);}catch(Exception e){_loadErrors.Add("Sidewalk: "+e.Message);}
@@ -234,6 +267,9 @@ namespace MedianGrassReplacement.Systems
             foreach(var patch in _patches.Values)
             {
                 if(patch.Role==5)continue; // Mixed atlas: never scale native curb/normal/mask UVs.
+                // This shader has no texture-transform constants for these maps.
+                // Repeats are baked into our colour image; retain native detail maps.
+                if (patch.Material.shader != null && SidewalkRepeatPolicy.NeedsBake(patch.Material.shader.name, patch.Role)) continue;
                 if(patch.Material.GetTexture(patch.Property)!=patch.Applied)continue;
                 if(patch.Property=="_WorldspaceAlbedo")SetUv(patch.Material,"_WorldspaceUVScale",true,true);
                 else foreach(var property in new[]{"_BaseColorMap","_NormalMap","_MaskMap"})SetUv(patch.Material,property,false,patch.Role==1);
@@ -327,6 +363,7 @@ namespace MedianGrassReplacement.Systems
             }
             }finally{_vanilla.End();}
             ApplyUv();
+            _appliedSidewalkRepeats = SidewalkRepeatPolicy.Repeats(Mod.Settings.SidewalkSurfaceTiling);
             Status="Global surfaces: "+roads+" road and "+walks+" sidewalk material(s). Cache "+_textures.Count+" textures, "+(_bytes/1048576)+" MiB estimate (GPU/native overhead extra). "+string.Join(" ",errors);if(Status==_lastReport)return;_lastReport=Status;Mod.Log.Info(Status);
             if((road!=null&&roads==0||walk!=null&&walks==0)&&candidates.Count>0)Mod.Log.Warn("Global surface unmatched network materials: "+string.Join(", ",candidates));
         }
@@ -355,10 +392,11 @@ namespace MedianGrassReplacement.Systems
             else if(_uvRefresh)
             {
                 bool mixed=false;foreach(var patch in _patches.Values)if(patch.Role==5){mixed=true;break;}
-                if(mixed&&_seenUvRevision!=_uvRevision){_seenUvRevision=_uvRevision;_uvQuietUntil=UnityEngine.Time.realtimeSinceStartup+.25f;return;}
-                if(mixed&&UnityEngine.Time.realtimeSinceStartup<_uvQuietUntil)return;
+                bool rebake = mixed || (_walkTexture != null && _appliedSidewalkRepeats != SidewalkRepeatPolicy.Repeats(Mod.Settings.SidewalkSurfaceTiling));
+                if(rebake&&_seenUvRevision!=_uvRevision){_seenUvRevision=_uvRevision;_uvQuietUntil=UnityEngine.Time.realtimeSinceStartup+.25f;return;}
+                if(rebake&&UnityEngine.Time.realtimeSinceStartup<_uvQuietUntil)return;
                 _uvRefresh=false;
-                if(mixed)_refresh=true;else ApplyUv();
+                if(rebake)_refresh=true;else ApplyUv();
             }
             else if(_discover&&(UnityEngine.Time.realtimeSinceStartup>=_quietUntil||UnityEngine.Time.realtimeSinceStartup>=_discoverBy)){_discover=false;Apply(true);World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.RequestRefresh();}
         }

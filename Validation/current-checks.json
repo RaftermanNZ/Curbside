@@ -1,5 +1,6 @@
 {
   "tests": [
+    "WireCornerChecks229",
     "AuditHardeningChecks",
     "RightBankChecks",
     "SharedPoleChecks",
@@ -29,9 +30,30 @@
     "MarkingSettingsAuditChecks",
     "NativeNetworkFixChecks",
     "MedianShoulderChecks",
-    "PreviewVisibilityChecks",
     "IndividualDividerChecks",
-    "PreviewContinuityChecks",
-    "BicyclePathTextureChecks"
+    "BicyclePathTextureChecks",
+    "SuppliedPreviewGeometryChecks",
+    "PreviewInheritanceChecks",
+    "StaticAppearanceChecks",
+    "NativeSignalPreviewChecks",
+    "UnchangedHoverChecks",
+    "ToolFamilyAuditChecks212",
+    "SignalCombinationChecks214",
+    "FortyIntersectionChecks214",
+    "SignalPoseOwnershipChecks214",
+    "Intersection300Checks214",
+    "LaneQueueChecks215",
+    "EmptyPreviewBatchChecks215",
+    "NativeVisibilityOwnershipChecks215",
+    "TransientCostChecks215",
+    "FloridaR19Checks217",
+    "RefreshInterestChecks218",
+    "MastSnapshotChecks219",
+    "MastAdmissionChecks220",
+    "MastCollisionChecks222",
+    "WireClearanceChecks223",
+    "SignalPlacementChecks226",
+    "SignalUpgradeChecks226",
+    "SignalLaneBindingChecks227"
   ]
 }

@@ -37,7 +37,7 @@ namespace MedianGrassReplacement
         }
         private float _roadSurfaceUv=.16f,_sidewalkSurfaceTiling=1f;
         [SettingsUISlider(min=.01f,max=1f,step=.01f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)][SettingsUISection(kTexturesTab,kSurfaceGroup)]public float RoadSurfaceUv{get=>_roadSurfaceUv;set{float next=GlobalSurfacePolicy.RoadUv(value);if(next==_roadSurfaceUv)return;_roadSurfaceUv=next;SurfaceUvChanged();}}
-        [SettingsUISlider(min=.1f,max=10f,step=.1f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)][SettingsUISection(kTexturesTab,kSurfaceGroup)]public float SidewalkSurfaceTiling{get=>_sidewalkSurfaceTiling;set{float next=GlobalSurfacePolicy.SidewalkTiling(value);if(next==_sidewalkSurfaceTiling)return;_sidewalkSurfaceTiling=next;SurfaceUvChanged();}}
+        [SettingsUISlider(min=1f,max=10f,step=1f,scalarMultiplier=1,unit=Unit.kFloatTwoFractions)][SettingsUISection(kTexturesTab,kSurfaceGroup)]public float SidewalkSurfaceTiling{get=>_sidewalkSurfaceTiling;set{float next=GlobalSurfacePolicy.SidewalkTiling(value);if(next==_sidewalkSurfaceTiling)return;_sidewalkSurfaceTiling=next;SurfaceUvChanged();}}
         private void GlobalSurfaceChanged(){if(_runtimeEventsEnabled){ApplyAndSave();GlobalSurfaceMaterialSystem.RequestRefresh();}}
         private void SurfaceUvChanged(){if(_runtimeEventsEnabled){ApplyAndSave();GlobalSurfaceMaterialSystem.RequestUvRefresh();}}
         [Exclude][SettingsUIButton][SettingsUISection(kTexturesTab,kSurfaceGroup)]public bool ApplySurfaceTextures{set{if(value){SurfaceTextureCatalog.Invalidate();TextureCatalog.Invalidate();ApplyAndSave();GlobalSurfaceMaterialSystem.RequestRefresh();}}}

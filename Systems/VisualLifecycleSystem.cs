@@ -55,6 +55,16 @@ namespace MedianGrassReplacement.Systems
         {
             if (!EntityManager.Exists(entity) || !EntityManager.HasComponent<PrefabRef>(entity)) return;
             if (BeforeCulling || Mod.Saving) { NativeVisualInvalidation.ApplyPrefab(World, entity, prefab); return; }
+            if (EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab == prefab)
+            {
+                if (changes.TryGetValue(entity, out var pending))
+                {
+                    pending.PrefabChanged = false;
+                    if (!pending.PoseChanged && !pending.Marked && !pending.RestoreRelative)
+                        changes.Remove(entity);
+                }
+                return;
+            }
             var change = GetChange(entity);
             change.PrefabChanged = true;
             change.Prefab = prefab;
@@ -64,8 +74,21 @@ namespace MedianGrassReplacement.Systems
         {
             if (!EntityManager.Exists(entity) || !EntityManager.HasComponent<Transform>(entity)) return;
             if (BeforeCulling || Mod.Saving) { NativeVisualInvalidation.ApplyTransform(World, entity, transform); return; }
+            var current = EntityManager.GetComponentData<Transform>(entity);
+            if (current.Equals(transform))
+            {
+                // A request to return to the current pose cancels an older
+                // queued pose, while retaining independent prefab/mark work.
+                if (changes.TryGetValue(entity, out var pending))
+                {
+                    pending.PoseChanged = false;
+                    if (!pending.PrefabChanged && !pending.Marked && !pending.RestoreRelative)
+                        changes.Remove(entity);
+                }
+                return;
+            }
             var change = GetChange(entity);
-            if (!change.PoseChanged) change.OriginalPose = EntityManager.GetComponentData<Transform>(entity);
+            if (!change.PoseChanged) change.OriginalPose = current;
             change.PoseChanged = true;
             change.Pose = transform;
         }
@@ -94,24 +117,28 @@ namespace MedianGrassReplacement.Systems
 
         internal void RetireDefinition(Entity entity, Entity original)
         {
-            if (!EntityManager.Exists(entity)) return;
+            if (entity == Entity.Null) return;
+            TrackDefinition(entity, original, "retirement-only");
             definitions[entity] = Frame + (BeforeCulling ? 0 : 1);
             definitionSources[entity] = original;
+            if (!definitionOrigins.HasDependents(entity)) readyDefinitions.Add(entity);
+            definitionRepairPending = true;
         }
 
         internal void RepairDefinitionReferences()
         {
-            if (definitions.Count == 0) return;
+            if (definitions.Count == 0 || !definitionRepairPending && readyDefinitions.Count == 0) return;
             NativeVisualInvalidation.CompleteReaders(World);
             using (var entities = references.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
             {
                 var prefab = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
-                if (definitionSources.TryGetValue(prefab, out var original) && EntityManager.Exists(original))
+                if (definitionSources.ContainsKey(prefab) && OriginalDefinition(prefab, out var original))
                 {
                     if (EntityManager.HasComponent<Deleted>(entity)) continue;
                     NativeVisualInvalidation.ApplyPrefab(World, entity, original);
                 }
             }
+            definitionRepairPending = false;
         }
 
         internal void CloseMutations()
@@ -129,25 +156,17 @@ namespace MedianGrassReplacement.Systems
             FlushPending();
             if (definitions.Count == 0) return;
             NativeVisualInvalidation.CompleteReaders(World);
-            foreach (var pair in definitionSources)
-                if (!EntityManager.Exists(pair.Value))
-                    throw new InvalidOperationException("Missing original visual definition before serialization: " + pair.Value);
+            PrepareDefinitionReferences();
 
-            using (var entities = references.ToEntityArray(Allocator.Temp))
-            {
-                foreach (var entity in entities)
-                {
-                    var prefab = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
-                    if (!definitionSources.TryGetValue(prefab, out var original)) continue;
-                    EntityManager.SetComponentData(entity, new PrefabRef(original));
-                    if (!EntityManager.HasComponent<Deleted>(entity))
-                        NativeVisualInvalidation.ApplyMark(EntityManager, entity);
-                }
-            }
             foreach (var entity in definitions.Keys)
+            {
                 if (EntityManager.Exists(entity)) EntityManager.DestroyEntity(entity);
+                definitionOrigins.ReleaseDestroyed(entity, DefinitionExists, DefinitionDependencyReleased);
+            }
+            definitionOrigins.SweepDestroyed(DefinitionExists, DefinitionDependencyReleased);
             definitions.Clear();
             definitionSources.Clear();
+            readyDefinitions.Clear(); definitionRepairPending = false;
         }
 
         protected override void OnUpdate()
@@ -171,28 +190,41 @@ namespace MedianGrassReplacement.Systems
                 if (EntityManager.HasComponent<Owner>(entity) != change.HadOwner || (change.HadOwner && EntityManager.GetComponentData<Owner>(entity).m_Owner != change.Owner)) continue;
                 if (EntityManager.HasComponent<PrefabRef>(entity) != change.HadPrefab || (change.HadPrefab && EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab != change.OriginalPrefab)) continue;
                 if (change.PrefabChanged && !EntityManager.Exists(change.Prefab)) continue;
-                if (change.PrefabChanged)
-                    NativeVisualInvalidation.ApplyPrefab(World, entity, change.Prefab);
-                if (change.PoseChanged && EntityManager.HasComponent<Transform>(entity) && EntityManager.GetComponentData<Transform>(entity).Equals(change.OriginalPose))
-                    NativeVisualInvalidation.ApplyTransform(World, entity, change.Pose);
-                if (change.RestoreRelative) NativeVisualInvalidation.ApplyRelative(World, entity, change.Relative);
-                if (change.Marked) NativeVisualInvalidation.ApplyMark(EntityManager, entity);
+                // CompleteReaders above owns this synchronous batch. The
+                // helpers schedule no jobs; keep all validation/reset work and
+                // mark each actor once after its final applied change.
+                bool marked = change.Marked;
+                try
+                {
+                    if (change.PrefabChanged)
+                        marked |= NativeVisualInvalidation.ApplyPrefabInBatch(World, entity, change.Prefab);
+                    if (change.PoseChanged && EntityManager.HasComponent<Transform>(entity) && EntityManager.GetComponentData<Transform>(entity).Equals(change.OriginalPose))
+                        marked |= NativeVisualInvalidation.ApplyTransformInBatch(World, entity, change.Pose);
+                    if (change.RestoreRelative) marked |= NativeVisualInvalidation.ApplyRelativeInBatch(World, entity, change.Relative);
+                }
+                finally
+                {
+                    // A later failed write cannot leave an applied prefab or
+                    // pose without the required native initialization flags.
+                    if (marked) NativeVisualInvalidation.ApplyMark(EntityManager, entity);
+                }
             }
             changes.Clear();
         }
 
         internal void FinishFrame()
         {
-            if (definitions.Count == 0) return;
+            if (readyDefinitions.Count == 0) return;
             NativeVisualInvalidation.CompleteReaders(World);
             var used = new HashSet<Entity>();
             using (var values = references.ToComponentDataArray<PrefabRef>(Allocator.Temp)) foreach (var value in values) used.Add(value.m_Prefab);
-            foreach (var entity in new List<Entity>(definitions.Keys))
+            foreach (var entity in new List<Entity>(readyDefinitions))
             {
-                if (definitions[entity] > Frame || used.Contains(entity)) continue;
+                if (definitions[entity] > Frame || used.Contains(entity) || definitionOrigins.HasDependents(entity)) continue;
                 if (EntityManager.Exists(entity)) EntityManager.DestroyEntity(entity);
-                definitions.Remove(entity);
+                definitions.Remove(entity); readyDefinitions.Remove(entity);
                 definitionSources.Remove(entity);
+                definitionOrigins.ReleaseDestroyed(entity, DefinitionExists, DefinitionDependencyReleased);
             }
         }
 
@@ -204,6 +236,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose, GameMode mode)
         {
             changes.Clear(); retire.Clear(); BeforeCulling = false;
+            definitions.Clear(); definitionSources.Clear(); definitionOrigins.Clear(); readyDefinitions.Clear(); definitionRepairPending = false;
             base.OnGamePreload(purpose, mode);
         }
     }

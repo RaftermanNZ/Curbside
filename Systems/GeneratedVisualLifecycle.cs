@@ -10,7 +10,7 @@ namespace MedianGrassReplacement.Systems
 {
     public struct MGRPendingVisualRegistration : IComponentData { }
 
-    internal static class GeneratedVisualLifecycle
+    internal static partial class GeneratedVisualLifecycle
     {
         internal static void RetireSaveBatch(World world,NativeArray<Entity> entities)
         {
@@ -77,6 +77,7 @@ namespace MedianGrassReplacement.Systems
         {
             var manager = world.EntityManager;
             if (!manager.Exists(entity)) return;
+            if (Mod.Saving && world.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.CompletedEarlyRetirement(entity) == true) return;
             world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
             Unregister(world, entity);
             manager.CompleteAllTrackedJobs();
@@ -144,16 +145,26 @@ namespace MedianGrassReplacement.Systems
         {
             Dependency.Complete();
             earlyRetired.Clear();
-            using(var entities=_visuals.ToEntityArray(Allocator.Temp))
+            ClearEarlyCompletion();
+            BeginMarkingRetention();
+            using(var snapshot=_visuals.ToEntityArray(Allocator.Temp))
+            using(var candidates=new NativeList<Entity>(snapshot.Length,Allocator.Temp))
             {
-                GeneratedVisualLifecycle.RetireSaveBatch(World,entities);
-                foreach(var entity in entities)earlyRetired.Add(entity);
+                CopyRetirementCandidates(snapshot,candidates);
+                RetireEarlyMarkingCandidates(candidates.AsArray());
             }
             Mod.Log.Info("Save visual retirement queued before native GPU-frame wait: count="+earlyRetired.Count);
         }
-        internal void EndSaveWindow(){earlyRetired.Clear();}
+        private void RetireEarlyMarkingCandidates(NativeArray<Entity> entities)
+        {
+            GeneratedVisualLifecycle.DetachSaveLanes(World,entities);
+            GeneratedVisualLifecycle.RetireSaveBatch(World,entities);
+            RecordEarlyCompletion(entities);
+            foreach(var entity in entities)earlyRetired.Add(entity);
+        }
+        internal void EndSaveWindow(){earlyRetired.Clear();ClearEarlyCompletion();EndMarkingRetention();}
         internal bool RetiredEarly(Entity entity)=>earlyRetired.Contains(entity);
-        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){earlyRetired.Clear();base.OnGamePreload(purpose,mode);}
+        protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){earlyRetired.Clear();ClearEarlyCompletion();EndMarkingRetention();base.OnGamePreload(purpose,mode);}
         internal void AuditRetirement()
         {
             var renderer=World.GetExistingSystemManaged<Game.Rendering.PreCullingSystem>();
@@ -172,7 +183,28 @@ namespace MedianGrassReplacement.Systems
         public void PreSerialize(Colossal.Serialization.Entities.Context context)
         {
             Dependency.Complete();
-            using(var entities=_visuals.ToEntityArray(Allocator.Temp))GeneratedVisualLifecycle.RetireSaveBatch(World,entities);
+            // Keep the final sweep for late visuals and actors revived since
+            // early retirement. Only skip IDs we retired and still own as Deleted.
+            ValidateMarkingRetention();
+            using(var snapshot=_visuals.ToEntityArray(Allocator.Temp))
+            using(var candidates=new NativeList<Entity>(snapshot.Length,Allocator.Temp))
+            {
+                CopyRetirementCandidates(snapshot,candidates);
+                RetireFinalMarkingCandidates(candidates.AsArray());
+            }
+        }
+        private void RetireFinalMarkingCandidates(NativeArray<Entity> entities)
+        {
+            using(var pending=new NativeList<Entity>(entities.Length,Allocator.Temp))
+            {
+                // Native reference passes can reattach an early-retired lane
+                // during the save-frame wait. Recheck membership for every ID,
+                // including its recorded old owner, at this final boundary.
+                GeneratedVisualLifecycle.DetachSaveLanes(World,entities,earlyLaneOwners);
+                foreach(var entity in entities)
+                    if(!CompletedEarlyRetirement(entity))pending.Add(entity);
+                if(pending.Length>0)GeneratedVisualLifecycle.RetireSaveBatch(World,pending.AsArray());
+            }
         }
     }
 

@@ -40,6 +40,17 @@ namespace MedianGrassReplacement.Systems
     // of actual changes; identical targets do not invalidate lights or batching.
     internal static class TemporaryPreviewWrites
     {
+        // Lane-only queues never carry pose or original-identity writes. Callers
+        // already read current while validating the committed binding. Replacing
+        // an earlier request with the already-present target must cancel that
+        // earlier request, rather than merely skip enqueueing the latest intent.
+        internal static void QueueLanePrefab(Dictionary<Entity, TemporaryPreviewWrite> requests,
+            Entity actor, Entity current, Entity target)
+        {
+            if (current == target) requests.Remove(actor);
+            else requests[actor] = new TemporaryPreviewWrite { Prefab = target };
+        }
+
         internal static bool Ready(EntityManager manager, Entity actor, Entity prefab)
         {
             if (!manager.Exists(actor) || manager.HasComponent<Deleted>(actor)

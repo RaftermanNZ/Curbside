@@ -76,17 +76,17 @@ namespace MedianGrassReplacement.Systems
  }
  public partial class SignalSaveSerializerEntrySystem:GameSystemBase
  {
-  protected override void OnUpdate(){Mod.Log.Info("Save boundary 4: entering native entity serialization.");}
+  protected override void OnUpdate(){World.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.BeginMarkingSerializationScope();Mod.Log.Info("Save boundary 4: entering native entity serialization.");}
  }
  public partial class SignalSaveSerializerExitSystem:GameSystemBase
  {
-  protected override void OnUpdate(){Mod.Log.Info("Save boundary 5: native entity serialization returned; asynchronous writing may still be pending.");}
+  protected override void OnUpdate(){World.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.RestoreMarkingSerializationScope();Mod.Log.Info("Save boundary 5: native entity serialization returned; asynchronous writing may still be pending.");}
  }
  public partial class SignalSaveWriterScheduledSystem:GameSystemBase
  {
   protected override void OnUpdate()
   {
-   if(!SaveDiagnostics.JoinWriter){Mod.Log.Info("Save boundary 6: native asynchronous writer owns completion; experimental extra-wait removal enabled.");return;}
+   if(!SaveDiagnostics.JoinWriter){Mod.Log.Info("Save boundary 6: native asynchronous writer owns completion; no extra main-thread writer wait.");return;}
    Mod.Log.Info("Save boundary 6: joining native compression/file-write jobs; this is not full save completion.");
    // Same public handle completed by SaveGameSystem on its following update.
    // Save-only fence: no replacement writer, background polling or buffer access.

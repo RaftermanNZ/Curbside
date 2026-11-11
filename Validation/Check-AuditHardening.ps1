@@ -33,7 +33,7 @@ try{
  $projectRoot=Split-Path $PSScriptRoot
  [xml]$project=Get-Content -LiteralPath (Join-Path $projectRoot 'MedianGrassReplacement.csproj') -Raw
  $version=$project.Project.PropertyGroup.Version|Where-Object {$_}|Select-Object -First 1
- $null=$version -match '^(\d+)\.(\d+)\.(\d+)-test\.(\d+)$'
+ if($version -notmatch '^(\d+)\.(\d+)\.(\d+)-test\.(\d+)(?:\+signals\.(?:r11|r19|r23)(?:\.florida2)?(?:\.surfaces\.r1)?)?$'){throw 'Unexpected test-build version format'}
  $expected="$($Matches[1]).$($Matches[2]).$($Matches[3]).$($Matches[4])"
  $metadata=Get-Content -LiteralPath (Join-Path $projectRoot 'UI/mod.json') -Raw|ConvertFrom-Json
  if($metadata.version -ne $expected){throw 'UI/project version mismatch'}

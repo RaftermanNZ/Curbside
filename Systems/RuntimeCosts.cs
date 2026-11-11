@@ -7,11 +7,13 @@ namespace ModDiagnostics
         private sealed class Gauge {internal long Current,Pending;}
         private static readonly Dictionary<string,Cost> Costs=new Dictionary<string,Cost>();
         private static readonly Dictionary<string,Gauge> Gauges=new Dictionary<string,Gauge>();
+        internal static Func<int> FrameNumber;
         private static long windowStart=Stopwatch.GetTimestamp();
         internal static long Begin()=>TraceBuffer.Enabled?Stopwatch.GetTimestamp():0;
         internal static void End(string name,long start)
         {
-            if(start==0||!TraceBuffer.Enabled)return;long ticks=Stopwatch.GetTimestamp()-start;
+            if(start==0||!TraceBuffer.Enabled)return;long end=Stopwatch.GetTimestamp();long ticks=end-start;
+            RuntimeCostEvents.Record(FrameNumber?.Invoke()??-1,name,start,end);
             if(!Costs.TryGetValue(name,out var cost))Costs[name]=cost=new Cost();cost.Count++;cost.Ticks+=ticks;if(ticks>cost.Maximum)cost.Maximum=ticks;
             double ms=ticks*(1000d/Stopwatch.Frequency);
             if(ms>=1)cost.OverOne++;if(ms>=4)cost.OverFour++;if(ms>=16)cost.OverSixteen++;
@@ -22,7 +24,22 @@ namespace ModDiagnostics
             if(!Gauges.TryGetValue(name,out var gauge))Gauges[name]=gauge=new Gauge();
             gauge.Current=Math.Max(0,current);gauge.Pending=Math.Max(0,pending);
         }
-        internal static void Reset(){Costs.Clear();Gauges.Clear();windowStart=Stopwatch.GetTimestamp();}
+        internal static void Reset(){Costs.Clear();Gauges.Clear();RuntimeCostEvents.Reset();windowStart=Stopwatch.GetTimestamp();}
+        internal static void ExportEvents(string folder)
+        {
+            if(!TraceBuffer.Enabled)return;
+            try
+            {
+                // Freeze before the legacy snapshot collectors run, so their
+                // expensive inspection work cannot masquerade as a hover spike.
+                var csv=RuntimeCostEvents.FreezeCsv(Stopwatch.Frequency);
+                System.IO.Directory.CreateDirectory(folder);
+                var path=System.IO.Path.Combine(folder,"callback-costs-"+DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff",CultureInfo.InvariantCulture)+".csv");
+                System.IO.File.WriteAllText(path,csv,new UTF8Encoding(false));
+                MedianGrassReplacement.Mod.Log.Info("Diagnostic callback events exported: "+path);
+            }
+            catch(Exception error){MedianGrassReplacement.Mod.Log.Warn("Diagnostic callback export failed: "+error.GetType().Name);}
+        }
         internal static string Snapshot()
         {
             double seconds=Math.Max(.001,(Stopwatch.GetTimestamp()-windowStart)/(double)Stopwatch.Frequency);

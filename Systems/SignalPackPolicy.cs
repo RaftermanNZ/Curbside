@@ -6,20 +6,32 @@ namespace GardenCitySignals
 {
     [Serializable] internal sealed class SignalPackManifest
     {
-        public string format=null,gameVersion=null;
+        public string format=null,gameVersion=null,signLayout=null;
         public int minimumCurbsideBuild=0;
         public string[] modules=null;
     }
     internal static class SignalPackPolicy
     {
+        internal static bool UseRigidSignLayout {get;private set;}
+        internal static bool UseLowerRigidSignLayout {get;private set;}
+        internal static bool IncludesFlorida {get;private set;}
+        // Called only after a complete, single-owner published Florida catalog
+        // passes discovery. Its first public asset release uses R23 clearance.
+        internal static void AdoptPublishedFloridaLayout()
+        {
+            UseRigidSignLayout=true;
+            UseLowerRigidSignLayout=true;
+            IncludesFlorida=true;
+        }
         // The native manifest includes the offline file/hash catalog (553KB in Prepared-Pack-Test1).
         internal const int MaximumManifestBytes=2*1024*1024;
         internal static bool ValidManifestLength(long bytes)=>bytes>0&&bytes<=MaximumManifestBytes;
         internal static int CurrentBuild=>MedianGrassReplacement.BuildIdentity.Number;
         internal static bool ValidManifest(string format,int minimum,string[] modules)
-            =>format=="Curbside.NativeSignalPack.v1"&&minimum>0&&minimum<=CurrentBuild&&modules!=null&&modules.Length==SignalModuleCatalog.Names.Length&&modules.Distinct(StringComparer.Ordinal).Count()==modules.Length&&SignalModuleCatalog.Names.All(n=>modules.Contains(n,StringComparer.Ordinal));
+            =>format=="Curbside.NativeSignalPack.v1"&&minimum>0&&minimum<=CurrentBuild&&modules!=null&&(modules.Length==SignalModuleCatalog.Names.Length||modules.Length==SignalModuleCatalog.Names.Length+FloridaModuleCatalog.Names.Length)&&modules.Distinct(StringComparer.Ordinal).Count()==modules.Length&&SignalModuleCatalog.Names.All(n=>modules.Contains(n,StringComparer.Ordinal))&&(modules.Length==SignalModuleCatalog.Names.Length||FloridaModuleCatalog.Names.All(n=>modules.Contains(n,StringComparer.Ordinal)));
         internal static bool ReadLocalManifest(string path)
         {
+            UseRigidSignLayout=false;UseLowerRigidSignLayout=false;IncludesFlorida=false;
             try
             {
                 var file=new FileInfo(path);
@@ -27,6 +39,10 @@ namespace GardenCitySignals
                 if(!ValidManifestLength(file.Length))throw new InvalidDataException("Manifest must be nonempty and no larger than "+MaximumManifestBytes+" bytes; actual="+file.Length+".");
                 var data=JsonUtility.FromJson<SignalPackManifest>(File.ReadAllText(path));
                 if(data==null||!ValidManifest(data.format,data.minimumCurbsideBuild,data.modules))throw new InvalidDataException("Unsupported format/build or incomplete module catalog.");
+                if(!string.IsNullOrEmpty(data.signLayout)&&data.signLayout!=SignalSignPlacement.Layout&&data.signLayout!=SignalSignPlacement.ClearanceLayout)throw new InvalidDataException("Unsupported signal sign layout.");
+                UseLowerRigidSignLayout=data.signLayout==SignalSignPlacement.ClearanceLayout;
+                UseRigidSignLayout=data.signLayout==SignalSignPlacement.Layout||UseLowerRigidSignLayout;
+                IncludesFlorida=data.modules.Length==SignalModuleCatalog.Names.Length+FloridaModuleCatalog.Names.Length;
                 Mod.Log.Info("Local prepared signal manifest accepted: game="+data.gameVersion+" minimumBuild="+data.minimumCurbsideBuild+". Native loader still validates assets; full file hashing is an offline check.");
                 return true;
             }

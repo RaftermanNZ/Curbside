@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { bindValue, useValue, trigger } from "cs2/api";
 import { Button, Panel, Tooltip, Scrollable } from "cs2/ui";
 import { createTranslator } from "./localization";
@@ -12,7 +12,7 @@ const activeBinding=bindValue("curbside","active",-1);
 const diagnosticBinding=bindValue("curbside","diagnosticsEnabled",false);
 const featuresBinding=bindValue("curbside","roadFeatures","");
 const groups=["Markings","Parking","Crosswalks","Traffic","Decoration","Visibility","Restore"];
-const order:Record<string,string[]>={Markings:["Inspect road","White line","Yellow line","Double yellow line","Double white line","White passing line","Yellow passing line","White standard-dash line","White short-dash line","White long-dash line","Yellow standard-dash line","Yellow short-dash line","Yellow long-dash line"],Parking:["Marked parking bays","T-mark parking bays","Full-depth T parking bays","Parking dividers to curb","Parking dividers only","Unmarked parking bays","Parking-end hatching","Yellow parking-end hatching","No parking"],Visibility:["Hide selected line","Hide all road lines","Hide vanilla lines","Hide lane and edge lines","Hide edge lines","Hide centerline","Hide lane arrows","Hide speed decals","Hide arrows and speed decals"],Restore:["Restore parking defaults","Restore line defaults","Reset Curbside upgrades"]};
+const order:Record<string,string[]>={Traffic:["One-way stop","Two-way stops","One-way yield","Two-way yields","Far-side traffic lights","Garden City traffic lights","Span-wire traffic lights","Rigid mast-arm traffic lights","Metal-pole span-wire signals","Florida horizontal traffic lights"],Markings:["Inspect road","White line","Yellow line","Double yellow line","Double white line","White passing line","Yellow passing line","White standard-dash line","White short-dash line","White long-dash line","Yellow standard-dash line","Yellow short-dash line","Yellow long-dash line"],Parking:["Marked parking bays","T-mark parking bays","Full-depth T parking bays","Parking dividers to curb","Parking dividers only","Unmarked parking bays","Parking-end hatching","Yellow parking-end hatching","No parking"],Visibility:["Hide selected line","Hide all road lines","Hide vanilla lines","Hide lane and edge lines","Hide edge lines","Hide centerline","Hide lane arrows","Hide speed decals","Hide arrows and speed decals"],Restore:["Restore parking defaults","Restore line defaults","Reset Curbside upgrades"]};
 const priority=(t:Tool)=>{const index=(order[t.group]||[]).indexOf(t.title);return index>=0?index:t.id;};
 export function CurbsidePanel(){
  const translations=useValue(translationsBinding);

@@ -23,6 +23,7 @@ namespace MedianGrassReplacement.Systems
             if(!_scaledPoles.TryGetValue(source,out var copy))
             {
                 copy=EntityManager.Instantiate(source);
+                World.GetOrCreateSystemManaged<VisualLifecycleSystem>().TrackDefinition(copy,source,"powerline-height");
                 if(!EntityManager.HasComponent<Prefab>(copy))EntityManager.AddComponent<Prefab>(copy);
                 if(EntityManager.HasComponent<PrefabData>(copy))EntityManager.SetComponentEnabled<PrefabData>(copy,false);
                 if(EntityManager.HasComponent<Created>(copy))EntityManager.RemoveComponent<Created>(copy);
@@ -50,7 +51,7 @@ namespace MedianGrassReplacement.Systems
                 var reference=EntityManager.GetComponentData<PrefabRef>(e);
                 if(reverse.TryGetValue(reference.m_Prefab,out var native)&&EntityManager.Exists(native))NativeVisualInvalidation.SetPrefab(World,e,native);
             }
-            foreach(var copy in _scaledPoles.Values)if(EntityManager.Exists(copy))GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
+            foreach(var copy in _scaledPoles.Values)GeneratedVisualLifecycle.RetireDefinition(World,copy,reverse[copy]);
             _scaledPoles.Clear();_pole=Entity.Null;
         }
         internal void DisposeResources(){Clear();RestorePoleDefinitions();}

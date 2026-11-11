@@ -75,11 +75,13 @@ namespace MedianGrassReplacement
 
 
 
+        private static int DiagnosticFrameNumber() => UnityEngine.Time.frameCount;
+
         public void OnLoad(UpdateSystem updateSystem)
 
         {
 
-            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+". Test197 baseline plus changed-preview inheritance and cached/batched signal adaptation. Offline test build; FPS and live acceptance pending.");
+            AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+".");
 
 
 
@@ -158,6 +160,9 @@ namespace MedianGrassReplacement
 
             updateSystem.UpdateAt<UpgradeAssetsSystem>(SystemUpdatePhase.PrefabUpdate);
 
+            updateSystem.UpdateBefore<DedicatedSurfaceSystem, Game.Prefabs.PrefabInitializeSystem>(SystemUpdatePhase.PrefabUpdate);
+            updateSystem.UpdateAt<DedicatedSurfaceMenuSystem>(SystemUpdatePhase.UIUpdate);
+
             updateSystem.UpdateBefore<DecalVisibilitySystem, Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
 
@@ -177,7 +182,10 @@ namespace MedianGrassReplacement
 
             updateSystem.UpdateBefore<RoadAttachmentCommitSystem,Game.Net.SecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
 
-            updateSystem.UpdateAfter<VisualPowerlineSystem,Game.Net.SecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
+            // Replacement secondary producers may run after the disabled native
+            // anchor or as a separate UpdateAt entry. Consume their completed
+            // phase work once, before its barrier, rather than as a sibling.
+            updateSystem.UpdateBefore<VisualPowerlineSystem,Game.Common.ModificationBarrier4B>(SystemUpdatePhase.Modification4B);
 
             updateSystem.UpdateBefore<GeneratedVisualRegistrationSystem,Game.Objects.SearchSystem>(SystemUpdatePhase.Modification5);
 
@@ -198,12 +206,16 @@ namespace MedianGrassReplacement
             updateSystem.UpdateBefore<SignalPreviewRestoreSystem,Game.Tools.ToolApplySystem>(SystemUpdatePhase.ApplyTool);
             updateSystem.UpdateBefore<SignalPreviewSystem,Game.Objects.SubObjectHiddenSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAt<CrosswalkAppearancePreviewSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAfter<DecalHoverPreviewSystem,CrosswalkAppearancePreviewSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<PreviewRefreshRestoreSystem,Game.Objects.SubObjectSystem>(SystemUpdatePhase.Modification2B);
             updateSystem.UpdateBefore<PreviewPaintInheritanceSystem,Game.Net.InitializeSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAfter<CrosswalkPreviewSystem,IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
             
-            updateSystem.UpdateBefore<CrosswalkVisualRestoreSystem, Game.Net.LaneSystem>(SystemUpdatePhase.Modification4);
-            updateSystem.UpdateBefore<FixedParkingRestoreSystem, Game.Net.LaneSystem>(SystemUpdatePhase.Modification4);
+            // Restore matching keys after native geometry, before components/
+            // lane production. Another mod's before-Lane sibling otherwise has
+            // no guaranteed order against our own before-Lane sibling.
+            updateSystem.UpdateBefore<CrosswalkVisualRestoreSystem, Game.Net.NetComponentsSystem>(SystemUpdatePhase.Modification4);
+            updateSystem.UpdateBefore<FixedParkingRestoreSystem, Game.Net.NetComponentsSystem>(SystemUpdatePhase.Modification4);
 
             updateSystem.UpdateAfter<FixedParkingSystem, Game.Net.SecondaryLaneReferencesSystem>(SystemUpdatePhase.Modification5);
 
@@ -234,6 +246,9 @@ namespace MedianGrassReplacement
             updateSystem.UpdateAt<CurbsidePanelSystem>(SystemUpdatePhase.UIUpdate);
 
             Settings.EnableRuntimeEvents();
+            ModDiagnostics.RuntimeCosts.FrameNumber = DiagnosticFrameNumber;
+
+            NativeLaneVisibilityOwnership.Install(updateSystem.World);
 
             GameManager.instance.onGameSaveLoad += SaveState;
 
@@ -297,6 +312,11 @@ namespace MedianGrassReplacement
 
             if (world != null && !world.IsCreated) world = null;
 
+            // A disposal during an exceptional save must release temporary
+            // serializer exclusion before normal ownership queries run.
+            try { world?.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.EndSaveWindow(); }
+            catch (Exception error) { Log.Error(error, "Could not release the marking serialization scope during disposal."); }
+
             Cleanup(() => world?.GetExistingSystemManaged<NativeCrosswalkResetSystem>()?.ReleaseInput());
 
             Cleanup(() => world?.GetExistingSystemManaged<CrosswalkUpgradeSystem>()?.DetachInput());
@@ -350,6 +370,7 @@ namespace MedianGrassReplacement
             Cleanup(() => world?.GetExistingSystemManaged<FarSideLightSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<SignalAssetSaveSystem>()?.RevertToVanilla());
             Cleanup(() => world?.GetExistingSystemManaged<VisualLifecycleSystem>()?.PrepareForSerialization());
+            Cleanup(NativeLaneVisibilityOwnership.Restore);
             AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);
             Cleanup(() => world?.GetExistingSystemManaged<SignalStreetNameSystem>()?.Clear());
 

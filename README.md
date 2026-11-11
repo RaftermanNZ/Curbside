@@ -6,9 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-This source package contains Test204 (0.5.1-test.204). Earlier source tags remain available. The detailed Test204 release notes describe preview, traffic-signal and font changes, validation and unresolved crash reports. See [the changelog](CHANGELOG.md) for changes and known limitations, including outstanding freeway-line issues. No Paradox Mods publication is triggered by GitHub pushes.
-
-Known issue: TTE protected left turns can still produce duplicate lights in Test204. See [detailed release notes](docs/TEST204-RELEASE.md).
+This is the source for **Curbside 0.6.0**, based on the Test239 candidate. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
 
 ## Build locally on Windows
 

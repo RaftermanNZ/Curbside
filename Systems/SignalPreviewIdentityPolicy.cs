@@ -15,6 +15,16 @@ namespace MedianGrassReplacement.Systems
         internal static bool CompatibleMask(ushort requested, ushort source)
             => requested == 0 || source == 0 || (requested & source) != 0;
 
+        // Native m_Original remains authoritative. Only the recovery path needs
+        // this stronger proof: overlapping phases do not identify the same head,
+        // and standalone crossings often both have vehicle mask zero.
+        internal static bool SameFallbackBinding(ushort requestedVehicle, ushort requestedPedestrian,
+            ushort sourceVehicle, ushort sourcePedestrian)
+            => requestedVehicle == sourceVehicle && requestedPedestrian == sourcePedestrian;
+
+        internal static ushort NativePedestrianMask(ushort current, ushort original, ushort applied)
+            => current == applied ? original : current;
+
         internal static bool TrySecondaryScore(Transform generated, Transform native, out float score)
         {
             score = math.distancesq(generated.m_Position, native.m_Position);

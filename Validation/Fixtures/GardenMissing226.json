@@ -1,0 +1,233 @@
+{
+  "node": "Entity(54979:1)",
+  "time": "2026-11-09 20:17:36,792",
+  "banks": [
+    {
+      "left": [
+        -463.4807,
+        124.5051,
+        -2982.218
+      ],
+      "right": [
+        -468.0709,
+        124.5051,
+        -2965.849
+      ],
+      "outward": [
+        0.9628521,
+        0.2700293
+      ],
+      "lanes": [
+        [
+          -466.8559,
+          124.5051,
+          -2970.182
+        ],
+        [
+          -467.6659,
+          124.5051,
+          -2967.293
+        ]
+      ],
+      "masks": [
+        2,
+        2
+      ]
+    },
+    {
+      "left": [
+        -474.4499,
+        124.493,
+        -2963.478
+      ],
+      "right": [
+        -487.9299,
+        124.493,
+        -2967.257
+      ],
+      "outward": [
+        -0.2700179,
+        0.9628553
+      ],
+      "lanes": [
+        [
+          -483.597,
+          124.493,
+          -2966.042
+        ],
+        [
+          -486.4856,
+          124.493,
+          -2966.853
+        ]
+      ],
+      "masks": [
+        1,
+        1
+      ]
+    },
+    {
+      "left": [
+        -467.6898,
+        124.4563,
+        -2987.584
+      ],
+      "right": [
+        -481.1697,
+        124.4563,
+        -2991.365
+      ],
+      "outward": [
+        0.2700142,
+        -0.9628563
+      ],
+      "lanes": [
+        [
+          -469.134,
+          124.4563,
+          -2987.989
+        ],
+        [
+          -472.0226,
+          124.4563,
+          -2988.8
+        ]
+      ],
+      "masks": [
+        1,
+        1
+      ]
+    },
+    {
+      "left": [
+        -487.9923,
+        124.5606,
+        -2987.533
+      ],
+      "right": [
+        -491.7725,
+        124.5606,
+        -2974.053
+      ],
+      "outward": [
+        -0.9628562,
+        -0.2700147
+      ],
+      "lanes": [
+        [
+          -488.3973,
+          124.5606,
+          -2986.089
+        ],
+        [
+          -489.2074,
+          124.5606,
+          -2983.2
+        ]
+      ],
+      "masks": [
+        2,
+        2
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "actor": "Entity(75238:129)",
+      "position": [
+        -466.2078,
+        124.5051,
+        -2972.493
+      ],
+      "approach": 0,
+      "mask": 2,
+      "prefab": "CSG Controller Only 39",
+      "ownedHidden": true
+    },
+    {
+      "actor": "Entity(75253:107)",
+      "position": [
+        -468.8244,
+        124.5047,
+        -2965.013
+      ],
+      "approach": 0,
+      "mask": 2,
+      "prefab": "CSG Controller Only 30",
+      "ownedHidden": true
+    },
+    {
+      "actor": "Entity(75529:3)",
+      "position": [
+        -481.1899,
+        124.493,
+        -2965.367
+      ],
+      "approach": 1,
+      "mask": 1,
+      "prefab": "CSG Applied 144",
+      "ownedHidden": false
+    },
+    {
+      "actor": "Entity(75530:3)",
+      "position": [
+        -488.7849,
+        124.494,
+        -2968.015
+      ],
+      "approach": 1,
+      "mask": 1,
+      "prefab": "CSG Controller Only 30",
+      "ownedHidden": true
+    },
+    {
+      "actor": "Entity(83819:3)",
+      "position": [
+        -474.4297,
+        124.4563,
+        -2989.475
+      ],
+      "approach": 2,
+      "mask": 1,
+      "prefab": "CSG Applied 145",
+      "ownedHidden": false
+    },
+    {
+      "actor": "Entity(83822:3)",
+      "position": [
+        -466.8181,
+        124.4579,
+        -2986.823
+      ],
+      "approach": 2,
+      "mask": 1,
+      "prefab": "CSG Controller Only 30",
+      "ownedHidden": true
+    },
+    {
+      "actor": "Entity(85507:3)",
+      "position": [
+        -489.8824,
+        124.5606,
+        -2980.793
+      ],
+      "approach": 3,
+      "mask": 2,
+      "prefab": "CSG Applied 146",
+      "ownedHidden": false
+    },
+    {
+      "actor": "Entity(85508:3)",
+      "position": [
+        -487.2343,
+        124.5576,
+        -2988.387
+      ],
+      "approach": 3,
+      "mask": 2,
+      "prefab": "CSG Controller Only 30",
+      "ownedHidden": true
+    }
+  ],
+  "scope": "Recorded banks/positions/assignments. Per-lane masks inferred from single-bit recorded bank mask; native roles, exact candidate ordering and adjustment branches not executed."
+}

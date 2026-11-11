@@ -47,7 +47,7 @@ namespace MedianGrassReplacement.Systems
 
         private readonly HashSet<Entity> _pending = new HashSet<Entity>(), _deferred = new HashSet<Entity>();
 
-        internal static void QueueRoad(Entity road) { Requested.Add(road); }
+        internal static void QueueRoad(Entity road) { Requested.Add(road); DecalHoverPreviewSystem.RoadChanged(road); }
 
         protected override void OnCreate()
 
@@ -234,7 +234,7 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        internal void Restore() { Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); }
+        internal void Restore() { World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore(); Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); }
 
         public void PreSerialize(Context context) { Restore(); }
 

@@ -44,20 +44,37 @@ namespace MedianGrassReplacement.Systems
         }
 
         internal static void ApplyRelative(World world, Entity entity, Game.Objects.Relative relative)
+            => ApplyRelativeCore(world, entity, relative, true);
+
+        // Only VisualLifecycleSystem.FlushPending may use this entry: its
+        // completed-reader fence precedes this synchronous mutation batch.
+        internal static bool ApplyRelativeInBatch(World world, Entity entity, Game.Objects.Relative relative)
+            => ApplyRelativeCore(world, entity, relative, false);
+
+        private static bool ApplyRelativeCore(World world, Entity entity, Game.Objects.Relative relative, bool standalone)
         {
             var manager = world.EntityManager;
-            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || manager.HasComponent<Game.Objects.Relative>(entity)) return;
-            CompleteReaders(world);
+            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || manager.HasComponent<Game.Objects.Relative>(entity)) return false;
+            if (standalone) CompleteReaders(world);
             manager.AddComponentData(entity, relative);
-            ApplyMark(manager, entity);
+            if (standalone) ApplyMark(manager, entity);
+            return true;
         }
 
         internal static void ApplyPrefab(World world, Entity entity, Entity prefab)
+            => ApplyPrefabCore(world, entity, prefab, true);
+
+        // Only VisualLifecycleSystem.FlushPending may use this entry: its
+        // completed-reader fence precedes this synchronous mutation batch.
+        internal static bool ApplyPrefabInBatch(World world, Entity entity, Entity prefab)
+            => ApplyPrefabCore(world, entity, prefab, false);
+
+        private static bool ApplyPrefabCore(World world, Entity entity, Entity prefab, bool standalone)
         {
             var manager = world.EntityManager;
-            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || !manager.HasComponent<PrefabRef>(entity)) return;
+            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || !manager.HasComponent<PrefabRef>(entity)) return false;
             if (!manager.Exists(prefab)) throw new InvalidOperationException("Visual prefab no longer exists: " + prefab);
-            if (manager.GetComponentData<PrefabRef>(entity).m_Prefab == prefab) return;
+            if (manager.GetComponentData<PrefabRef>(entity).m_Prefab == prefab) return false;
             if (manager.HasComponent<Game.Objects.Transform>(entity))
             {
                 if (!manager.HasComponent<ObjectData>(prefab) || !manager.HasComponent<ObjectGeometryData>(prefab) || !manager.HasBuffer<SubMesh>(prefab))
@@ -74,19 +91,30 @@ namespace MedianGrassReplacement.Systems
             }
             if (manager.HasBuffer<Emissive>(entity) != manager.HasBuffer<LightState>(entity))
                 throw new InvalidOperationException("Incomplete native light buffers on " + entity);
-            CompleteReaders(world);
+            if (standalone) CompleteReaders(world);
             manager.SetComponentData(entity, new PrefabRef(prefab));
             if (manager.HasBuffer<Emissive>(entity) && !manager.HasComponent<MGRLightReset>(entity)) manager.AddComponent<MGRLightReset>(entity);
-            ApplyMark(manager, entity);
+            if (standalone) ApplyMark(manager, entity);
+            return true;
         }
 
         internal static void ApplyTransform(World world, Entity entity, Transform transform)
+            => ApplyTransformCore(world, entity, transform, true);
+
+        // Only VisualLifecycleSystem.FlushPending may use this entry: its
+        // completed-reader fence precedes this synchronous mutation batch.
+        internal static bool ApplyTransformInBatch(World world, Entity entity, Transform transform)
+            => ApplyTransformCore(world, entity, transform, false);
+
+        private static bool ApplyTransformCore(World world, Entity entity, Transform transform, bool standalone)
         {
             var manager = world.EntityManager;
-            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || !manager.HasComponent<Transform>(entity)) return;
-            CompleteReaders(world);
+            if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity) || !manager.HasComponent<Transform>(entity)) return false;
+            if (manager.GetComponentData<Transform>(entity).Equals(transform)) return false;
+            if (standalone) CompleteReaders(world);
             manager.SetComponentData(entity, transform);
-            ApplyMark(manager, entity);
+            if (standalone) ApplyMark(manager, entity);
+            return true;
         }
 
         internal static void ApplyMark(EntityManager manager, Entity entity)
