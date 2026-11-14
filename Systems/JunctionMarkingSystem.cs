@@ -140,6 +140,9 @@ namespace MedianGrassReplacement.Systems
 
             if (!EntityManager.HasComponent<Game.Net.Node>(owner)) return false;
 
+            // Native secondary semantics protect modded stop bars too; display names are not ownership.
+            if (World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().IsStopDefinition(EntityManager.GetComponentData<PrefabRef>(line).m_Prefab)) return false;
+
             if(_externalPaint.Contains(EntityManager,line))return false;
             if(EntityManager.HasBuffer<MGRIndividualDivider>(owner)){var individual=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
             if(individual.KeepsIndividualDivider(owner,line))return false;
@@ -306,7 +309,8 @@ namespace MedianGrassReplacement.Systems
 
             _nodeWork.Clear(); foreach (var node in RequestedNodes) _nodeWork.Add(node); RequestedNodes.Clear();
 
-            using (var nodes = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) _nodeWork.Add(node);
+            if(World.GetExistingSystemManaged<CurbLineEmissionSystem>()?.UsesMarkingSpecificChanges != true)
+                using (var nodes = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) _nodeWork.Add(node);
 
             bool nodeChange = _nodeWork.Count > 0;
 

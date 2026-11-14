@@ -118,15 +118,7 @@ namespace MedianGrassReplacement.Systems
 
         internal bool IsStopDefinition(Entity prefab) => _stopPrefabs.Contains(prefab);
 
-        internal void RefreshDefinitionsIfNeeded()
-
-        {
-
-            int count = _lanePrefabs.CalculateEntityCount() + _secondaryDefinitions.CalculateEntityCount();
-
-            if (_catalogRequested || count != _definitionCount) { RefreshCatalog(); _definitionCount = count; }
-
-        }
+        internal void RefreshDefinitionsIfNeeded() => RefreshDefinitions(true);
 
         private EntityQuery _joinNodes;
         private EntityQuery _roads, _changedRoads, _changedLaneRoads, _deletedRoads, _owned, _deletedOwned, _lanePrefabs;
@@ -494,6 +486,11 @@ namespace MedianGrassReplacement.Systems
         private readonly List<Entity> _deliveredParking = new List<Entity>(8), _retryRoadWork = new List<Entity>();
         private readonly List<Entity> _joinCandidates = new List<Entity>(8), _completedJoins = new List<Entity>(8);
         private readonly System.Diagnostics.Stopwatch _roadWatch = new System.Diagnostics.Stopwatch(), _joinWatch = new System.Diagnostics.Stopwatch();
+        private readonly PaintOwnerNotifications _ownerNotifications = new PaintOwnerNotifications();
+        private readonly HashSet<Entity> _notifiedRoadWork = new HashSet<Entity>();
+        private readonly List<Entity> _notifiedNodeWork = new List<Entity>();
+        private MarkingChangeNotifications _markingChanges;
+        internal bool UsesMarkingSpecificChanges => _active && Enabled && _markingChanges != null && MarkingChangeNotifications.Supported;
         private static readonly ComponentType[] RoadGeometryChanges = { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Composition>() };
 
         private readonly Dictionary<Entity, RoadMarks> _marks = new Dictionary<Entity, RoadMarks>();
@@ -507,6 +504,9 @@ namespace MedianGrassReplacement.Systems
             base.OnCreate();
 
             _prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _ownerNotifications.KnownNonPaintPrefab = new PaintLaneReadPolicy(_prefabs).IsNonPaint;
+            _markingChanges = MarkingChangeNotifications.Supported
+                ? new MarkingChangeNotifications(descriptions => GetEntityQuery(descriptions)) : null;
 
             var all = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Road>(),
 
@@ -536,9 +536,9 @@ namespace MedianGrassReplacement.Systems
 
             _deletedOwned = GetEntityQuery(ComponentType.ReadOnly<MGRCurbMarking>(), ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Owner>());
 
-            _secondaryDefinitions = GetEntityQuery(ComponentType.ReadOnly<SecondaryNetLane>());
+            _secondaryDefinitions = GetEntityQuery(ComponentType.ReadOnly<SecondaryNetLane>(), ComponentType.Exclude<MGRPrivateVisualPrefab>());
 
-            _lanePrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneArchetypeData>(), ComponentType.Exclude<MGRPrivatePaintDefinition>());
+            _lanePrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneArchetypeData>(), ComponentType.Exclude<MGRPrivatePaintDefinition>(), ComponentType.Exclude<MGRPrivateVisualPrefab>());
 
         }
 
@@ -621,9 +621,12 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            if (_active) RefreshDefinitionsIfNeeded();
+            if (_active) ObserveDefinitionsIfReady();
 
             var directRoads=_directRoadWork;directRoads.Clear();directRoads.UnionWith(_externalDirtyRoads);
+            foreach (var road in _externalDirtyRoads) _paintRefreshReasons.Require(road);
+            foreach (var road in _externalParkingRoads) { directRoads.Add(road); _paintRefreshReasons.Parking(road); }
+            _externalParkingRoads.Clear();
 
             _externalDirtyRoads.Clear();
 
@@ -771,26 +774,78 @@ namespace MedianGrassReplacement.Systems
 
             // Apply each filter only while collecting that snapshot, then reset.
 
-            var backlog=_backlogRoadWork;backlog.Clear();backlog.UnionWith(_pendingRoads);_pendingRoads.Clear();
-            var pending=directRoads;
+            bool specificChanges=UsesMarkingSpecificChanges;
+            if (specificChanges)
+            {
+                _notifiedRoadWork.Clear(); _notifiedNodeWork.Clear();
+                _markingChanges.Collect(EntityManager, _notifiedRoadWork, _notifiedNodeWork);
+                _backlogRoadWork.Clear(); _backlogRoadWork.UnionWith(_pendingRoads); _pendingRoads.Clear();
+            }
+            else
+            {
+#if CURBSIDE_ASYNC_PAINT_NOTIFICATIONS
+            _notifiedRoadWork.Clear();
+            _notifiedNodeWork.Clear();
+            var notifications = new PaintNotificationBatch();
+            try
+            {
+                notifications.Schedule(_roads, _joinNodes, Dependency);
+                Dependency = Unity.Jobs.JobHandle.CombineDependencies(Dependency, notifications.Jobs);
+                // Independent managed bookkeeping; no ECS views or mutations.
+                _backlogRoadWork.Clear();_backlogRoadWork.UnionWith(_pendingRoads);_pendingRoads.Clear();
+                notifications.CopyTo(_notifiedRoadWork, _notifiedNodeWork, GetEntityTypeHandle());
+            }
+            finally { notifications.Dispose(); }
+#else
+            _backlogRoadWork.Clear();_backlogRoadWork.UnionWith(_pendingRoads);_pendingRoads.Clear();
+            _notifiedRoadWork.Clear();
             try
             {
                 _roads.SetChangedVersionFilter(RoadGeometryChanges);
-                using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)pending.Add(road);
+                using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)_notifiedRoadWork.Add(road);
                 _roads.SetChangedVersionFilter(ComponentType.ReadOnly<SubLane>());
-                using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)pending.Add(road);
+                using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)_notifiedRoadWork.Add(road);
             }
             finally{_roads.ResetFilter();}
-            if(_initial)using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads)pending.Add(road);
-            foreach(var road in backlog)pending.Add(road);
-            using(var changedNodes=_joinNodes.ToEntityArray(Allocator.Temp))foreach(var node in changedNodes)
-            {
-                _dirtyNodes.Add(node);
-                foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
-                    if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!EntityManager.HasComponent<Deleted>(connection.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(connection.m_Edge))pending.Add(connection.m_Edge);
+#endif
+
+#if !CURBSIDE_ASYNC_PAINT_NOTIFICATIONS
+                _notifiedNodeWork.Clear();
+                using(var changedNodes=_joinNodes.ToEntityArray(Allocator.Temp))foreach(var node in changedNodes)_notifiedNodeWork.Add(node);
+#endif
             }
+            var backlog=_backlogRoadWork;
+            var pending=directRoads;
+            _ownerNotifications.BeginBatch(_notifiedRoadWork.Count + _notifiedNodeWork.Count > 1);
+            try
+            {
+            foreach (var road in _notifiedRoadWork)
+                if (_ownerNotifications.Changed(EntityManager, _externalPaint, road, true))
+                { pending.Add(road); _paintRefreshReasons.Observe(road); if(specificChanges){IntersectionPaintSystem.RequestMarkingRoad(road);World.GetExistingSystemManaged<CurbDecalSystem>()?.NotifyMarkingRoad(road);} }
+            if(_initial)using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads){pending.Add(road);_paintRefreshReasons.Require(road);}
+            foreach(var road in backlog){pending.Add(road);_paintRefreshReasons.Require(road);}
+            foreach(var node in _notifiedNodeWork)
+            {
+                bool changed = _ownerNotifications.Changed(EntityManager, _externalPaint, node);
+                if (!_initial && !changed) continue;
+                _dirtyNodes.Add(node);
+                if(specificChanges){IntersectionPaintSystem.RequestMarkingOwner(node);JunctionMarkingSystem.RequestNodeRefresh(node);}
+                foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
+                    if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!EntityManager.HasComponent<Deleted>(connection.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(connection.m_Edge)){pending.Add(connection.m_Edge);_paintRefreshReasons.Observe(connection.m_Edge);if(specificChanges){IntersectionPaintSystem.RequestMarkingRoad(connection.m_Edge);World.GetExistingSystemManaged<CurbDecalSystem>()?.NotifyMarkingRoad(connection.m_Edge);}}
+            }
+            }
+            finally { _ownerNotifications.EndBatch(); }
             if (pending.Count == 0 && _roadWorkOrder.Count == 0 && _dirtyNodes.Count == 0) return;
 
+            int catalogBeforeWork = CatalogRevision;
+            // Registration may create native entities. Only this closed,
+            // pre-generation boundary may advance the deferred definition pass;
+            // generic catalog readers can be holding native lane buffers.
+            World.GetExistingSystemManaged<YellowPaintDefinitionSystem>()?.EnsureCurrentCatalog();
+            RefreshDefinitionsIfNeeded();
+            if (catalogBeforeWork != CatalogRevision)
+                using (var roads = _roads.ToEntityArray(Allocator.Temp))
+                    foreach (var road in roads) { pending.Add(road); _paintRefreshReasons.Require(road); }
             if (!ResolveLine()) { foreach (var road in pending) _pendingRoads.Add(road); return; }
 
             Dependency.Complete();
@@ -806,6 +861,8 @@ namespace MedianGrassReplacement.Systems
                 {
                     if(rebuilt>=32||(rebuilt>=2&&rebuildWatch.Elapsed.TotalMilliseconds>=2))break;
                     if(!_roadWorkOrder.Take(out var road))break;
+                    var refreshReason = _paintRefreshReasons.TakeReason(road);
+                    bool parkingOnly = refreshReason == PaintRefreshReason.Parking;
                     rebuilt++;
 
                     if (!EntityManager.Exists(road) || EntityManager.HasComponent<Deleted>(road)) { RemoveRoad(road); continue; }
@@ -844,11 +901,29 @@ namespace MedianGrassReplacement.Systems
 
                             if (!EntityManager.Exists(entity) || EntityManager.HasComponent<Deleted>(entity)) { intact = false; break; }
 
-                        if (intact) {existing.Curves.Clear();existing.Curves.AddRange(curves);QueueNativeEdges(road);continue;}
+                        if (intact)
+                        {
+                            // Observed buffer changes do not require native-source
+                            // fanout when output AND source ownership are identical.
+                            // Explicit choices, recovery and retries still force it.
+                            bool forward = refreshReason == PaintRefreshReason.Required
+                                || !SamePaintOwnership(existing.Curves, curves);
+                            existing.Curves.Clear(); existing.Curves.AddRange(curves);
+                            if (forward) QueueNativeEdges(road);
+                            continue;
+                        }
 
                     }
 
-                    if (curves.Count == 0) { if(existing!=null)foreach(var entity in existing.Entities)GeneratedVisualLifecycle.Retire(World,entity);_marks.Remove(road);QueueNativeEdges(road);continue; }
+                    if (curves.Count == 0)
+                    {
+                        if(existing!=null)foreach(var entity in existing.Entities)GeneratedVisualLifecycle.Retire(World,entity);
+                        _marks.Remove(road);
+                        // No previous replacement and no new replacement means
+                        // a parking-only notification changed no paint ownership.
+                        if (!parkingOnly || existing != null) QueueNativeEdges(road);
+                        continue;
+                    }
 
                     
                 var reusable = new Dictionary<MarkingKey, Queue<Entity>>();
@@ -2546,6 +2621,7 @@ namespace MedianGrassReplacement.Systems
         private void RemoveRoad(Entity road)
 
         {
+            _paintRefreshReasons.Remove(road);
 
             if (_caps.TryGetValue(road, out var caps)) { foreach (var cap in caps) _dirtyNodes.Add(cap.Node); _caps.Remove(road); }
 
@@ -2572,6 +2648,9 @@ namespace MedianGrassReplacement.Systems
                 foreach (var entity in entities) GeneratedVisualLifecycle.Retire(World,entity);
 
             _roadWorkOrder.Clear();
+            _paintRefreshReasons.Clear(); _externalParkingRoads.Clear();
+            _ownerNotifications.Clear(); _markingChanges?.Clear();
+            _notifiedRoadWork.Clear();
             _parkingDirtyRoads.Clear();
 
             _auditRoads.Clear();
@@ -2589,6 +2668,7 @@ namespace MedianGrassReplacement.Systems
             _ownedCount = 0;
 
         }
+
 
     }
 

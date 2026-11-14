@@ -48,9 +48,9 @@ namespace MedianGrassReplacement.Systems
   }
   internal Entity Variant(Entity source)=>_variants.TryGetValue(source,out var prefab)?Ready(prefab):Entity.Null;
 
-  protected override void OnCreate(){base.OnCreate();_prefabs=World.GetOrCreateSystemManaged<PrefabSystem>();_geometry=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<NetLaneGeometryData>(),ComponentType.ReadOnly<NetLaneArchetypeData>());}
-  protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);_variants.Clear();_whiteVariants.Clear();_count=-1;_waiting=true;}
-  protected override void OnGameLoadingComplete(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_count=-1;_waiting=true;Enabled=true;}
+  protected override void OnCreate(){base.OnCreate();_prefabs=World.GetOrCreateSystemManaged<PrefabSystem>();_geometry=GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),ComponentType.ReadOnly<NetLaneGeometryData>(),ComponentType.ReadOnly<NetLaneArchetypeData>(),ComponentType.Exclude<MGRPrivateVisualPrefab>());}
+  protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);_variants.Clear();_whiteVariants.Clear();_count=-1;_waiting=true;catalogDeferred=false;}
+  protected override void OnGameLoadingComplete(Colossal.Serialization.Entities.Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_count=-1;_waiting=true;catalogDeferred=false;Enabled=true;}
 
   private NetLaneGeometryPrefab Clone(NetLaneGeometryPrefab source,NetLaneMeshInfo[] meshes,string name)
 
@@ -77,11 +77,15 @@ namespace MedianGrassReplacement.Systems
    foreach(var prefab in _whiteVariants.Values)yield return prefab;
   }
 
-  protected override void OnUpdate()
-
+  private bool catalogDeferred;
+  internal void EnsureCurrentCatalog() { if (catalogDeferred) RefreshDefinitions(true); }
+  protected override void OnUpdate() => RefreshDefinitions(false);
+  private void RefreshDefinitions(bool required)
   {
-
    if(Mod.Saving)return;
+   if (!required && !_waiting && _count >= 0 && !CatalogQueryReadiness.Ready(_geometry))
+   { catalogDeferred = true; return; }
+   catalogDeferred = false;
 
    if(_waiting)
    {

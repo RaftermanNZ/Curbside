@@ -161,7 +161,13 @@ namespace MedianGrassReplacement.Systems
                         if((pending.Selection.ParkingLeft|pending.Selection.ParkingRight)!=0){FixedParkingSystem.QueueRoad(road);CurbLineEmissionSystem.QueueRoad(road);}
                         if((pending.Selection.HiddenLeft|pending.Selection.HiddenRight)!=0)DecalVisibilitySystem.QueueRoad(road);
                         if(pending.Selection.StreetLighting!=0)StreetLightingSystem.QueueRoad(road);
-                        if(pending.Selection.LineVisibility!=0||pending.Selection.EdgeStyle!=0||(pending.Selection.EdgeLeft|pending.Selection.EdgeRight)!=0||pending.Selection.DividerStyle!=0||pending.Selection.CenterStyle!=0||pending.Selection.HideCenter){CurbLineEmissionSystem.QueueRoad(road);IntersectionPaintSystem.RequestRefresh();}
+                        if(pending.Selection.LineVisibility!=0||pending.Selection.EdgeStyle!=0||(pending.Selection.EdgeLeft|pending.Selection.EdgeRight)!=0||pending.Selection.DividerStyle!=0||pending.Selection.CenterStyle!=0||pending.Selection.HideCenter)
+                        {
+                            CurbLineEmissionSystem.QueueRoad(road);
+                            var paint = World.GetOrCreateSystemManaged<IntersectionPaintSystem>();
+                            paint.RequestCommittedRoadPaint(road);
+                            if (pending.Original != road) paint.RequestCommittedRoadPaint(pending.Original);
+                        }
                         if(pending.Selection.Powerlines!=0) World.GetOrCreateSystemManaged<VisualPowerlineSystem>().QueueRoad(road);
 
                         if(pending.Selection.Decals!=0) World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);

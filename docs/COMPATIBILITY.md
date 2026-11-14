@@ -1,4 +1,4 @@
-# Compatibility review for 0.6.0
+# Compatibility review inherited from 0.6.0; update notes for 0.6.1
 
 This is a source and installed-assembly review, not runtime certification of every listed mod. The review screened 565 source repositories, refreshed 22 relevant source checkouts, and inspected seven playsets plus 359 cached managed assemblies. Source HEAD is not necessarily identical to the installed binary.
 

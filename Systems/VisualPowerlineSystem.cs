@@ -193,6 +193,11 @@ namespace MedianGrassReplacement.Systems
     {
         private static readonly ComponentType[] PowerlineGeometryChanges={ComponentType.ReadOnly<EdgeGeometry>(),ComponentType.ReadOnly<Composition>()};
         private readonly List<Entity> _nodeBatch=new List<Entity>(2);
+        private readonly PowerlineJunctionScope _junctionScope = new PowerlineJunctionScope();
+        private readonly HashSet<Entity> _scopeRoads = new HashSet<Entity>();
+        private bool _scopeSeeded, _scopeComplete;
+        private int _scopeOrder;
+        private EntityQuery _upgradedRoads;
 
 
         internal const string AssetName="MGR Visual Roadside Powerlines";
@@ -231,7 +236,7 @@ namespace MedianGrassReplacement.Systems
 
         private readonly HashSet<Entity> _pending=new HashSet<Entity>(),_dirtyNodes=new HashSet<Entity>();
 
-        private void EnqueueRoad(Entity road) {if(_pending.Add(road)) _roadQueue.Enqueue(road);}
+        private void EnqueueRoad(Entity road) { _scopeRoads.Add(road); if(_pending.Add(road)) _roadQueue.Enqueue(road); }
 
         private readonly HashSet<Entity> _withdrawals=new HashSet<Entity>();
         internal void QueueRoad(Entity road,bool removeVisuals=false) {if(removeVisuals)_withdrawals.Add(road);EnqueueRoad(road);_assetsUnavailable=false;Status="Roadside powerlines queued";}
@@ -247,6 +252,8 @@ namespace MedianGrassReplacement.Systems
             _nodes=GetEntityQuery(ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
 
             _nodes.SetChangedVersionFilter(ComponentType.ReadOnly<ConnectedEdge>());
+
+            _upgradedRoads=GetEntityQuery(ComponentType.ReadOnly<MGRVisualPowerlineUpgrade>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
 
             _deleted=GetEntityQuery(ComponentType.ReadOnly<Road>(),ComponentType.ReadOnly<Deleted>());
 
@@ -274,7 +281,7 @@ namespace MedianGrassReplacement.Systems
 
             Dependency.Complete();using(var owned=_owned.ToEntityArray(Allocator.Temp)) foreach(var e in owned) Delete(e);
 
-            _visuals.Clear();_poles.Clear();_poleEntities.Clear();_orphans.Clear();_spans.Clear();_joins.Clear();_pending.Clear();_roadQueue.Clear();_dirtyNodes.Clear();_withdrawals.Clear();_initial=true;Status="Not applied";
+            _visuals.Clear();_poles.Clear();_poleEntities.Clear();_orphans.Clear();_spans.Clear();_joins.Clear();_pending.Clear();_roadQueue.Clear();_dirtyNodes.Clear();_withdrawals.Clear();_scopeRoads.Clear();_junctionScope.Clear();_scopeSeeded=false;_scopeComplete=false;_initial=true;Status="Not applied";
 
         }
 
@@ -831,7 +838,8 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                Dependency.Complete();_tick++;
+                if (!PowerlineJunctionScope.Supported) Dependency.Complete();
+                _tick++;
                 foreach(var road in _withdrawals)RemoveRoad(road,true);
                 _withdrawals.Clear();
 
@@ -846,7 +854,7 @@ namespace MedianGrassReplacement.Systems
 
                 if(spacing!=_spacing || minimum!=_minimumGap || corner!=_cornerSetback || height!=_preferredHeight) {Clear();_pole=Entity.Null;_attachments=null;_assetsUnavailable=false;_spacing=spacing;_minimumGap=minimum;_cornerSetback=corner;_preferredHeight=height;}
 
-                using(var gone=_deleted.ToEntityArray(Allocator.Temp)) foreach(var road in gone) RemoveRoad(road);
+                using(var gone=_deleted.ToEntityArray(Allocator.Temp)) foreach(var road in gone) { _junctionScope.ForgetRoad(road); RemoveRoad(road); }
 
                 try
 
@@ -872,10 +880,16 @@ namespace MedianGrassReplacement.Systems
 
                 _initial=false;
 
+                RefreshJunctionScope();
+
+                if (!PowerlineJunctionScope.Supported || !_scopeComplete || _junctionScope.HasJunctions || _joins.Count != 0)
                 using(var nodes=_nodes.ToEntityArray(Allocator.Temp)) foreach(var node in nodes)
                 {
-                    bool relevant=_joins.ContainsKey(node);
-                    foreach(var edge in EntityManager.GetBuffer<ConnectedEdge>(node,true))
+                    bool existingJoin = _joins.ContainsKey(node);
+                    if (PowerlineJunctionScope.Supported && _scopeComplete && !_junctionScope.Relevant(node, existingJoin)) continue;
+                    var connected = EntityManager.GetBuffer<ConnectedEdge>(node,true);
+                    bool relevant=existingJoin;
+                    foreach(var edge in connected)
                         if(EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(edge.m_Edge))
                         { EnqueueRoad(edge.m_Edge); relevant=true; }
                     // Existing joins still need cleanup after the last upgrade
@@ -902,6 +916,48 @@ namespace MedianGrassReplacement.Systems
 
             catch(Exception error) {Clear();Enabled=false;Status="Powerlines stopped: "+error.GetType().Name;Mod.Log.Error("Visual powerlines stopped and owned visuals cleared: "+error);}
 
+        }
+
+        private void RefreshJunctionScope()
+        {
+            if (!PowerlineJunctionScope.Supported) { _scopeRoads.Clear(); return; }
+            int order = EntityManager.GetComponentOrderVersion<MGRVisualPowerlineUpgrade>();
+            // Membership/archetype changes include partial roads becoming ready,
+            // tag removal, same-count replacements and entity-index reuse. This
+            // unfiltered ID query is used when that structural stamp changes,
+            // or an incomplete road receives a readiness/geometry notification.
+            if (!_scopeSeeded || order != _scopeOrder || (!_scopeComplete && _scopeRoads.Count != 0))
+            {
+                _junctionScope.Clear(); _scopeComplete = true;
+                using (var upgraded = _upgradedRoads.ToEntityArray(Allocator.Temp))
+                    foreach (var road in upgraded)
+                    {
+                        if (EntityManager.HasComponent<Road>(road) && EntityManager.HasComponent<Edge>(road)
+                            && EntityManager.HasComponent<EdgeGeometry>(road) && EntityManager.HasComponent<Composition>(road))
+                        {
+                            var edge = EntityManager.GetComponentData<Edge>(road);
+                            _junctionScope.TrackRoad(road, edge);
+                            if (!EntityManager.HasComponent<Node>(edge.m_Start) || !EntityManager.HasComponent<Node>(edge.m_End)) _scopeComplete = false;
+                        }
+                        else _scopeComplete = false;
+                    }
+                _scopeOrder = order; _scopeSeeded = true;
+            }
+            foreach (var road in _scopeRoads)
+            {
+                if (Live(road) && EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(road))
+                {
+                    if (EntityManager.HasComponent<Edge>(road))
+                    {
+                        var edge = EntityManager.GetComponentData<Edge>(road);
+                        _junctionScope.TrackRoad(road, edge);
+                        if (!EntityManager.HasComponent<Node>(edge.m_Start) || !EntityManager.HasComponent<Node>(edge.m_End)) _scopeComplete = false;
+                    }
+                    else _scopeComplete = false;
+                }
+                else _junctionScope.ForgetRoad(road);
+            }
+            _scopeRoads.Clear();
         }
 
     }

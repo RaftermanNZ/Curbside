@@ -17,7 +17,7 @@ Push-Location $PSScriptRoot
 
 try {
 
-& dotnet msbuild $project -restore '-t:PrepareResources;Compile' -p:Configuration=Release -p:SkipCurbsideUI=true -p:LangVersion=9.0 -p:RestoreIgnoreFailedSources=true -p:NugetAudit=false -verbosity:minimal
+& dotnet msbuild $project -restore '-t:PrepareResources;Compile' -p:Configuration=Release -p:SkipCurbsideUI=true -p:EnableBatchedPaintNotifications=true -p:LangVersion=9.0 -p:RestoreIgnoreFailedSources=true -p:NugetAudit=false -verbosity:minimal
 
 } finally { Pop-Location }
 

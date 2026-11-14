@@ -1,0 +1,8 @@
+0.6.1-perf.14-scoped-notifications
+OFFLINE TEST CANDIDATE. Not installed, launched in Cities: Skylines II, or published.
+Based on perf.13 preview-cache plus the approved R27 signal texture-cache integration.
+Changes: scope decorative roadside-powerline junction reads to relevant endpoints; avoid the early broad dependency fence on the verified runtime; memoize copied marking inputs inside the read-only notification batch only.
+Existing line generation, light/wire placement, saved components/serializers and working preview methods unchanged.
+The signal asset registration repair is included. On any future authorized install, back up/remove the temporary CurbsideSignalMipFix add-on and use only the integrated core; do not run both cache repairs.
+No under-10-ms frame-time, in-game FPS or save round-trip guarantee is established by offline checks.
+Existing post-save marking-retention fallback remains unchanged and unresolved.

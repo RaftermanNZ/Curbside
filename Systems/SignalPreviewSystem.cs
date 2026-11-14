@@ -509,10 +509,18 @@ namespace MedianGrassReplacement.Systems
     public partial class PreviewRefreshRestoreSystem : GameSystemBase
     {
         private EntityQuery ownerChanges, temporaryObjectOwners, objectEvents;
+        private EntityQuery objectReaders, laneReaders;
         private readonly PreviewRefreshScope scope = new PreviewRefreshScope();
         protected override void OnCreate()
         {
             base.OnCreate();
+            // Read-only dependency gates: never complete an unfinished writer
+            // just to inspect a cache. Unknown game profiles use native reads.
+            if (MarkingChangeNotifications.Supported)
+            {
+                objectReaders = GetEntityQuery(ComponentType.ReadOnly<Game.Objects.SubObject>());
+                laneReaders = GetEntityQuery(ComponentType.ReadOnly<Game.Net.SubLane>());
+            }
             var networkChanges = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Updated>() },
@@ -540,6 +548,11 @@ namespace MedianGrassReplacement.Systems
                 Any = new[] { ComponentType.ReadOnly<Game.Objects.SubObjectsUpdated>(), ComponentType.ReadOnly<Game.Buildings.RentersUpdated>() } });
         }
 
+        protected override void OnGamePreload(Purpose purpose, GameMode mode)
+        {
+            scope.ResetHistory(); scope.Clear(); base.OnGamePreload(purpose, mode);
+        }
+
         protected override void OnUpdate()
         {
             if (Mod.Saving) return;
@@ -554,18 +567,24 @@ namespace MedianGrassReplacement.Systems
             if (paint != null) scope.Include(paint.RefreshOwners);
             if (crossings != null) scope.Include(crossings.RefreshOwners);
             if (decals != null) scope.Include(decals.RefreshOwners);
-            using (var owners = ownerChanges.ToEntityArray(Allocator.Temp))
-                foreach (var owner in owners) scope.Add(EntityManager, owner);
-            using (var objects = temporaryObjectOwners.ToEntityArray(Allocator.Temp))
-                foreach (var actor in objects) scope.AddObjectOwner(EntityManager, actor);
-            using (var events = objectEvents.ToEntityArray(Allocator.Temp))
-                foreach (var item in events)
-                {
-                    if (EntityManager.HasComponent<Game.Objects.SubObjectsUpdated>(item))
-                        scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Objects.SubObjectsUpdated>(item).m_Owner);
-                    if (EntityManager.HasComponent<Game.Buildings.RentersUpdated>(item))
-                        scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Buildings.RentersUpdated>(item).m_Property);
-                }
+            try
+            {
+                scope.BeginBatch(EntityManager, objectReaders, laneReaders,
+                    MarkingChangeNotifications.Supported, UnityEngine.Time.frameCount);
+                using (var owners = ownerChanges.ToEntityArray(Allocator.Temp))
+                    foreach (var owner in owners) scope.Add(EntityManager, owner);
+                using (var objects = temporaryObjectOwners.ToEntityArray(Allocator.Temp))
+                    foreach (var actor in objects) scope.AddObjectOwner(EntityManager, actor);
+                using (var events = objectEvents.ToEntityArray(Allocator.Temp))
+                    foreach (var item in events)
+                    {
+                        if (EntityManager.HasComponent<Game.Objects.SubObjectsUpdated>(item))
+                            scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Objects.SubObjectsUpdated>(item).m_Owner);
+                        if (EntityManager.HasComponent<Game.Buildings.RentersUpdated>(item))
+                            scope.AddObjectOwner(EntityManager, EntityManager.GetComponentData<Game.Buildings.RentersUpdated>(item).m_Property);
+                    }
+            }
+            finally { scope.EndBatch(); }
             signals?.RestoreForOwners(scope);
             paint?.RestoreForOwners(scope);
             crossings?.RestoreForOwners(scope);

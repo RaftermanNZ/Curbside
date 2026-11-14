@@ -663,7 +663,9 @@ namespace MedianGrassReplacement.Systems
 
             if (!_active || (!_initial && Requested.Count == 0 && _moved.Count == 0 && _lamps.Count==0 && _generatedLamps.Count==0 && _hiddenSignals.Count==0 && maintenance.Count==0 && _upgrades.IsEmptyIgnoreFilter)) return;
 
-            Dependency.Complete();
+            // No jobs are scheduled by this managed path. Actual EntityManager
+            // reads join their own producers; do not join every type registered
+            // by lamp handles or an earlier explicit diagnostic lookup here.
             SynchronizeChangedLampStates();
 
             var nodes = _nodeWork; nodes.Clear(); forcedSignalWork.Clear(); foreach (var node in Requested) { nodes.Add(node); forcedSignalWork.Add(node); } Requested.Clear();
@@ -1370,7 +1372,7 @@ namespace MedianGrassReplacement.Systems
 
             _approaches.Clear();if(!EntityManager.HasBuffer<ConnectedEdge>(node)) return _approaches;
 
-            var marking=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();marking.RefreshDefinitionsIfNeeded();
+            var marking=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
 
             foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
 

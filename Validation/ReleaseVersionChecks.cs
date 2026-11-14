@@ -13,19 +13,19 @@ class ReleaseVersionChecks
     static void Main()
     {
         var identity=A.GetType("MedianGrassReplacement.BuildIdentity",true);
-        Check((string)identity.GetField("Version",F).GetValue(null)=="0.6.0","Public version");
-        Check((string)Get(identity,"Label")=="0.6.0","No test label");
-        Check((int)identity.GetField("Number",F).GetValue(null)==240,"Independent compatibility build");
+        Check((string)identity.GetField("Version",F).GetValue(null)=="0.6.1","Public version");
+        Check((string)Get(identity,"Label")=="0.6.1","No test label");
+        Check((int)identity.GetField("Number",F).GetValue(null)==243,"Independent compatibility build");
         Check(A.GetName().Version.ToString()=="0.5.1.0","Preserved assembly identity");
-        Check(A.GetCustomAttribute<AssemblyFileVersionAttribute>().Version=="0.6.0.0","File version");
+        Check(A.GetCustomAttribute<AssemblyFileVersionAttribute>().Version=="0.6.1.0","File version");
         var policy=A.GetType("GardenCitySignals.SignalPackPolicy",true);
         var modules=(string[])A.GetType("GardenCitySignals.SignalModuleCatalog",true).GetField("Names",F).GetValue(null);
         var florida=(string[])A.GetType("GardenCitySignals.FloridaModuleCatalog",true).GetField("Names",F).GetValue(null);
         var combined=modules.Concat(florida).ToArray();
-        Check((int)Get(policy,"CurrentBuild")==240,"Manifest compatibility independent of SemVer patch");
+        Check((int)Get(policy,"CurrentBuild")==243,"Manifest compatibility independent of SemVer patch");
         Check((bool)Call(policy,"ValidManifest","Curbside.NativeSignalPack.v1",224,combined),"R23 manifest accepted");
         Check((bool)Call(policy,"ValidManifest","Curbside.NativeSignalPack.v1",214,modules),"Original manifest accepted");
-        Check(!(bool)Call(policy,"ValidManifest","Curbside.NativeSignalPack.v1",241,combined),"Future manifest rejected");
+        Check(!(bool)Call(policy,"ValidManifest","Curbside.NativeSignalPack.v1",244,combined),"Future manifest rejected");
         Check(!(bool)Call(policy,"ValidManifest","wrong",224,combined),"Unknown format rejected");
         Check(!(bool)Call(policy,"ValidManifest","Curbside.NativeSignalPack.v1",224,combined.Take(68).ToArray()),"Partial catalog rejected");
         Check(!(bool)Get(policy,"UseRigidSignLayout")&&!(bool)Get(policy,"UseLowerRigidSignLayout")&&!(bool)Get(policy,"IncludesFlorida"),"Legacy published pack remains legacy until Florida proof");

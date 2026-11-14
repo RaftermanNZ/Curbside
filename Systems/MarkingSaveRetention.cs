@@ -226,6 +226,7 @@ namespace MedianGrassReplacement.Systems
 
         private void PrepareRetainedSourcesForSerialization()
         {
+            CaptureCrosswalkRestorePriority();
             var retention = World.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.MarkingRetention;
             if (retention == null || !retention.Active || retention.Sources.Count == 0)
             { Restore(); World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestoreAll(); return; }
@@ -256,6 +257,11 @@ namespace MedianGrassReplacement.Systems
             if (!MarkingSerializationProfile.Supported)
             {
                 Mod.Log.Warn("Marking retention preflight rejected before GPU wait: unreviewed native modules.");
+                return;
+            }
+            if (!MarkingSerializationQuery.Supports(World))
+            {
+                Mod.Log.Warn("Marking retention preflight rejected before GPU wait: native serializer query no longer excludes held actors.");
                 return;
             }
             NativeVisualInvalidation.CompleteReaders(World);

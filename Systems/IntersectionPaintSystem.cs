@@ -38,7 +38,11 @@ namespace MedianGrassReplacement.Systems
 
     {
 
+        private readonly PaintOwnerNotifications _ownerNotifications = new PaintOwnerNotifications();
+        private readonly PaintOwnerNotifications _geometryNotifications = new PaintOwnerNotifications();
         private EntityQuery _sources, _originals, _paint, _definitions, _changedOwners, _changedGeometry, _hiddenOwners, _revealedOriginals;
+        private PaintSourceDiscoverySystem _sourceDiscovery;
+        private List<Entity> _discoverySources;
         private readonly ManagedWorkIndex<Entity,Entity> _sourceIndex=new ManagedWorkIndex<Entity,Entity>();
         private readonly List<Entity> _auditSources=new List<Entity>(64), _ownerSources=new List<Entity>();
         private readonly HashSet<Entity> _maintenanceSources=new HashSet<Entity>(), _previousHiddenOwners=new HashSet<Entity>(), _currentHiddenOwners=new HashSet<Entity>();
@@ -106,7 +110,11 @@ namespace MedianGrassReplacement.Systems
         private void QueueOwnerPaint(Entity owner,HashSet<Entity> pending)
         {
             if(!EntityManager.HasBuffer<Game.Net.SubLane>(owner))return;
-            foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner,true)){pending.Add(entry.m_SubLane);_clipRetries.Remove(entry.m_SubLane);}
+            foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner,true))
+            {
+                if (OwnerPaintCandidate(entry.m_SubLane)) pending.Add(entry.m_SubLane);
+                _clipRetries.Remove(entry.m_SubLane);
+            }
         }
 
         private readonly Dictionary<Entity, Replacement> _replacements = new Dictionary<Entity, Replacement>();
@@ -118,6 +126,9 @@ namespace MedianGrassReplacement.Systems
             base.OnCreate();
 
             _prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
+            var reads = new PaintLaneReadPolicy(_prefabs);
+            _ownerNotifications.KnownNonPaintPrefab = reads.IsNonPaint;
+            _geometryNotifications.KnownNonPaintPrefab = reads.IsNonPaint;
 
             var description = new EntityQueryDesc
 
@@ -130,6 +141,8 @@ namespace MedianGrassReplacement.Systems
             };
 
             _sources = GetEntityQuery(description);
+            _discoverySources = new List<Entity>();
+            if (MarkingChangeNotifications.Supported) _sourceDiscovery = World.GetOrCreateSystemManaged<PaintSourceDiscoverySystem>();
 
             _changedOwners = GetEntityQuery(ComponentType.ReadOnly<Game.Net.SubLane>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
 
@@ -148,13 +161,13 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _externalPaint.Clear(); _active = false; Restore(); }
+        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); savedCrossings.Clear(); _externalPaint.Clear(); _active = false; Restore(); }
 
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
 
         {
 
-            base.OnGameLoadingComplete(purpose, mode); Restore();
+            base.OnGameLoadingComplete(purpose, mode); savedCrossings.Clear(); Restore();
 
             _active = (mode & GameMode.GameOrEditor) != GameMode.None;
 
@@ -216,6 +229,7 @@ namespace MedianGrassReplacement.Systems
             using (var paint = _paint.ToEntityArray(Allocator.Temp)) foreach (var entity in paint) GeneratedVisualLifecycle.Retire(World,entity);
 
             World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestoreAll();
+            _ownerNotifications.Clear(); _geometryNotifications.Clear(); _changedOwnerPaintSources.Clear(); markingRoadChanges.Clear(); markingOwnerChanges.Clear();
             _deferred.Clear(); _retryDue.Clear(); _retryOrder.Clear();_clipRetries.Clear(); _backlog.Clear(); _sourceOrder.Clear(); _clickedCrossings.Clear(); _processedClicks.Clear(); _requestedSources.Clear(); _clipFailures.Clear(); _replacements.Clear();_sourceIndex.Clear();_previousHiddenOwners.Clear();_currentHiddenOwners.Clear();_maintenanceSources.Clear(); _initial = true; _white = Entity.Null;
 
         }
@@ -302,6 +316,9 @@ namespace MedianGrassReplacement.Systems
             Entity prefabEntity = World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab);
 
             if (!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(prefabEntity, out var prefab) || prefab == null) { Remove(source); return; }
+
+            // Never replace/suppress a native RequireStop crossing as longitudinal paint.
+            if (World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().IsStopDefinition(prefabEntity)) { Remove(source); return; }
 
             var choices = World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
 
@@ -573,7 +590,7 @@ namespace MedianGrassReplacement.Systems
 
                 FindWhite();
 
-                var catalog=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();catalog.RefreshDefinitionsIfNeeded();
+                var catalog=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();catalog.ObserveDefinitionsIfReady();
 
                 if(_previousCenterStyle!=Mod.Settings.CenterLineStyle||_previousYellow!=Mod.Settings.YellowCenterLines||_catalogVersion!=CurbLineEmissionSystem.CatalogRevision){_previousCenterStyle=Mod.Settings.CenterLineStyle;_previousYellow=Mod.Settings.YellowCenterLines;_catalogVersion=CurbLineEmissionSystem.CatalogRevision;_initial=true;}
 
@@ -595,13 +612,36 @@ namespace MedianGrassReplacement.Systems
                     if(_retryDue.TryGetValue(source,out float due)&&UnityEngine.Time.realtimeSinceStartup<due){_retryOrder.Enqueue(source);continue;}
                     _deferred.Remove(source);_retryDue.Remove(source);pending.Add(source);
                 }
+                var affected = _affected; affected.Clear();
+                if (catalog.UsesMarkingSpecificChanges)
+                {
+                    foreach(var road in markingRoadChanges)
+                    {
+                        if(!Alive(road)||!EntityManager.HasComponent<Game.Net.Edge>(road))continue;
+                        if(!_initial&&!_geometryNotifications.Changed(EntityManager,_externalPaint,road,true))continue;
+                        QueueOwnerPaint(road,pending);var edge=EntityManager.GetComponentData<Game.Net.Edge>(road);
+                        QueueOwnerPaint(edge.m_Start,pending);QueueOwnerPaint(edge.m_End,pending);
+                    }
+                    foreach(var owner in markingOwnerChanges)
+                    {
+                        if(!Alive(owner)||!EntityManager.HasBuffer<Game.Net.SubLane>(owner))continue;
+                        if(EntityManager.HasComponent<Node>(owner))World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>().PruneNodeIntents(owner);
+                        _changedOwnerPaintSources.Clear();CollectChangedOwnerPaint(owner,_changedOwnerPaintSources);
+                        if(_changedOwnerPaintSources.Count==0||(!_initial&&!_ownerNotifications.Changed(EntityManager,_externalPaint,owner)))continue;
+                        foreach(var source in _changedOwnerPaintSources){pending.Add(source);affected.Add(source);}
+                    }
+                    markingRoadChanges.Clear();markingOwnerChanges.Clear();
+                }
+                else
+                {
                 using(var roads=_changedGeometry.ToEntityArray(Allocator.Temp))foreach(var road in roads)
                 {
+                    if (!_initial && !_geometryNotifications.Changed(EntityManager, _externalPaint, road, true)) continue;
                     QueueOwnerPaint(road,pending);var edge=EntityManager.GetComponentData<Game.Net.Edge>(road);
                     QueueOwnerPaint(edge.m_Start,pending);QueueOwnerPaint(edge.m_End,pending);
                 }
 
-                var affected = _affected; affected.Clear();
+
 
                 if (!_initial)
 
@@ -613,11 +653,21 @@ namespace MedianGrassReplacement.Systems
 
                             if(EntityManager.HasComponent<Node>(owner)) World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>().PruneNodeIntents(owner);
 
-                            foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner, true))
-
-                            { pending.Add(entry.m_SubLane); affected.Add(entry.m_SubLane); }
+                            _changedOwnerPaintSources.Clear();
+                            CollectChangedOwnerPaint(owner, _changedOwnerPaintSources);
+                            if (_changedOwnerPaintSources.Count == 0 || !_ownerNotifications.Changed(EntityManager, _externalPaint, owner)) continue;
+                            foreach (var source in _changedOwnerPaintSources)
+                            { pending.Add(source); affected.Add(source); }
 
                         }
+
+
+                    markingRoadChanges.Clear();markingOwnerChanges.Clear();
+                }
+                // Observe before integrity maintenance. Otherwise its old blanket
+                // dependency completion would make the readiness gate too late.
+                bool backgroundReady = _sourceDiscovery == null
+                    || _sourceDiscovery.TryCollect(_discoverySources, _initial);
 
                 // Only changed/hidden owners need immediate visibility maintenance.
             // Hidden-owner removals are detected from last update's managed IDs.
@@ -634,7 +684,6 @@ namespace MedianGrassReplacement.Systems
             // would expose originals between visits and cause visible overlap.
             if(!_revealedOriginals.IsEmpty)
             {
-                Dependency.Complete();
                 using(var revealed=_revealedOriginals.ToEntityArray(Allocator.Temp))
                 using(var visibility=new EntityCommandBuffer(Allocator.Temp))
                 {
@@ -648,11 +697,10 @@ namespace MedianGrassReplacement.Systems
                     if(!visibility.IsEmpty)visibility.Playback(EntityManager);
                 }
             }
-            _auditSources.Clear();_sourceIndex.Rotate(_auditSources,64);
+            _auditSources.Clear();if(backgroundReady)_sourceIndex.Rotate(_auditSources,64);
             foreach(var source in _auditSources)_maintenanceSources.Add(source);
             if(_maintenanceSources.Count>0)
             {
-                Dependency.Complete();
                 using(var visibility=new EntityCommandBuffer(Allocator.Temp))
                 {
                     foreach(var source in _maintenanceSources)MaintainReplacement(source,pending,visibility,crossingVisuals);
@@ -660,25 +708,52 @@ namespace MedianGrassReplacement.Systems
                 }
             }
 
+            if (_sourceDiscovery != null)
+            {
+                // Only background discovery may defer. Explicit requests, owner
+                // events, native reveal repairs and reconciliation stay above/below.
+                // Its own system version advances only after a successful read.
+                foreach (var source in _discoverySources)
+                    if (OwnerPaintCandidate(source) && (!_replacements.TryGetValue(source, out var tracked) || affected.Contains(source) || _initial || !tracked.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, crossingVisuals.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab))))) pending.Add(source);
+            }
+            else
+            {
             _sources.ResetFilter();
 
                 if (!_initial) _sources.SetChangedVersionFilter(SourceChanges);
 
-                try { using (var sources = _sources.ToEntityArray(Allocator.Temp)) foreach (var source in sources) if (!_replacements.TryGetValue(source, out var tracked) || affected.Contains(source) || _initial || !tracked.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, crossingVisuals.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab)))) pending.Add(source); }
+                try { using (var sources = _sources.ToEntityArray(Allocator.Temp)) foreach (var source in sources) if (OwnerPaintCandidate(source) && (!_replacements.TryGetValue(source, out var tracked) || affected.Contains(source) || _initial || !tracked.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, crossingVisuals.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab))))) pending.Add(source); }
 
                 finally { _sources.ResetFilter(); }
 
-                if(pending.Count>0)Dependency.Complete();
+            }
+
+                if (pending.Count != 0 || _sourceOrder.Count != 0 || _initial)
+                {
+                    World.GetExistingSystemManaged<YellowPaintDefinitionSystem>()?.EnsureCurrentCatalog();
+                    catalog.RefreshDefinitionsIfNeeded();
+                    if (_catalogVersion != CurbLineEmissionSystem.CatalogRevision)
+                    {
+                        _catalogVersion = CurbLineEmissionSystem.CatalogRevision;
+                        _initial = true;
+                        _sources.ResetFilter();
+                        using (var all = _sources.ToEntityArray(Allocator.Temp))
+                            foreach (var source in all) if (OwnerPaintCandidate(source)) pending.Add(source);
+                    }
+                }
             int processed = 0;
 
                 foreach(var requested in pending)_sourceOrder.Add(requested);
-                if(_sourceOrder.Count>0)Dependency.Complete();
                 _processedClicks.Clear();
                 // User-selected crossings must not wait behind a city-wide
                 // refresh. Keep the same total work/time budget and reserve
                 // capacity for background roads after at most eight clicks.
                 while(processed<8&&_clickedCrossings.Take(out var clicked))
                 {Reconcile(clicked);_processedClicks.Add(clicked);processed++;}
+                // Use unused crossing-priority slots after a save. User clicks
+                // remain first, at most eight total priority visits are allowed,
+                // and ordinary work keeps its existing remainder of the budget.
+                ProcessSavedCrosswalkPriority(ref processed);
                 while(_sourceOrder.Count>0)
                 {
                     if(processed>=128||(processed>=8&&watch.Elapsed.TotalMilliseconds>=2))break;

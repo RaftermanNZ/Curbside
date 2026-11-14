@@ -88,8 +88,7 @@ namespace MedianGrassReplacement.Systems
                 var owner = manager.GetComponentData<Owner>(entity).m_Owner;
                 if (manager.Exists(owner) && manager.HasBuffer<Game.Net.SubLane>(owner))
                 {
-                    var lanes = manager.GetBuffer<Game.Net.SubLane>(owner);
-                    for (int i = lanes.Length - 1; i >= 0; i--) if (lanes[i].m_SubLane == entity) lanes.RemoveAt(i);
+                    DetachLaneMembership(manager, owner, entity);
                 }
             }
             if (!manager.HasComponent<Deleted>(entity)) manager.AddComponent<Deleted>(entity);

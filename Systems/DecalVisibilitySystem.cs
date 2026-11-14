@@ -54,6 +54,16 @@ namespace MedianGrassReplacement.Systems
         {
 
             base.OnCreate(); _prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _readyDecalDefinitions = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<PrefabData>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>() },
+                // Registration and later geometry component additions both
+                // change chunk order. Ignore the serialization enable bit:
+                // this query reads IDs only, not enabled prefab payloads.
+                Options = EntityQueryOptions.IgnoreComponentEnabledState
+            });
+            _readyDecalDefinitions.SetOrderVersionFilter();
 
             _roads = GetEntityQuery(ComponentType.ReadOnly<Road>(), ComponentType.ReadOnly<RDCUpgrade>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
 
@@ -69,6 +79,7 @@ namespace MedianGrassReplacement.Systems
             _changedHidden=GetEntityQuery(ComponentType.ReadOnly<RDCHiddenDecal>(),ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>());
             _changedHidden.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>()});
             _revealedHidden=GetEntityQuery(ComponentType.ReadOnly<RDCHiddenDecal>(),ComponentType.Exclude<Hidden>());
+            InitializeHiddenDecalIndex();
 
         }
 
@@ -97,10 +108,9 @@ namespace MedianGrassReplacement.Systems
         {
 
             if (_kinds.TryGetValue(prefab, out byte kind)) return kind;
+            if (!TryReadDecalDefinition(prefab, out string name)) return 0;
 
             bool speed = EntityManager.HasComponent<TrafficSignData>(prefab) && (EntityManager.GetComponentData<TrafficSignData>(prefab).m_TypeMask & TrafficSignData.GetTypeMask(TrafficSignType.SpeedLimit)) != 0;
-
-            string name = _prefabs.TryGetPrefab<PrefabBase>(prefab, out var definition) ? definition?.name : null;
 
             kind = DecalPolicy.Classify(PureDecal(prefab), EntityManager.HasComponent<LaneDirectionData>(prefab), speed, name); _kinds[prefab] = kind;
 
@@ -166,11 +176,16 @@ namespace MedianGrassReplacement.Systems
 
             road = Entity.Null;
 
-            if (!Live(obj) || !EntityManager.HasComponent<Game.Objects.ObjectGeometry>(obj) || !EntityManager.HasComponent<PrefabRef>(obj)) return false;
+            if (!Live(obj) || !EntityManager.HasComponent<Game.Objects.ObjectGeometry>(obj) || !EntityManager.HasComponent<PrefabRef>(obj))
+            { pendingDecalKinds.Remove(obj); return false; }
 
-            byte kind = Kind(EntityManager.GetComponentData<PrefabRef>(obj).m_Prefab); if (kind == 0) return false;
+            var prefab = EntityManager.GetComponentData<PrefabRef>(obj).m_Prefab;
+            byte kind = Kind(prefab);
+            if (kind == 0 && unreadyDecalKinds.Contains(prefab)) pendingDecalKinds.Add(prefab, obj);
+            else pendingDecalKinds.Remove(obj);
+            if (kind == 0) return false;
 
-            road = RoadFor(obj); return Live(road) && EntityManager.HasComponent<RDCUpgrade>(road) && (RoadSideUpgrades.HiddenDecals(EntityManager, road, obj) & kind) != 0;
+            road = RoadFor(obj); return Live(road) && EntityManager.HasComponent<RDCUpgrade>(road) && (HiddenDecalMask(road, obj) & kind) != 0;
 
         }
 
@@ -181,6 +196,9 @@ namespace MedianGrassReplacement.Systems
         private void Release(Entity obj)
 
         {
+
+            hiddenDecalOwners.Remove(obj);
+            sideCache.Forget(obj);
 
             if (!EntityManager.Exists(obj)) return;
 
@@ -204,7 +222,7 @@ namespace MedianGrassReplacement.Systems
 
                 if (ParentHidden(obj)) { _deferred.Add(road); return; }
 
-                if (EntityManager.HasComponent<RDCHiddenDecal>(obj)) return;
+                if (EntityManager.HasComponent<RDCHiddenDecal>(obj)) { TrackHiddenDecal(obj); return; }
 
                 if (EntityManager.HasComponent<Hidden>(obj)) return; // Never take ownership of another system's hidden flag.
 
@@ -212,6 +230,7 @@ namespace MedianGrassReplacement.Systems
 
                 EntityManager.AddComponentData(obj, new RDCHiddenDecal { Road = road, Prefab = prefab, Owner = EntityManager.GetComponentData<Owner>(obj).m_Owner, Kind = Kind(prefab) });
 
+                TrackHiddenDecal(obj);
                 EntityManager.AddComponent<Hidden>(obj); RenderChanged(obj);
 
             }
@@ -234,7 +253,7 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        internal void Restore() { World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore(); Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); }
+        internal void Restore() { World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore(); Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); sideCache.Clear(); ClearDecalReadiness(); ClearHiddenDecalIndex(); }
 
         public void PreSerialize(Context context) { Restore(); }
 
@@ -254,15 +273,16 @@ namespace MedianGrassReplacement.Systems
 
                 // Avoid an unconditional completion/playback on idle rendering frames.
                 // IsEmpty honors changed filters; IsEmptyIgnoreFilter would not.
+                CollectReadyDecalKinds();
                 long preflightStarted=ModDiagnostics.RuntimeCosts.Begin();
-                bool idle=!_initial&&Requested.Count==0&&_deferred.Count==0&&_changedRoads.IsEmpty&&_changedNodes.IsEmpty&&_changedHidden.IsEmpty&&_revealedHidden.IsEmpty;
+                bool idle=readyDecalSources.Count==0&&!_initial&&Requested.Count==0&&_deferred.Count==0&&_changedRoads.IsEmpty&&_changedNodes.IsEmpty&&_changedHidden.IsEmpty&&_revealedHidden.IsEmpty&&hiddenDecalMarkerChanges.IsEmpty;
                 ModDiagnostics.RuntimeCosts.End("DecalVisibility.Preflight",preflightStarted);
                 if(idle)return;
                 long dependencyStarted=ModDiagnostics.RuntimeCosts.Begin();Dependency.Complete();
                 ModDiagnostics.RuntimeCosts.End("DecalVisibility.DependencyWait",dependencyStarted);
                 bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();
 
-                if (!explicitRequest && _roads.IsEmpty && _hidden.IsEmpty) { _deferred.Clear(); _initial = false; return; }
+                if (!explicitRequest && readyDecalSources.Count==0 && _roads.IsEmpty && _hidden.IsEmpty) { _deferred.Clear(); _initial = false; return; }
 
                 if (_initial) using (var roads = _roads.ToEntityArray(Allocator.Temp)) foreach (var road in roads) _pending.Add(road);
 
@@ -284,14 +304,16 @@ namespace MedianGrassReplacement.Systems
                     _visibilityWork.Clear();
                     using(var changed=_changedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in changed)_visibilityWork.Add(obj);
                     using(var revealed=_revealedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in revealed)_visibilityWork.Add(obj);
-                    if(_initial||_pending.Count>0)using(var owned=_hidden.ToEntityArray(Allocator.Temp))foreach(var obj in owned)
-                        if(_initial||_pending.Contains(EntityManager.GetComponentData<RDCHiddenDecal>(obj).Road))_visibilityWork.Add(obj);
+                    using (var markers = hiddenDecalMarkerChanges.ToEntityArray(Allocator.Temp))
+                        foreach (var obj in markers) _visibilityWork.Add(obj);
+                    CollectHiddenDecalWork(_pending, _initial, _visibilityWork);
                     foreach (var obj in _visibilityWork)
                         {
 
                             var marker = EntityManager.GetComponentData<RDCHiddenDecal>(obj);
+                            hiddenDecalOwners.Add(marker.Road, obj);
 
-                            bool unchanged = Live(obj) && Live(marker.Road) && !_pending.Contains(marker.Road) && EntityManager.HasComponent<PrefabRef>(obj) && EntityManager.HasComponent<Owner>(obj) && EntityManager.GetComponentData<PrefabRef>(obj).m_Prefab == marker.Prefab && EntityManager.GetComponentData<Owner>(obj).m_Owner == marker.Owner && EntityManager.HasComponent<RDCUpgrade>(marker.Road) && (RoadSideUpgrades.HiddenDecals(EntityManager, marker.Road, obj) & marker.Kind) != 0;
+                            bool unchanged = Live(obj) && Live(marker.Road) && !_pending.Contains(marker.Road) && EntityManager.HasComponent<PrefabRef>(obj) && EntityManager.HasComponent<Owner>(obj) && EntityManager.GetComponentData<PrefabRef>(obj).m_Prefab == marker.Prefab && EntityManager.GetComponentData<Owner>(obj).m_Owner == marker.Owner && EntityManager.HasComponent<RDCUpgrade>(marker.Road) && (HiddenDecalMask(marker.Road, obj) & marker.Kind) != 0;
 
                             if (!unchanged)
 
@@ -301,7 +323,9 @@ namespace MedianGrassReplacement.Systems
 
                                 var prefab = EntityManager.GetComponentData<PrefabRef>(obj).m_Prefab;
 
-                                EntityManager.SetComponentData(obj, new RDCHiddenDecal { Road = road, Prefab = prefab, Owner = EntityManager.GetComponentData<Owner>(obj).m_Owner, Kind = Kind(prefab) });
+                                var updated = new RDCHiddenDecal { Road = road, Prefab = prefab, Owner = EntityManager.GetComponentData<Owner>(obj).m_Owner, Kind = Kind(prefab) };
+                                if (!SameHiddenDecal(marker, updated)) EntityManager.SetComponentData(obj, updated);
+                                hiddenDecalOwners.Add(road, obj);
 
                             }
 
@@ -323,6 +347,14 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
+                // Only sources whose previously missing definition arrived.
+                // Inspect revalidates current owner, prefab and saved hide choice.
+                foreach (var obj in readyDecalSources)
+                {
+                    if (Live(obj)) Inspect(obj);
+                    else pendingDecalKinds.Remove(obj);
+                }
+                readyDecalSources.Clear();
                 _initial = false;
 
             }

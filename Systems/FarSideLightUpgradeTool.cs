@@ -137,15 +137,11 @@ namespace MedianGrassReplacement.Systems
             }
 
             if(nativeChange)
-
             {
-
-                using(var edges=EntityManager.GetBuffer<ConnectedEdge>(node,true).ToNativeArray(Allocator.Temp))foreach(var entry in edges)
-
-                    if(EntityManager.Exists(entry.m_Edge)&&!EntityManager.HasComponent<Deleted>(entry.m_Edge)&&!EntityManager.HasComponent<Updated>(entry.m_Edge))EntityManager.AddComponent<Updated>(entry.m_Edge);
-
-                if(!EntityManager.HasComponent<Updated>(node))EntityManager.AddComponent<Updated>(node);
-
+                var endpoints = NativeSignalRebuild.Request(EntityManager, node);
+                foreach (var endpoint in endpoints)
+                    if (EntityManager.HasBuffer<MGRStopApproach>(endpoint))
+                        World.GetOrCreateSystemManaged<ApproachStopSystem>().Queue(endpoint);
             }
 
             if(remove){if(has)EntityManager.RemoveComponent<MGRFarSideLights>(node);}

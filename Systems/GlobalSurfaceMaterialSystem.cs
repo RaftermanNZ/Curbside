@@ -8,7 +8,7 @@ namespace MedianGrassReplacement.Systems
         internal static float SidewalkTiling(float value)=>SidewalkRepeatPolicy.Repeats(value);
         internal static int AssetKind(string name,string shader)
         {
-            if(string.IsNullOrEmpty(shader)||shader.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0)return 0;
+            if(!NativeAreaMaterialPolicy.Shader(shader))return 0;
             // Exact renderer copies only; no substring-based surface expansion.
             if(name==VanillaSurfacePolicy.AreaBatchName("Pavement Surface 01"))return 4;
             if(name==VanillaSurfacePolicy.AreaBatchName("Pavement Surface 02"))return 2;
@@ -59,26 +59,45 @@ namespace MedianGrassReplacement.Systems
         private sealed class Patch {internal Material Material;internal string Property;internal int Role;internal Texture Before,Applied;}
         private readonly Dictionary<(Material,string),Patch> _patches=new Dictionary<(Material,string),Patch>();
         private readonly VanillaSurfaceOwnership _vanilla=new VanillaSurfaceOwnership();
-        private Unity.Entities.EntityQuery _areaPrefabs;
+        private Unity.Entities.EntityQuery _areaConfigurations;
         protected override void OnCreate()
         {
             base.OnCreate();
-            _areaPrefabs=GetEntityQuery(Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.PrefabData>(),Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.RenderedAreaData>());
+            _areaConfigurations=GetEntityQuery(Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.PrefabData>(),Unity.Entities.ComponentType.ReadOnly<Game.Prefabs.AreasConfigurationData>());
+        }
+        private static IEnumerable<Game.Prefabs.AreaPrefab> PavementPrefabs(Game.Prefabs.PrefabSystem prefabs)
+        {
+            foreach(string name in new[]{"Pavement Surface 01","Pavement Surface 02"})
+                if(prefabs.TryGetPrefab(new Game.Prefabs.PrefabID(nameof(Game.Prefabs.SurfacePrefab),name),out var prefab)
+                    &&prefab is Game.Prefabs.SurfacePrefab surface)yield return surface;
         }
         private void RefreshAreaCatalog()
         {
             var prefabs=World.GetExistingSystemManaged<Game.Prefabs.PrefabSystem>();
             if(prefabs==null)return;
-            // Read values on explicit refresh only. No area renderer buffers,
-            // native batch access, prefab mutations or asset loads are needed.
-            using(var entities=_areaPrefabs.ToEntityArray(Unity.Collections.Allocator.Temp))
-                foreach(var entity in entities)if(prefabs.TryGetPrefab<Game.Prefabs.AreaPrefab>(entity,out var prefab))_vanilla.AddAreaPrefab(prefab);
+            Material fallback=null;
+            using(var configs=_areaConfigurations.ToEntityArray(Unity.Collections.Allocator.Temp))
+                foreach(var entity in configs)if(prefabs.TryGetPrefab<Game.Prefabs.AreasConfigurationPrefab>(entity,out var config)&&config.isBuiltin)
+                {fallback=config.m_RenderedAreaMaterial;break;}
+            _vanilla.BeginAreas(fallback);
+            var renderer=World.GetExistingSystemManaged<Game.Rendering.AreaBatchSystem>();
+            // Explicit/change-triggered discovery only; retain managed materials,
+            // not native renderer views. Unknown renderer layouts stay untouched.
+            foreach(var prefab in PavementPrefabs(prefabs))
+                {
+                    _vanilla.AddAreaPrefab(prefab);
+                    if(Mod.Settings.SurfaceTexturesOnAssets&&prefabs.TryGetEntity(prefab,out var entity)
+                        &&EntityManager.HasComponent<Game.Prefabs.RenderedAreaData>(entity))
+                        _vanilla.BindAreaMaterial(prefab,NativeAreaMaterials.Read(renderer,EntityManager.GetComponentData<Game.Prefabs.RenderedAreaData>(entity).m_BatchIndex));
+                }
         }
         private sealed class UvPatch {internal Material Material;internal string Property;internal bool Scalar,Road;internal float BeforeFloat,AppliedFloat;internal Vector2 BeforeScale,AppliedScale;}
         private readonly Dictionary<(Material,string),UvPatch> _uvPatches=new Dictionary<(Material,string),UvPatch>();
         private Texture2D _roadTexture,_walkTexture;
         private readonly List<string> _loadErrors=new List<string>();
         private readonly Dictionary<string,Texture2D> _textures=new Dictionary<string,Texture2D>(StringComparer.OrdinalIgnoreCase);
+        private Material[] refreshMaterials;
+        private IEnumerable<Material> RefreshMaterials() => refreshMaterials ?? Resources.FindObjectsOfTypeAll<Material>();
         private long _bytes;private bool _active;private static bool _refresh=true,_discover,_uvRefresh;private static float _quietUntil,_discoverBy;
         internal static string Status="Global surfaces: Vanilla.";
         internal static void RequestRefresh(){_refresh=true;}
@@ -125,10 +144,11 @@ namespace MedianGrassReplacement.Systems
             var map=Colossal.IO.AssetDatabase.AssetDatabase.global?.resources?.unityObjectsMap;
             if(map==null)return;
             int restored=0,unresolved=0;
-            foreach(var material in Resources.FindObjectsOfTypeAll<Material>())
+            foreach(var material in RefreshMaterials())
             {
                 if(material==null||material.shader==null||!material.name.StartsWith("Area batch (",StringComparison.Ordinal)
                     ||material.shader.name.IndexOf("AreaDecalShader",StringComparison.Ordinal)<0||!material.HasProperty("_BaseColorMap"))continue;
+                if(!_vanilla.IsTargetAreaMaterial(material))continue;
                 var current=material.GetTexture("_BaseColorMap");
                 if(current==null||!SurfaceRestorePolicy.IsCurbsideTexture(current.name)||_patches.ContainsKey((material,"_BaseColorMap")))continue;
                 bool hasOriginal=_vanilla.TryGetAreaOriginal(material,out var original);
@@ -225,10 +245,36 @@ namespace MedianGrassReplacement.Systems
             // Keep any cached image still referenced by a live material (including another mod).
             var selected=new HashSet<string>();
             foreach(var value in new[]{Mod.Settings.GlobalRoadTexture,Mod.Settings.GlobalSidewalkTexture})try{string path=SurfaceTextureCatalog.Resolve(value??"");if(string.IsNullOrWhiteSpace(path))continue;var file=new FileInfo(Path.GetFullPath(path.Trim().Trim('"')));if(file.Exists)selected.Add(file.FullName+"|"+file.Length+"|"+file.LastWriteTimeUtc.Ticks);}catch(Exception){/* Load reports the invalid selection below. */}
-            var retained=ReferencedTextures();
-            var stale=new List<string>();foreach(var pair in _textures)if(pair.Value==null||!selected.Contains(pair.Key)&&!retained.Contains(pair.Value))stale.Add(pair.Key);
+            var candidates = new List<string>();
+            foreach (var pair in _textures)
+                if (pair.Value == null || !selected.Contains(pair.Key)) candidates.Add(pair.Key);
+            // There is no possible release when every live key is selected.
+            // Keep accounting exact without enumerating unrelated materials.
+            if (candidates.Count == 0) { RecountTextures(); return; }
+            var retained = ReferencedRefreshTextures();
+            var stale = new List<string>();
+            foreach (var key in candidates)
+                if (_textures[key] == null || !retained.Contains(_textures[key])) stale.Add(key);
             foreach(var key in stale){var texture=_textures[key];if(texture!=null){_bytes-=(long)texture.width*texture.height*16/3;UnityEngine.Object.Destroy(texture);}_textures.Remove(key);}
             _bytes=0;foreach(var texture in _textures.Values)if(texture!=null)_bytes+=(long)texture.width*texture.height*16/3;
+        }
+        private void RecountTextures()
+        {
+            _bytes = 0;
+            foreach (var texture in _textures.Values)
+                if (texture != null) _bytes += (long)texture.width * texture.height * 16 / 3;
+        }
+        private HashSet<Texture> ReferencedRefreshTextures()
+        {
+            var retained = new HashSet<Texture>();
+            foreach (var material in RefreshMaterials())
+                if (material != null && material.shader != null)
+                    foreach (var property in material.GetTexturePropertyNames())
+                    {
+                        var texture = material.GetTexture(property);
+                        if (texture != null) retained.Add(texture);
+                    }
+            return retained;
         }
         private static HashSet<Texture> ReferencedTextures()
         {
@@ -277,6 +323,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal void RecordNetworkSnapshot()
         {
+            RecordPavementSnapshot();
             Mod.Log.Info(World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.Status??"Quay bike isolation system unavailable.");
             int samples=0,total=0;
             _vanilla.Begin(World.GetExistingSystemManaged<Game.Rendering.ManagedBatchSystem>());
@@ -305,6 +352,26 @@ namespace MedianGrassReplacement.Systems
                 Mod.Log.Info("Network texture snapshot: sampled="+samples+" total="+total+" discoveryPending="+_discover+" refreshPending="+_refresh+" masterDisabled="+Mod.Settings.DisableTextureReplacement);
             }
             finally{_vanilla.End();}
+        }
+        private void RecordPavementSnapshot()
+        {
+            RefreshAreaCatalog();
+            var prefabs=World.GetExistingSystemManaged<Game.Prefabs.PrefabSystem>();
+            if(prefabs==null)return;
+            var renderer=World.GetExistingSystemManaged<Game.Rendering.AreaBatchSystem>();
+            foreach(var prefab in PavementPrefabs(prefabs))
+                {
+                    if(!prefabs.TryGetEntity(prefab,out var entity)||!EntityManager.HasComponent<Game.Prefabs.RenderedAreaData>(entity))continue;
+                    int index=EntityManager.GetComponentData<Game.Prefabs.RenderedAreaData>(entity).m_BatchIndex;
+                    var material=NativeAreaMaterials.Read(renderer,index);
+                    bool hasBase=material!=null&&material.HasProperty("_BaseColorMap");
+                    var current=hasBase?material.GetTexture("_BaseColorMap"):null;
+                    bool tracked=hasBase&&_patches.ContainsKey((material,"_BaseColorMap"));
+                    Mod.Log.Info("Pavement target snapshot: prefab="+prefab.name+" builtin="+prefab.isBuiltin
+                        +" batch="+index+" adapter="+NativeAreaMaterials.Supported+" material="+(material!=null?material.name:"none")
+                        +" bound="+_vanilla.IsTargetAreaMaterial(material)+" eligible="+(hasBase&&_vanilla.Allows(material,"_BaseColorMap",current))
+                        +" tracked="+tracked+" texture="+(current!=null?current.name:"none")+" enabled="+Mod.Settings.SurfaceTexturesOnAssets);
+                }
         }
         private string _lastReport;
         private bool ApplyParkingAtlas(Material material,out bool roadApplied,out bool walkApplied)
@@ -335,8 +402,15 @@ namespace MedianGrassReplacement.Systems
             _patches[(material,property)]=new Patch{Material=material,Property=property,Role=5,Before=original,Applied=replacement};
             roadApplied=_roadTexture!=null;walkApplied=_walkTexture!=null;return true;
         }
+        private IEnumerable<Material> WithTargetAreas(IEnumerable<Material> materials)
+        {
+            var seen=new HashSet<Material>();
+            foreach(var material in materials)if(material!=null&&seen.Add(material))yield return material;
+            foreach(var material in _vanilla.AreaMaterials)if(material!=null&&seen.Add(material))yield return material;
+        }
         private void Apply(bool discovery=false)
         {
+            if(discovery&&Mod.Settings.SurfaceTexturesOnAssets)RefreshAreaCatalog();
             var road=_roadTexture;var walk=_walkTexture;var errors=_loadErrors;
             if(road==null&&walk==null){Status="Global surfaces: Vanilla. "+string.Join(" ",errors);Mod.Log.Info(Status);return;}
             int roads=0,walks=0;var candidates=new List<string>();
@@ -345,8 +419,10 @@ namespace MedianGrassReplacement.Systems
             // Ordinary network rediscovery reuses the renderer's managed material
             // catalog. Full Unity-object discovery remains initial/explicit or
             // experimental-area work; no periodic whole-object scan is added.
-            foreach(var material in discovery&&!Mod.Settings.SurfaceTexturesOnAssets&&_vanilla.HasBatchMaterials
-                ?_vanilla.BatchMaterials:(IEnumerable<Material>)Resources.FindObjectsOfTypeAll<Material>())
+            IEnumerable<Material> materials=discovery&&_vanilla.HasBatchMaterials
+                ?_vanilla.BatchMaterials:RefreshMaterials();
+            if(Mod.Settings.SurfaceTexturesOnAssets)materials=WithTargetAreas(materials);
+            foreach(var material in materials)
             {
                 if(material==null||material.shader==null)continue;
                 if(material.shader.name=="BH/NetCompositionMeshLitShader"&&GlobalSurfacePolicy.ProtectedWaterfront(material.name))continue;
@@ -387,7 +463,19 @@ namespace MedianGrassReplacement.Systems
             if(_refresh)
             {
                 _refresh=false;_discover=false;_uvRefresh=false;
-                _vanilla.RefreshCatalog();RefreshAreaCatalog();RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.RequestRefresh();
+                _vanilla.RefreshCatalog();RefreshAreaCatalog();
+                // One managed-object snapshot for this synchronous refresh only.
+                // No borrowed native views or cross-frame material snapshot.
+                refreshMaterials = Resources.FindObjectsOfTypeAll<Material>();
+                try
+                {
+                    RecoverUntrackedAreas();Restore(false);RefreshTextures();Apply();
+                    World.GetExistingSystemManaged<QuayBikeMaterialSystem>()?.RequestRefresh();
+                }
+                finally { refreshMaterials = null; }
+                // Reuse the existing deferred discovery pass after the native
+                // renderer's initial texture load; no retry loop or new system.
+                if(Mod.Settings.SurfaceTexturesOnAssets)NotifyRenderActivity();
             }
             else if(_uvRefresh)
             {

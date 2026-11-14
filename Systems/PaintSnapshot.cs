@@ -40,6 +40,20 @@ namespace MedianGrassReplacement.Systems
                     ModDiagnostics.TraceBuffer.Record("snapshot.lineAnchors",lane+" a="+curve.a+" d="+curve.d);
                     bool edge=EntityManager.HasComponent<Road>(owner);
                     ModDiagnostics.TraceBuffer.Record("snapshot.paintSource",lane+" "+prefab.name+" owner="+owner+" road="+edge+" hidden="+EntityManager.HasComponent<Hidden>(lane)+" replaced="+EntityManager.HasComponent<MGRReplacedPaint>(lane)+" junctionHidden="+EntityManager.HasComponent<MGRHiddenJunctionLine>(lane)+" external="+_externalPaint.Contains(EntityManager,lane)+" medianCovered="+(edge&&HasMedianReplacement(owner,curve))+" curbCovered="+(edge&&HasCurbReplacement(owner,curve))+" centerRole="+(edge?IsOpposingBoundary(owner,curve):IsYellowNodeBoundary(owner,curve)));
+                    var definition=EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab;
+                    bool hasGeometry=EntityManager.HasComponent<NetLaneGeometryData>(definition);
+                    var geometry=hasGeometry?EntityManager.GetComponentData<NetLaneGeometryData>(definition):default;
+                    bool hasCulling=EntityManager.HasComponent<Game.Rendering.CullingInfo>(lane);
+                    var culling=hasCulling?EntityManager.GetComponentData<Game.Rendering.CullingInfo>(lane):default;
+                    int meshBatches=EntityManager.HasBuffer<Game.Rendering.MeshBatch>(lane)?EntityManager.GetBuffer<Game.Rendering.MeshBatch>(lane,true).Length:0;
+                    ModDiagnostics.TraceBuffer.Record("snapshot.paintRender",lane+" definition="+definition
+                        +" gameLayers="+(hasGeometry?geometry.m_GameLayers.ToString():"missing")
+                        +" editorLayers="+(hasGeometry?geometry.m_EditorLayers.ToString():"missing")
+                        +" batchesUpdated="+EntityManager.HasComponent<BatchesUpdated>(lane)
+                        +" meshBatches="+meshBatches+" culling="+hasCulling
+                        +" cullingMask="+(hasCulling?culling.m_Mask.ToString():"missing")
+                        +" passedCulling="+(hasCulling?culling.m_PassedCulling.ToString():"missing")
+                        +" note=mesh-batch-presence-does-not-prove-drawing");
                 }
             }
             if(EntityManager.HasBuffer<MGRHighwayLineIntent>(road))foreach(var intent in EntityManager.GetBuffer<MGRHighwayLineIntent>(road,true))ModDiagnostics.TraceBuffer.Record("snapshot.highwayLineIntent","node="+road+" role="+intent.Role+" style="+intent.Style+" start="+intent.A+" end="+intent.D);

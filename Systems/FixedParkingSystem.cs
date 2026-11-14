@@ -34,7 +34,7 @@ namespace MedianGrassReplacement.Systems
 
     {
 
-        private EntityQuery _lanes, _changedLanes, _references, _changedOwners,_changedNodes;
+        private EntityQuery _lanes, _changedLanes, _references, _changedOwners,_changedNodes, _parkingEvents, _readyParkingDefinitions;
 
         private bool _scanAll = true;
 
@@ -73,9 +73,14 @@ namespace MedianGrassReplacement.Systems
 
                 ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Curve>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
 
-            _changedLanes = GetEntityQuery(ComponentType.ReadOnly<Game.Net.ParkingLane>(), ComponentType.ReadOnly<PrefabRef>(),
-
-                ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Curve>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
+            // Load discovery must include lanes whose native components are
+            // still arriving. Complete-input _lanes remains the apply query.
+            _changedLanes = GetEntityQuery(ComponentType.ReadOnly<Game.Net.ParkingLane>(),
+                ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
+            _readyParkingDefinitions = GetEntityQuery(ComponentType.ReadOnly<ParkingLaneData>(),
+                ComponentType.ReadOnly<NetLaneData>(), ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<MGRPrivateVisualPrefab>());
+            _readyParkingDefinitions.SetOrderVersionFilter();
 
 
 
@@ -89,6 +94,12 @@ namespace MedianGrassReplacement.Systems
 
             });
 
+            _parkingEvents=GetEntityQuery(new EntityQueryDesc
+            {
+                All=new[]{ComponentType.ReadOnly<Game.Net.ParkingLane>()},
+                Any=new[]{ComponentType.ReadOnly<Created>(),ComponentType.ReadOnly<Updated>(),ComponentType.ReadOnly<Deleted>()},
+                None=new[]{ComponentType.ReadOnly<Game.Tools.Temp>()}
+            });
             _changedNodes=GetEntityQuery(ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.ReadOnly<Updated>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
             _references = GetEntityQuery(ComponentType.ReadWrite<PrefabRef>());
 
@@ -118,26 +129,41 @@ namespace MedianGrassReplacement.Systems
 
             if ((_originals.Count == 0 && _restrictions.Count == 0) || _changedOwners.IsEmpty&&_changedNodes.IsEmpty) return;
 
-            Dependency.Complete();
-
-            var repairOwners=new HashSet<Entity>();
+            var repairOwners=_restoreOwners;repairOwners.Clear();
             using(var owners=_changedOwners.ToEntityArray(Allocator.Temp))foreach(var owner in owners)repairOwners.Add(owner);
             using(var nodes=_changedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)
                 foreach(var edge in EntityManager.GetBuffer<ConnectedEdge>(node,true))if(EntityManager.HasComponent<Road>(edge.m_Edge)&&EntityManager.HasBuffer<Game.Net.SubLane>(edge.m_Edge)&&!EntityManager.HasComponent<Deleted>(edge.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(edge.m_Edge))repairOwners.Add(edge.m_Edge);
             foreach(var owner in repairOwners)
                 {
+                    _restoreLanes.Clear();
+                    _parkingOwners.CopyOwner(owner, _restoreLanes);
+                    // Native updates also include roads whose parking we never
+                    // changed. They need neither restoration nor a parking scan.
+                    if (_restoreLanes.Count == 0 && !HasParkingChoice(owner)) continue;
+                    // EntityManager owns the component/buffer dependency fences.
+                    // No system-wide join is needed for these managed records.
                     // Regeneration can replace only LaneOverlap, leaving Curve/PrefabRef unchanged.
                     // Reapply this owner after the native lane jobs finish.
                     _queuedOwners.Add(owner);
-
-                    using(var laneSnapshot=EntityManager.GetBuffer<Game.Net.SubLane>(owner,true).ToNativeArray(Allocator.Temp))
-                    foreach(var entry in laneSnapshot)
+                    if (_restoreLanes.Count == 0) continue;
+                    _restoreMembers.Clear();
+                    foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner, true))
+                        _restoreMembers.Add(entry.m_SubLane);
+                    foreach(var lane in _restoreLanes)
 
                     {
 
-                        Entity lane = entry.m_SubLane;
+                        // Match the old current-buffer membership contract. A
+                        // stale index must not restore a reparented foreign lane.
+                        if (!_restoreMembers.Contains(lane)) continue;
 
-                        RestoreRestriction(lane);
+                        // Native LaneOverlapSystem clears and rebuilds overlaps
+                        // for updated roads and their affected neighbors. Keep
+                        // our ranges until then; ApplySetback reconciles them
+                        // afterward, including a producer that leaves them intact.
+                        // Deletion still releases our existing ownership records.
+                        if (EntityManager.HasComponent<Deleted>(owner) || EntityManager.HasComponent<Deleted>(lane))
+                            RestoreRestriction(lane);
 
                         if (!_originals.TryGetValue(lane, out var original) || !EntityManager.Exists(lane)
 
@@ -147,7 +173,7 @@ namespace MedianGrassReplacement.Systems
 
                         if (_copies.TryGetValue(original, out var copy) && current == copy)
 
-                            NativeVisualInvalidation.SetPrefab(World,lane,original);
+                            SetParkingDefinition(lane,original);
 
                     }
                 }
@@ -168,7 +194,7 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                if (forget) { _originals.Clear(); _waiting.Clear(); }
+                if (forget) { _originals.Clear(); ClearParkingReadiness(); _parkingOwners.Clear(); }
 
                 _scanAll = true;
 
@@ -193,8 +219,10 @@ namespace MedianGrassReplacement.Systems
                     var reference = EntityManager.GetComponentData<PrefabRef>(entity);
 
                     if (reverse.TryGetValue(reference.m_Prefab, out var original) && EntityManager.Exists(original))
-
-                        NativeVisualInvalidation.SetPrefab(World,entity,original);
+                    {
+                        SetParkingDefinition(entity,original);
+                        RequestRestoredParkingPaint(entity,original);
+                    }
 
                 }
 
@@ -202,11 +230,12 @@ namespace MedianGrassReplacement.Systems
 
             _copies.Clear();
 
-            if (forget) { _originals.Clear(); _waiting.Clear(); }
+            if (forget) { _originals.Clear(); ClearParkingReadiness(); _parkingOwners.Clear(); }
 
             _scanAll = true;
 
-            CurbLineEmissionSystem.RequestRoadRefresh();
+            // Known committed parking references queue their exact road above.
+            // Foreign/ambiguous references keep the original global fallback.
 
         }
 
@@ -272,6 +301,7 @@ namespace MedianGrassReplacement.Systems
         private void ApplyBays()
 
         {
+            parkingCatalogChecked = false;
 
             if (_scanRequested) { _scanAll = true; _scanRequested = false; }
 
@@ -284,12 +314,25 @@ namespace MedianGrassReplacement.Systems
             var pending = _pendingLanes; pending.Clear();
 
             _lanes.ResetFilter();
+            if(MarkingChangeNotifications.Supported)
+            {
+                // Initial load/settings/save restore retains the existing full
+                // parking scan. Ordinary updates use native lane lifecycle tags,
+                // not a global Curve/PrefabRef writer fence on every callback.
+                var inputs=_scanAll?_changedLanes:_parkingEvents;
+                using(var changed=inputs.ToEntityArray(Allocator.Temp))foreach(var lane in changed)pending.Add(lane);
+            }
+            else
+            {
+            _lanes.ResetFilter();
 
             if (!_scanAll) _lanes.SetChangedVersionFilter(LaneChanges);
 
             try { using (var changed = _lanes.ToEntityArray(Allocator.Temp)) foreach (var lane in changed) pending.Add(lane); }
 
             finally { _lanes.ResetFilter(); }
+
+            }
 
             foreach (var owner in _queuedOwners) if (EntityManager.Exists(owner) && EntityManager.HasBuffer<Game.Net.SubLane>(owner))
 
@@ -305,37 +348,34 @@ namespace MedianGrassReplacement.Systems
 
             _queuedOwners.Clear();
 
+            CollectReadyParking(pending);
+
             if (pending.Count == 0) { _scanAll = false; return; }
 
-            World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RefreshDefinitionsIfNeeded();
-
-
-
-            var stale = new List<Entity>();
-
-            foreach (var pair in _originals)
-
-                if (!EntityManager.Exists(pair.Key) || EntityManager.HasComponent<Deleted>(pair.Key)) stale.Add(pair.Key);
-
-            foreach (var lane in stale) { _originals.Remove(lane); _waiting.Remove(lane); }
+            CleanupParkingRecords(pending);
 
             foreach (var lane in pending)
 
             {
 
+                if (!EntityManager.Exists(lane) || EntityManager.HasComponent<Deleted>(lane)
+                    || EntityManager.HasComponent<Game.Tools.Temp>(lane))
+                { ForgetParkingReadiness(lane); continue; }
+                if (!EntityManager.HasComponent<Owner>(lane) || !EntityManager.HasComponent<PrefabRef>(lane)
+                    || !EntityManager.HasComponent<Curve>(lane))
+                { DeferParkingInputs(lane); continue; }
                 var owner = EntityManager.GetComponentData<Owner>(lane).m_Owner;
 
-                if (!EntityManager.HasComponent<Road>(owner) || EntityManager.HasComponent<Deleted>(owner)) continue;
+                if (!EntityManager.HasComponent<Road>(owner) || EntityManager.HasComponent<Deleted>(owner))
+                { ForgetParkingReadiness(lane); continue; }
 
-                byte mode = RoadSideUpgrades.ParkingMode(EntityManager, owner, Colossal.Mathematics.MathUtils.Position(EntityManager.GetComponentData<Curve>(lane).m_Bezier, .5f));
-
-                bool banned=ParkingBanPolicy.Banned(EntityManager,owner,Colossal.Mathematics.MathUtils.Position(EntityManager.GetComponentData<Curve>(lane).m_Bezier,.5f));
-                if(banned)mode=1;
+                byte mode = ParkingLaneReadPolicy.Mode(EntityManager, owner, lane);
                 bool marked = mode >= 2;
 
                 if (!marked)
 
                 {
+                    ForgetParkingReadiness(lane);
 
                     if (mode == 0) RestoreRestriction(lane);
 
@@ -351,13 +391,14 @@ namespace MedianGrassReplacement.Systems
 
                         if (_copies.TryGetValue(saved, out var privateCopy) && currentReference == privateCopy)
 
-                            NativeVisualInvalidation.SetPrefab(World,lane,saved);
+                            SetParkingDefinition(lane,saved);
 
                         _originals.Remove(lane);
+                        ForgetParkingIfUnused(lane);
 
                         if (!EntityManager.HasComponent<Updated>(lane)) EntityManager.AddComponent<Updated>(lane);
 
-                        CurbLineEmissionSystem.QueueRoad(owner);
+                        CurbLineEmissionSystem.QueueParkingRoad(owner);
 
                     }
 
@@ -369,7 +410,8 @@ namespace MedianGrassReplacement.Systems
 
                 var parking = EntityManager.GetComponentData<Game.Net.ParkingLane>(lane);
 
-                if ((parking.m_Flags & (ParkingLaneFlags.VirtualLane | ParkingLaneFlags.SpecialVehicles | ParkingLaneFlags.ParkingDisabled)) != 0) continue;
+                if ((parking.m_Flags & (ParkingLaneFlags.VirtualLane | ParkingLaneFlags.SpecialVehicles | ParkingLaneFlags.ParkingDisabled)) != 0)
+                { ForgetParkingReadiness(lane); continue; }
 
                 Entity current = EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab;
 
@@ -377,15 +419,18 @@ namespace MedianGrassReplacement.Systems
 
                 if (known && current != original && (!_copies.TryGetValue(original, out var oldCopy) || current != oldCopy))
 
-                { _originals.Remove(lane); known = false; }
+                { _originals.Remove(lane); ForgetParkingIfUnused(lane); known = false; }
 
                 if (!known) original = current;
 
-                if (!EntityManager.HasComponent<ParkingLaneData>(original) || !EntityManager.HasComponent<NetLaneData>(original)) continue;
+                if (!EntityManager.Exists(original) || !EntityManager.HasComponent<ParkingLaneData>(original)
+                    || !EntityManager.HasComponent<NetLaneData>(original))
+                { DeferParkingDefinition(lane, original); continue; }
 
                 var data = EntityManager.GetComponentData<ParkingLaneData>(original);
 
-                if (!math.isfinite(data.m_SlotAngle) || math.abs(data.m_SlotAngle) > 0.01f) continue;
+                if (!math.isfinite(data.m_SlotAngle) || math.abs(data.m_SlotAngle) > 0.01f)
+                { ForgetParkingReadiness(lane); continue; }
 
                 ApplySetback(lane, owner);
 
@@ -395,7 +440,7 @@ namespace MedianGrassReplacement.Systems
 
                 // subsequent arrivals use the fixed slot grid.
 
-                _waiting.Remove(lane);
+                ForgetParkingReadiness(lane);
 
                 if (!_copies.TryGetValue(original, out var copy) || !EntityManager.Exists(copy))
 
@@ -425,9 +470,10 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                if (current != copy) NativeVisualInvalidation.SetPrefab(World,lane,copy);
+                if (current != copy) SetParkingDefinition(lane,copy);
 
                 _originals[lane] = original;
+                _parkingOwners.Add(owner, lane);
 
                 if (!known)
 
@@ -435,7 +481,7 @@ namespace MedianGrassReplacement.Systems
 
                     if (!EntityManager.HasComponent<Updated>(lane)) EntityManager.AddComponent<Updated>(lane);
 
-                    CurbLineEmissionSystem.QueueRoad(owner);
+                    CurbLineEmissionSystem.QueueParkingRoad(owner);
 
                 }
 
@@ -453,22 +499,28 @@ namespace MedianGrassReplacement.Systems
 
             if (!_restrictions.TryGetValue(lane, out var added)) return;
 
+            bool removed = false;
+
             if (EntityManager.Exists(lane) && EntityManager.HasBuffer<LaneOverlap>(lane))
 
             {
 
-                var buffer = EntityManager.GetBuffer<LaneOverlap>(lane);
-
-                foreach (var owned in added)
-
-                    for (int i = buffer.Length - 1; i >= 0; i--)
-
-                        if (buffer[i].Equals(owned)) { buffer.RemoveAt(i); break; }
+                // A native/foreign producer may already have replaced these
+                // entries. Inspect before obtaining a writable buffer or marking
+                // the lane Updated; neither is needed if nothing is removed.
+                if (ContainsOwnedOverlap(EntityManager.GetBuffer<LaneOverlap>(lane, true), added))
+                {
+                    var buffer = EntityManager.GetBuffer<LaneOverlap>(lane);
+                    foreach (var owned in added)
+                        for (int i = buffer.Length - 1; i >= 0; i--)
+                            if (buffer[i].Equals(owned)) { buffer.RemoveAt(i); removed = true; break; }
+                }
 
             }
 
             _restrictions.Remove(lane);
-            if(EntityManager.Exists(lane)&&!EntityManager.HasComponent<Deleted>(lane)&&!EntityManager.HasComponent<Updated>(lane))EntityManager.AddComponent<Updated>(lane);
+            ForgetParkingIfUnused(lane);
+            if(removed&&EntityManager.Exists(lane)&&!EntityManager.HasComponent<Deleted>(lane)&&!EntityManager.HasComponent<Updated>(lane))EntityManager.AddComponent<Updated>(lane);
 
         }
 
@@ -512,6 +564,14 @@ namespace MedianGrassReplacement.Systems
             var curve = EntityManager.GetComponentData<Curve>(lane).m_Bezier;
 
             var marking = World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
+            // Native parking notifications without an applicable choice do not
+            // need the marking catalog. Refresh once only when setback/ban
+            // calculation actually needs the current stop-mark definitions.
+            if (!parkingCatalogChecked)
+            {
+                marking.RefreshDefinitionsIfNeeded();
+                parkingCatalogChecked = true;
+            }
 
             foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(road, true))
 
@@ -620,9 +680,10 @@ namespace MedianGrassReplacement.Systems
             }
 
             _restrictions[lane] = additions;
+            _parkingOwners.Add(road, lane);
             if(!EntityManager.HasComponent<Updated>(lane))EntityManager.AddComponent<Updated>(lane);
 
-            CurbLineEmissionSystem.QueueRoad(road);
+            CurbLineEmissionSystem.QueueParkingRoad(road);
 
         }
 

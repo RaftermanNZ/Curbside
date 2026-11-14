@@ -1,3 +1,43 @@
+# Curbside 0.6.1
+
+This update brings the tested perf.20 branch to the public release. It focuses on reducing unnecessary marking, parking and texture refresh work and includes the targeted traffic-signal texture-cache correction.
+
+## Traffic signals
+
+- Normalize duplicate configuration tags only for Curbside's known traffic-signal mid-mip cache. The game's lookup requires one matching tag; repeated database refreshes can otherwise hide the valid cache and produce the reported TextureStreamingSystem mid-mip mismatch.
+- Coalesce cache-change notifications, retain unfamiliar tags, and skip repeated refreshes for an already processed cache/streaming pair. This is a targeted correction, not a general repair for unrelated asset errors.
+- Preserve current light placement, native controllers, wire layouts and working preview behavior.
+
+## Markings, parking and previews
+
+- Narrow road work to marking-relevant changes and reject unchanged-owner notifications before full road planning or junction refreshes.
+- Avoid parking restore/reapply cycles when only unrelated network/access state changes; initialize existing saved parking and hidden-decal state after native definitions are ready.
+- Reduce repeated junction checks, line preflight work, catalog waits, parking cleanup and hidden-decal scans. Keep required recovery and native-reader synchronization.
+- Separate intersection-paint discovery from optional integrity audits, with bounded deferral when producer jobs are busy. The starvation fallback may still wait.
+- Exclude private transient visual copies from authored marking catalogs. Restore matching parking definitions with a refresh request for the affected road; ambiguous foreign references keep the broader safe fallback.
+- Correct stop-line invalidation across connected endpoints after signal changes, and keep native transverse stop declarations out of longitudinal-line hiding.
+
+## Textures and crosswalks
+
+- Reuse one material snapshot within a texture refresh and avoid scanning every material during cleanup when all cached textures remain selected.
+- Tighten experimental asset/surface replacement to the exact native Pavement 01 (road texture) and Pavement 02 (sidewalk texture) targets. Other surface materials remain outside those targets.
+- Preserve crosswalk choices through native replacement/road upgrades and reduce unnecessary refresh requests.
+
+## Compatibility and validation
+
+- Public version 0.6.1; serialized assembly identity remains 0.5.1.0 and asset compatibility level remains 243.
+- The release-only compiled comparison must match perf.20 executable methods, saved component fields, embedded resources and SDK references. The UI bundle and Burst library are retained from perf.20.
+- perf.20 passed 20 regression suites, 37 source contracts, 20 native material-fixture rounds, 20 native catalog/parking-fixture rounds and the targeted mid-mip cache checks. These are bounded offline tests, not universal gameplay or frame-time guarantees.
+- No new line-generation mathematics, line output, saved-choice schema, signal placement or preview algorithm is introduced in this release promotion. The separate perf.17 planning/preview experiment and new generation optimizations are excluded.
+
+## Known limits
+
+- Default-marking flashes and crosswalk restoration delays can still occur around saves. The alternative save-retention design remains experimental and is not enabled here.
+- Unusual road geometry, Road Builder roads and competing signal/traffic appearance owners still require in-game testing. TTE protected-turn overlap is not declared universally resolved.
+- The isolated timing improvements do not establish removal of the recorded 144 ms surface callback or a universal under-10 ms CPU target.
+
+---
+
 # Curbside 0.6.0
 
 This release brings the improvements developed since public 0.5.1-test.204 into a traditionally numbered release. It builds on Test239, with release identity changes and a correction for discovering the updated published signal pack.

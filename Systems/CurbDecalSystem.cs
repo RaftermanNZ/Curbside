@@ -131,6 +131,9 @@ namespace MedianGrassReplacement.Systems
         internal void QueueRoad(Entity road) { Remove(road); if (_build?.Road == road) CancelBuild(); EnqueueRoad(road); }
 
         private readonly HashSet<Entity> _pending = new HashSet<Entity>();
+        private readonly HashSet<Entity> _markingRoads = new HashSet<Entity>();
+        internal void NotifyMarkingRoad(Entity road) { if(_enabled) _markingRoads.Add(road); }
+
 
         private readonly Queue<Entity> _roadQueue=new Queue<Entity>();
 
@@ -182,7 +185,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            CancelBuild(); foreach (var visual in _visuals.Values) Destroy(visual); _visuals.Clear(); _pending.Clear();_roadQueue.Clear(); _total = 0;
+            CancelBuild(); foreach (var visual in _visuals.Values) Destroy(visual); _visuals.Clear(); _pending.Clear();_roadQueue.Clear(); _markingRoads.Clear(); _total = 0;
 
             if (_volume != null) UnityEngine.Object.Destroy(_volume); _volume = null;
 
@@ -222,7 +225,12 @@ namespace MedianGrassReplacement.Systems
             using (var items = _deleted.ToEntityArray(Allocator.Temp)) foreach (var road in items) { Remove(road); if (_build?.Road == road) CancelBuild(); }
 
             if (_initial) { using (var items = _roads.ToEntityArray(Allocator.Temp)) foreach (var road in items) EnqueueRoad(road); _initial = false; }
-
+            else if(World.GetExistingSystemManaged<CurbLineEmissionSystem>()?.UsesMarkingSpecificChanges == true)
+            {
+                foreach(var road in _markingRoads)
+                    if(Live(road)&&(EntityManager.HasComponent<MGRCurbDecalSides>(road)
+                        ||_visuals.ContainsKey(road)||_build?.Road==road))EnqueueRoad(road);
+            }
             else
 
             {
@@ -250,6 +258,8 @@ namespace MedianGrassReplacement.Systems
                 using (var nodes = _nodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) foreach (var edge in EntityManager.GetBuffer<ConnectedEdge>(node, true)) EnqueueRoad(edge.m_Edge);
 
             }
+
+            _markingRoads.Clear();
 
             if (_build == null && _pending.Count == 0) return;
             Dependency.Complete();

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Game.Net;
 using Game.Tools;
@@ -29,14 +30,49 @@ namespace MedianGrassReplacement.Systems
         }
 
         internal void Include(PreviewOwnerIndex index) { interests.Add(index); }
+        private readonly PreviewNativeLists nativeLists = new PreviewNativeLists();
+        private readonly List<PreviewOwnerIndex> previousInterests = new List<PreviewOwnerIndex>(4);
+        private readonly List<ulong> previousRevisions = new List<ulong>(4);
+        private ulong selectionEpoch;
+        private readonly Action<Entity> includeChild;
+        private readonly Func<Entity, bool> selectChild;
+
+        internal PreviewRefreshScope() { includeChild = AddOwner; selectChild = Interested; }
+
+        internal void BeginBatch(EntityManager manager, EntityQuery objects, EntityQuery lanes,
+            bool supported, int frame)
+        {
+            bool changed = interests.Count != previousInterests.Count;
+            for (int i = 0; !changed && i < interests.Count; i++)
+                changed = !ReferenceEquals(interests[i], previousInterests[i]) || interests[i].Revision != previousRevisions[i];
+            if (changed)
+            {
+                unchecked { selectionEpoch++; }
+                previousInterests.Clear(); previousRevisions.Clear();
+                foreach (var index in interests) { previousInterests.Add(index); previousRevisions.Add(index.Revision); }
+            }
+            nativeLists.BeginBatch(manager, objects, lanes, supported, frame, selectionEpoch, selectChild);
+        }
+
+        internal void EndBatch() { nativeLists.EndBatch(); }
+
+        internal void ResetHistory()
+        {
+            EndBatch(); nativeLists.Reset(); previousInterests.Clear(); previousRevisions.Clear();
+            unchecked { selectionEpoch++; }
+        }
+
+        private bool Interested(Entity entity)
+        {
+            if (interests.Count == 0) return true;
+            foreach (var index in interests) if (index.MaySelect(entity)) return true;
+            return false;
+        }
+
 
         private void AddOwner(Entity entity)
         {
-            // Keep native ownership/buffer traversal, including actors moved by
-            // another mod. Only discard keys no active restore index can select.
-            if (interests.Count == 0) { Owners.Add(entity); return; }
-            foreach (var index in interests)
-                if (index.MaySelect(entity)) { Owners.Add(entity); return; }
+            if (Interested(entity)) Owners.Add(entity);
         }
 
         internal void AddObjectOwner(EntityManager manager, Entity actor)
@@ -121,9 +157,11 @@ namespace MedianGrassReplacement.Systems
         {
             if (!expanded.Add(owner)) return;
             if (manager.HasBuffer<Game.Objects.SubObject>(owner))
-                foreach (var item in manager.GetBuffer<Game.Objects.SubObject>(owner, true)) AddOwner(item.m_SubObject);
+                if (!nativeLists.Objects(manager, owner, !manager.HasComponent<Temp>(owner), includeChild, out var objects))
+                    foreach (var item in objects) AddOwner(item.m_SubObject);
             if (manager.HasBuffer<SubLane>(owner))
-                foreach (var item in manager.GetBuffer<SubLane>(owner, true)) AddOwner(item.m_SubLane);
+                if (!nativeLists.Lanes(manager, owner, !manager.HasComponent<Temp>(owner), includeChild, out var lanes))
+                    foreach (var item in lanes) AddOwner(item.m_SubLane);
         }
     }
 }

@@ -85,6 +85,7 @@ namespace MedianGrassReplacement
 
 
 
+            updateSystem.UpdateBefore<SignalMidMipCacheRepairSystem, Colossal.IO.AssetDatabase.VirtualTexturing.TextureStreamingSystem>(SystemUpdatePhase.PrefabUpdate);
             BundledAssets.Initialize(this);
             GardenCitySignals.Mod.Initialize(updateSystem);
             updateSystem.UpdateBefore<VisualLifecycleSystem,Game.Common.ModificationSystem>(SystemUpdatePhase.MainLoop);

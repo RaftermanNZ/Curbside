@@ -10,6 +10,7 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<Entity, HashSet<Entity>> actors = new Dictionary<Entity, HashSet<Entity>>();
         private readonly Dictionary<Entity, HashSet<Entity>> owners = new Dictionary<Entity, HashSet<Entity>>();
         private readonly HashSet<Entity> selected = new HashSet<Entity>();
+        internal ulong Revision { get; private set; }
 
         // Matches the two ways Select can find an actor: a tracked actor key,
         // or a native/source owner key. No native state is retained here.
@@ -37,7 +38,7 @@ namespace MedianGrassReplacement.Systems
             if (!actors.TryGetValue(owner, out var values)) actors.Add(owner, values = new HashSet<Entity>());
             values.Add(actor);
             if (!owners.TryGetValue(actor, out var keys)) owners.Add(actor, keys = new HashSet<Entity>());
-            keys.Add(owner);
+            if (keys.Add(owner)) unchecked { Revision++; }
         }
 
         internal void Remove(Entity actor)
@@ -50,6 +51,7 @@ namespace MedianGrassReplacement.Systems
                     if (values.Count == 0) actors.Remove(key);
                 }
             owners.Remove(actor);
+            unchecked { Revision++; }
         }
 
         internal void Select(IEnumerable<Entity> keys, List<Entity> output)
@@ -66,6 +68,6 @@ namespace MedianGrassReplacement.Systems
             selected.Clear();
         }
 
-        internal void Clear() { actors.Clear(); owners.Clear(); selected.Clear(); }
+        internal void Clear() { actors.Clear(); owners.Clear(); selected.Clear(); unchecked { Revision++; } }
     }
 }

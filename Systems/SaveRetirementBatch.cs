@@ -28,6 +28,16 @@ namespace MedianGrassReplacement.Systems
             foreach (var pair in owners)
             {
                 if (!manager.Exists(pair.Key) || !manager.HasBuffer<SubLane>(pair.Key)) continue;
+                // Read-only probing avoids announcing a buffer change when
+                // these generated actors were never members of native SubLane.
+                bool found = false;
+                {
+                    var existing = manager.GetBuffer<SubLane>(pair.Key, true);
+                    foreach (var lane in existing)
+                        if (pair.Value.Contains(lane.m_SubLane)) { found = true; break; }
+                }
+                if (!found) continue;
+
                 var lanes = manager.GetBuffer<SubLane>(pair.Key);
                 for (int i = lanes.Length - 1; i >= 0; i--)
                     if (pair.Value.Contains(lanes[i].m_SubLane)) lanes.RemoveAt(i);

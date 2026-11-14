@@ -22,7 +22,11 @@ namespace MedianGrassReplacement.Systems
     {
         private sealed class Source{internal bool Builtin,Custom;internal SurfaceAsset Surface;}
         private sealed class AreaSource{internal AreaPrefab Prefab;internal TextureAsset TextureAsset;internal Material OriginalMaterial;internal Texture OriginalTexture;internal bool HasTextureReference,Ambiguous;}
+        private readonly EmbeddedPavementTextures embedded=new EmbeddedPavementTextures(GlobalSurfaceMaterialSystem.NotifyRenderActivity);
         private readonly Dictionary<string,AreaSource> areas=new Dictionary<string,AreaSource>(StringComparer.Ordinal);
+        private readonly Dictionary<Material,AreaSource> areaMaterials=new Dictionary<Material,AreaSource>();
+        private Material defaultAreaMaterial;
+        private Dictionary<Texture,TextureAsset> loadedBuiltinTextures;
         private readonly Dictionary<string,Source> sources=new Dictionary<string,Source>(StringComparer.Ordinal);
         private readonly Dictionary<Material,ManagedBatchSystem.MaterialKey> batches=new Dictionary<Material,ManagedBatchSystem.MaterialKey>();
         // The shipped API exposes isObjectLoaded but no non-loading getter.
@@ -32,6 +36,7 @@ namespace MedianGrassReplacement.Systems
         {
             sources.Clear();
             areas.Clear();
+            areaMaterials.Clear();
             var database=AssetDatabase.global;
             if(database==null||database.resources==null)return;
             foreach(var asset in database.GetAssets<SurfaceAsset>())
@@ -52,12 +57,50 @@ namespace MedianGrassReplacement.Systems
             // Catalog older replacement targets for recovery; AllowsArea still
             // limits NEW replacements to the two approved vanilla pavements.
             if(prefab==null||string.IsNullOrEmpty(prefab.name)||!prefab.TryGet<RenderedArea>(out var rendered)||rendered==null)return;
-            var original=rendered.m_Material;
-            bool usesTexture=rendered.m_Version==RenderedArea.Version.OverrideMaterial&&rendered.m_BaseColorMap!=null;
-            var source=new AreaSource{Prefab=prefab,TextureAsset=usesTexture?(TextureAsset)rendered.m_BaseColorMap:null,HasTextureReference=usesTexture,
-                OriginalMaterial=original,OriginalTexture=original!=null&&original.HasProperty("_BaseColorMap")?original.GetTexture("_BaseColorMap"):null};
+            // Match native AreaBatchSystem: a null template uses the global
+            // area template and enables the prefab's texture overrides.
+            var original=rendered.m_Material!=null?rendered.m_Material:defaultAreaMaterial;
+            bool usesTexture=(rendered.m_Material==null||rendered.m_Version==RenderedArea.Version.OverrideMaterial)&&rendered.m_BaseColorMap!=null;
+            var originalTexture=original!=null&&original.HasProperty("_BaseColorMap")?original.GetTexture("_BaseColorMap"):null;
+            // Embedded native targets have exact prefab/template identities and
+            // cached content verification. Do not enumerate the full texture
+            // asset database again for each render-material discovery batch.
+            bool embeddedNative=!usesTexture&&EmbeddedPavementTextures.NativeContext(prefab,original);
+            var source=new AreaSource{Prefab=prefab,TextureAsset=usesTexture?(TextureAsset)rendered.m_BaseColorMap:embeddedNative?null:FindBuiltinTexture(originalTexture),HasTextureReference=usesTexture,
+                OriginalMaterial=original,OriginalTexture=originalTexture};
             AddAreaName(VanillaSurfacePolicy.AreaBatchName(prefab.name),source);
         }
+        internal void BeginAreas(Material fallback)
+        {areas.Clear();areaMaterials.Clear();defaultAreaMaterial=fallback;loadedBuiltinTextures=null;}
+        private TextureAsset FindBuiltinTexture(Texture texture)
+        {
+            if(texture==null||loadedTexture==null||loadedTexture.FieldType!=typeof(Texture))return null;
+            if(loadedBuiltinTextures==null)
+            {
+                loadedBuiltinTextures=new Dictionary<Texture,TextureAsset>();
+                foreach(var asset in AssetDatabase.global.GetAssets<TextureAsset>())
+                    if(asset!=null&&asset.isValid&&asset.isBuiltin&&asset.isObjectLoaded
+                        &&loadedTexture.GetValue(asset) is Texture instance&&instance!=null)
+                        loadedBuiltinTextures[instance]=asset;
+            }
+            return loadedBuiltinTextures.TryGetValue(texture,out var result)?result:null;
+        }
+        internal void BindAreaMaterial(AreaPrefab prefab,Material material)
+        {
+            if(prefab==null||material==null||material.shader==null
+                ||!areas.TryGetValue(VanillaSurfacePolicy.AreaBatchName(prefab.name),out var source)
+                ||source.Prefab!=prefab
+                ||!NativeAreaMaterialPolicy.Admits(prefab.name,material.name,material.shader.name,
+                    AreaBuiltin(prefab),source.Ambiguous,true,material==source.OriginalMaterial))return;
+            if(areaMaterials.TryGetValue(material,out var previous)&&previous.Prefab!=prefab)
+            {previous.Ambiguous=true;source.Ambiguous=true;return;}
+            areaMaterials[material]=source;
+        }
+        internal IEnumerable<Material> AreaMaterials=>areaMaterials.Keys;
+        internal bool IsTargetAreaMaterial(Material material)=>material!=null
+            &&areaMaterials.TryGetValue(material,out var source)&&source.Prefab!=null
+            &&NativeAreaMaterialPolicy.Admits(source.Prefab.name,material.name,material.shader?.name,
+                AreaBuiltin(source.Prefab),source.Ambiguous,true,material==source.OriginalMaterial);
         private void AddAreaName(string name,AreaSource source)
         {
             if(areas.TryGetValue(name,out var previous))
@@ -74,12 +117,17 @@ namespace MedianGrassReplacement.Systems
             &&(prefab.asset!=null?prefab.asset.isValid&&prefab.asset.isBuiltin:prefab.isBuiltin);
         private bool AllowsArea(AreaSource source,Material material,string property,Texture current)
         {
-            if(source.Ambiguous||!AreaBuiltin(source.Prefab)||!VanillaSurfacePolicy.TargetArea(source.Prefab.name)||property!="_BaseColorMap")return false;
+            if(property!="_BaseColorMap"||!NativeAreaMaterialPolicy.Admits(source.Prefab.name,
+                material.name,material.shader?.name,AreaBuiltin(source.Prefab),source.Ambiguous,
+                areaMaterials.TryGetValue(material,out var bound)&&ReferenceEquals(bound,source),
+                material==source.OriginalMaterial))return false;
             if(source.HasTextureReference)return source.TextureAsset!=null&&SameLoadedNativeTexture(source.TextureAsset,current);
             var original=source.OriginalMaterial;var expected=source.OriginalTexture;
             if(original==null||expected==null)return false;
-            var map=AssetDatabase.global.resources.unityObjectsMap;
-            return VanillaSurfacePolicy.Allows(true,false,expected!=null&&map.ContainsObject(original)&&map.ContainsObject(expected),current==expected);
+            // A registered Unity object alone is not proof of a vanilla texture.
+            // Embedded originals also need exact native context and content.
+            return current==expected&&(source.TextureAsset!=null&&SameLoadedNativeTexture(source.TextureAsset,current)
+                ||embedded.Allows(source.Prefab,original,current));
         }
         private static bool SameLoadedNativeTexture(TextureAsset asset,Texture current)
         {
@@ -111,14 +159,14 @@ namespace MedianGrassReplacement.Systems
         internal bool HasBatchMaterials=>batches.Count>0;
         internal IEnumerable<Material> BatchMaterials=>batches.Keys;
         internal void End()=>batches.Clear();
-        internal void Clear(){End();sources.Clear();areas.Clear();}
+        internal void Clear(){embedded.Clear();End();sources.Clear();areas.Clear();areaMaterials.Clear();defaultAreaMaterial=null;loadedBuiltinTextures=null;}
         internal bool Allows(Material material,string property,Texture current)
         {
             if(material==null||current==null)return false;
             // Only rendered area-batch copies are edited. Never modify their
             // shared prefab material templates, which other packs could reuse.
             if(material.shader!=null&&material.shader.name.IndexOf("AreaDecalShader",StringComparison.Ordinal)>=0)
-                return areas.TryGetValue(material.name,out var area)&&AllowsArea(area,material,property,current);
+                return areaMaterials.TryGetValue(material,out var area)&&AllowsArea(area,material,property,current);
             var name=material.name;
             if(name.StartsWith("Batch (",StringComparison.Ordinal)&&name.EndsWith(")",StringComparison.Ordinal))name=name.Substring(7,name.Length-8);
             if(!sources.TryGetValue(name,out var source)||!source.Builtin||source.Custom)return false;

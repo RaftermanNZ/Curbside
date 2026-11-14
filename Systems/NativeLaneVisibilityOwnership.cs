@@ -56,7 +56,11 @@ namespace MedianGrassReplacement.Systems
             foreach (var source in original)
             {
                 if (source == null || !Has(source.All, hidden) || source.Any == null || source.Any.Length != 2
-                    || !Has(source.Any, lane) || !Has(source.Any, children)) return false;
+                    || !Has(source.Any, lane) || !Has(source.Any, children)
+                    // Newer query forms must not silently lose a foreign filter.
+                    || (source.Disabled != null && source.Disabled.Length != 0)
+                    || (source.Absent != null && source.Absent.Length != 0)
+                    || (source.Present != null && source.Present.Length != 0)) return false;
                 // Any is satisfied by the added Lane/SubLane requirement; do
                 // not duplicate a type across All and Any (Unity rejects that).
                 Add(result, source, Plus(source.All, children), Array.Empty<ComponentType>(), Plus(source.None));
@@ -79,13 +83,17 @@ namespace MedianGrassReplacement.Systems
         private static FieldInfo field;
         private static EntityQuery original, filtered;
         private static bool installed;
-        private static readonly Guid SupportedGameModule = new Guid("e15551e9-3dea-4855-8dde-1da3cea7d7ef");
+        internal static bool SupportsModule(Guid module, Guid entities)
+            => (module == new Guid("e15551e9-3dea-4855-8dde-1da3cea7d7ef")
+                && entities == new Guid("3d6b23ae-b281-44a6-a5f4-cbd5fd3d75e6"))
+            || (module == new Guid("46198354-d4f9-4d23-bf32-7e3c085d8b92")
+                && entities == new Guid("bfb47e8c-9b6e-4acf-8c6d-c80a7bff1c41"));
 
         internal static void Install(World world)
         {
             if (installed && owner == world) return;
             Restore();
-            if (world == null || !world.IsCreated || typeof(Game.Net.LaneHiddenSystem).Module.ModuleVersionId != SupportedGameModule)
+            if (world == null || !world.IsCreated || !SupportsModule(typeof(Game.Net.LaneHiddenSystem).Module.ModuleVersionId, typeof(EntityQuery).Module.ModuleVersionId))
             { Mod.Log.Info("Native marking visibility ownership: unsupported game module; existing Curbside visibility maintenance retained."); return; }
             try
             {
@@ -94,6 +102,10 @@ namespace MedianGrassReplacement.Systems
                 var member = typeof(Game.Net.LaneHiddenSystem).GetField("m_HiddenQuery", BindingFlags.Instance | BindingFlags.NonPublic);
                 if (member == null || member.FieldType != typeof(EntityQuery)) return;
                 var before = (EntityQuery)member.GetValue(target);
+                // Descriptions do not contain shared/change/order filters. A
+                // foreign filter cannot be reconstructed from descriptions.
+                if (before.HasFilter())
+                { Mod.Log.Info("Native marking visibility ownership: native query has a foreign chunk filter; unchanged."); return; }
                 if (!NativeLaneVisibilityQuery.TryBuild(before.GetEntityQueryDescs(), ComponentType.ReadOnly<Hidden>(),
                     ComponentType.ReadOnly<Lane>(), ComponentType.ReadOnly<SubLane>(), ComponentType.ReadOnly<PedestrianLane>(),
                     ComponentType.ReadOnly<MGRReplacedPaint>(), ComponentType.ReadOnly<MGRHiddenJunctionLine>(),

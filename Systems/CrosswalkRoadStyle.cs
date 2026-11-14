@@ -275,27 +275,52 @@ namespace MedianGrassReplacement.Systems
         }
 
         internal void PruneNodeIntents(Entity node)
-
         {
+            if (!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node)
+                || !EntityManager.HasBuffer<ConnectedEdge>(node)) return;
+            if (EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node, true).Length == 0) return;
 
-            if(!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node) || !EntityManager.HasBuffer<ConnectedEdge>(node)) return;
-
-            var connections=EntityManager.GetBuffer<ConnectedEdge>(node,true);
-
-            var buffer=EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);
-
-            for(int i=buffer.Length-1;i>=0;i--)
-
+            // Missing geometry is not evidence that a saved approach was removed.
+            // The next native owner change can reconsider it; no retry sweep is added.
+            var directions = new System.Collections.Generic.List<float3>();
             {
-
-                bool found=false;
-
-                foreach(var entry in connections) if(!EntityManager.HasComponent<Deleted>(entry.m_Edge) && !EntityManager.HasComponent<Game.Tools.Temp>(entry.m_Edge) && ApproachDirection(entry.m_Edge,node,out var direction) && CrosswalkIntentPolicy.Matches(direction,buffer[i].Direction)) {found=true;break;}
-
-                if(!found) buffer.RemoveAt(i);
-
+                var connections = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+                if (connections.Length == 0) return;
+                foreach (var entry in connections)
+                {
+                    var road = entry.m_Edge;
+                    // A stale/deleted entry still in ConnectedEdge means the
+                    // native connection list has not finished settling.
+                    if (!EntityManager.Exists(road)
+                        || EntityManager.HasComponent<Deleted>(road)
+                        || EntityManager.HasComponent<Game.Tools.Temp>(road)
+                        || !ApproachDirection(road, node, out var direction)) return;
+                    directions.Add(direction);
+                }
             }
 
+            // Read first: an intact choice must not dirty the owner chunk.
+            bool remove = false;
+            {
+                var intents = EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node, true);
+                foreach (var intent in intents)
+                {
+                    bool found = false;
+                    foreach (var direction in directions)
+                        if (CrosswalkIntentPolicy.Matches(direction, intent.Direction)) { found = true; break; }
+                    if (!found) { remove = true; break; }
+                }
+            }
+            if (!remove) return;
+
+            var buffer = EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);
+            for (int i = buffer.Length - 1; i >= 0; i--)
+            {
+                bool found = false;
+                foreach (var direction in directions)
+                    if (CrosswalkIntentPolicy.Matches(direction, buffer[i].Direction)) { found = true; break; }
+                if (!found) buffer.RemoveAt(i);
+            }
         }
 
         internal bool IsSourceSelected(Entity source)
