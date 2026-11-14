@@ -17,6 +17,9 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: UI/package-lock.json
+      - name: Verify required Curbside icons
+        shell: pwsh
+        run: ./Packaging/Validate-Icons.ps1 -ProjectRoot $PWD
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: UI
       - run: npm run build

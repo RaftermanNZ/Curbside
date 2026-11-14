@@ -90,3 +90,7 @@ Write-Output "Windows test build ready: $OutputFolder. Installed mod was not rep
 $textureOutput=Join-Path $OutputFolder "BundledTextures"
 New-Item -ItemType Directory -Path $textureOutput -Force|Out-Null
 Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "BundledTextures") -Filter "*.png" -File|Copy-Item -Destination $textureOutput -Force
+
+# Validate the postprocessed payload before it can be installed or published.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Packaging/Validate-Icons.ps1') -ProjectRoot $PSScriptRoot -AssemblyPath (Join-Path $OutputFolder 'MedianGrassReplacement.dll')
+if ($LASTEXITCODE -ne 0) { throw 'Final icon payload validation failed' }

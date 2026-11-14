@@ -1,3 +1,16 @@
+# Curbside 0.6.2
+
+This is an icon-packaging hotfix based directly on 0.6.1.
+
+- Restored 57 original SVG icons, including the launcher, marking tools and placeable surface controls. Existing installations could retain extracted icons and mask the omission.
+- Added build-time validation of the required artwork manifest, production references, SVG documents and exact embedded resource names and bytes. The postprocessed package is checked too, even when the UI bundle is reused.
+- Verified offline installation into an empty icon folder using the actual bundled-asset installer. Repeated extraction skips unchanged files; corrupt cached artwork is repaired.
+- Kept all existing gameplay methods, saved component layouts and serializers unchanged from 0.6.1. Performance prototypes are not included.
+
+This correction addresses missing artwork. Native unlock requirements and optional traffic-signal pack discovery remain separate conditions for control availability. No signal asset pack changes are included.
+
+---
+
 # Curbside 0.6.1
 
 This update brings the tested perf.20 branch to the public release. It focuses on reducing unnecessary marking, parking and texture refresh work and includes the targeted traffic-signal texture-cache correction.

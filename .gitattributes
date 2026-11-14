@@ -1,0 +1,2 @@
+# Embedded artwork must keep the exact bytes checked against the built DLL.
+Icons/*.svg -text whitespace=cr-at-eol

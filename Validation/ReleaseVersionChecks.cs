@@ -13,11 +13,11 @@ class ReleaseVersionChecks
     static void Main()
     {
         var identity=A.GetType("MedianGrassReplacement.BuildIdentity",true);
-        Check((string)identity.GetField("Version",F).GetValue(null)=="0.6.1","Public version");
-        Check((string)Get(identity,"Label")=="0.6.1","No test label");
+        Check((string)identity.GetField("Version",F).GetValue(null)=="0.6.2","Public version");
+        Check((string)Get(identity,"Label")=="0.6.2","No test label");
         Check((int)identity.GetField("Number",F).GetValue(null)==243,"Independent compatibility build");
         Check(A.GetName().Version.ToString()=="0.5.1.0","Preserved assembly identity");
-        Check(A.GetCustomAttribute<AssemblyFileVersionAttribute>().Version=="0.6.1.0","File version");
+        Check(A.GetCustomAttribute<AssemblyFileVersionAttribute>().Version=="0.6.2.0","File version");
         var policy=A.GetType("GardenCitySignals.SignalPackPolicy",true);
         var modules=(string[])A.GetType("GardenCitySignals.SignalModuleCatalog",true).GetField("Names",F).GetValue(null);
         var florida=(string[])A.GetType("GardenCitySignals.FloridaModuleCatalog",true).GetField("Names",F).GetValue(null);

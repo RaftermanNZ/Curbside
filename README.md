@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-This is the source for **Curbside 0.6.1**, based on the Test239 candidate. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
+This is the source for **Curbside 0.6.2**, an icon-packaging hotfix on the 0.6.1 public baseline. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
 
 ## Build locally on Windows
 
@@ -14,7 +14,7 @@ This is the source for **Curbside 0.6.1**, based on the Test239 candidate. Publi
 2. Install .NET SDK 10.0.402 (see `global.json`), the .NET Framework 4.8 targeting pack and Node.js 22 or 24 LTS. SDK 10 is a developer tool; the mod still targets the game-shipped net48 runtime and C# 9.
 3. In `UI`, run `npm ci --ignore-scripts`, then `npm run build`. Editable TypeScript/SCSS, ambient UI declarations and the lockfile are included. See `UI/TEMPLATE-PROVENANCE.txt` for the shipped-template baseline and deliberate deviations.
 4. Run `./Build-Local.ps1` from PowerShell. It compiles and invokes the official game postprocessor/Burst tools. `BuildOutput` is a local staging folder; the script does not install or publish.
-5. Bundled texture artwork is excluded here. Obtain the approved images from the maintainer for a complete production package. The mod deploys them beside the DLL in `BundledTextures`, using the same saved selection IDs and extracted filenames.
+5. Original SVG icons are included in `Icons`; the build checks their manifest, production references and embedded bytes. Bundled texture artwork is excluded here. Obtain the approved images from the maintainer for a complete production package. The mod deploys them beside the DLL in `BundledTextures`, using the same saved selection IDs and extracted filenames.
 6. Before local installation, close the game and disable the subscribed core copy. Never run two Curbside copies. Use disposable copies of saves for development.
 
 GitHub checks build the UI without proprietary game assemblies. Full native compilation, policy tests and in-game save/reload/performance checks run locally with the licensed game/toolchain. See [release gates](docs/RELEASE-SAFETY.md).
