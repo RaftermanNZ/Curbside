@@ -90,16 +90,16 @@ namespace MedianGrassReplacement.Systems
 
             if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit)) return deps;
 
-            deps.Complete();
+            if (applyAction.WasPressedThisFrame() || remove) { deps.Complete(); deps = default; }
             if(_selected?.name==RoadFeatureInspector.AssetName&&SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var inspectTarget)&&EntityManager.HasComponent<Node>(inspectTarget))
             {
                 World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RetainPaintTarget(inspectTarget);
                 var inspectOverlay=World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>().GetBuffer(out var inspectPending);inspectPending.Complete();
                 inspectOverlay.DrawCircle(new UnityEngine.Color(.3f,.8f,1,.8f),EntityManager.GetComponentData<Node>(inspectTarget).m_Position,4f);
-                return default;
+                return deps;
             }
             var markingHit=SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var markingTarget)?markingTarget:hit.m_Owner;
-            if(HandleHoverLine(markingHit,hit.m_Hit.m_HitPosition,remove))return default;
+            if(HandleHoverLine(markingHit,hit.m_Hit.m_HitPosition,remove))return deps;
             byte edgeStyle=EdgeUpgradePolicy.Style(_selected?.name);
             byte dividerStyle=LaneDividerPolicy.Style(_selected?.name);bool dividerTool=dividerStyle!=0;
             byte nodeCenterStyle=CenterlineUpgradePolicy.Style(_selected?.name);
@@ -114,7 +114,7 @@ namespace MedianGrassReplacement.Systems
                 var color=(nodeCenterStyle!=0?CenterlineUpgradePolicy.YellowPaint(nodeCenterStyle,Mod.Settings.YellowToolPaint):(dividerTool?LaneDividerPolicy.IsYellow(dividerStyle):EdgeUpgradePolicy.IsYellow(edgeStyle)))?new UnityEngine.Color(1,.8f,.15f,.9f):new UnityEngine.Color(1,1,1,.9f);
                 foreach(var path in nodePaths){if(EdgeUpgradePolicy.Paired(edgeStyle)){overlayNode.DrawCurve(color,NetUtils.OffsetCurveLeftSmooth(path,-emitter.EdgeSpacing(edgeStyle)),.12f);overlayNode.DrawCurve(color,NetUtils.OffsetCurveLeftSmooth(path,emitter.EdgeSpacing(edgeStyle)),.12f);}else overlayNode.DrawCurve(color,path,.12f);}
                 if(applyAction.WasPressedThisFrame()||remove){if(nodeVisibility)World.GetOrCreateSystemManaged<SegmentUpgradeSystem>().ApplyNode(lineTarget,_selected.name,remove);else if(nodeCenterStyle!=0)emitter.ApplyNodeCenter(lineTarget,nodeCenterStyle,remove);else if(edgeStyle!=0)emitter.ApplyEdge(lineTarget,true,true,edgeStyle,remove);else emitter.ApplyNodeDividers(lineTarget,remove,dividerStyle);}
-                return default;
+                return deps;
             }
             if(_selected?.name==StreetLightingSystem.AssetName&&StreetLightingSystem.TryLightTarget(EntityManager,EntityManager.HasComponent<Node>(hit.m_Hit.m_HitEntity)?hit.m_Hit.m_HitEntity:hit.m_Owner,out var lightTarget)&&EntityManager.HasComponent<Node>(lightTarget))
             {
@@ -122,13 +122,13 @@ namespace MedianGrassReplacement.Systems
                 var nodeOverlay=World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>().GetBuffer(out var nodePending);nodePending.Complete();
                 nodeOverlay.DrawCircle(new UnityEngine.Color(.3f,.8f,1,.8f),EntityManager.GetComponentData<Node>(lightTarget).m_Position,4f);
                 if(applyAction.WasPressedThisFrame()||remove)lights.ApplyNode(lightTarget,!remove);
-                return default;
+                return deps;
             }
-            if(!SectionUpgradeTargeting.TryRoad(EntityManager,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))return default;
+            if(!SectionUpgradeTargeting.TryRoad(EntityManager,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))return deps;
 
             for (int i = 0; i < 8 && !EntityManager.HasComponent<Road>(road) && EntityManager.HasComponent<Owner>(road); i++) road = EntityManager.GetComponentData<Owner>(road).m_Owner;
 
-            if (!EntityManager.HasComponent<Road>(road) || !EntityManager.HasComponent<Curve>(road) || EntityManager.HasComponent<Deleted>(road) || EntityManager.HasComponent<Temp>(road)) return default;
+            if (!EntityManager.HasComponent<Road>(road) || !EntityManager.HasComponent<Curve>(road) || EntityManager.HasComponent<Deleted>(road) || EntityManager.HasComponent<Temp>(road)) return deps;
 
             World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RetainPaintTarget(road);
             bool wear = _selected?.name == RoadSideUpgrades.DecalAsset;bool ban=_selected?.name==ParkingBanPolicy.AssetName;bool hideCenter=_selected?.name==CenterlineVisibility.AssetName;byte centerStyle=CenterlineUpgradePolicy.Style(_selected?.name);
@@ -148,36 +148,36 @@ namespace MedianGrassReplacement.Systems
                 }
             }
 
-            if(_selected?.name==RoadFeatureInspector.AssetName)return default;
+            if(_selected?.name==RoadFeatureInspector.AssetName)return deps;
             if (applyAction.WasPressedThisFrame() || remove)
 
             {
 
-                if(_selected?.name==ParkingHatchPolicy.AssetName||_selected?.name==ParkingHatchPolicy.Yellow){World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ApplyHatching(road,left,remove,_selected?.name==ParkingHatchPolicy.Yellow);UpgradeFeedback.Report(_selected.name,UpgradeFeedback.Text);return default;}
-                if(SegmentUpgradePolicy.Known(_selected?.name)) {World.GetOrCreateSystemManaged<SegmentUpgradeSystem>().Apply(road,_selected.name,remove);return default;}
-                if(edgeStyle!=0){World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ApplyEdge(road,false,left,edgeStyle,remove);return default;}
+                if(_selected?.name==ParkingHatchPolicy.AssetName||_selected?.name==ParkingHatchPolicy.Yellow){World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ApplyHatching(road,left,remove,_selected?.name==ParkingHatchPolicy.Yellow);UpgradeFeedback.Report(_selected.name,UpgradeFeedback.Text);return deps;}
+                if(SegmentUpgradePolicy.Known(_selected?.name)) {World.GetOrCreateSystemManaged<SegmentUpgradeSystem>().Apply(road,_selected.name,remove);return deps;}
+                if(edgeStyle!=0){World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().ApplyEdge(road,false,left,edgeStyle,remove);return deps;}
                 if(dividerTool)
                 {
                     var emitter=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
-                    if(!remove&&!emitter.TryDividerPlan(road,out _)){UpgradeFeedback.Report(_selected.name,"No adjacent same-direction traffic lanes on this section.");return default;}
+                    if(!remove&&!emitter.TryDividerPlan(road,out _)){UpgradeFeedback.Report(_selected.name,"No adjacent same-direction traffic lanes on this section.");return deps;}
                     World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(road);
                     if(!EntityManager.HasComponent<MGRLaneDivider>(road))EntityManager.AddComponent<MGRLaneDivider>(road);
                     EntityManager.SetComponentData(road,new MGRLaneDivider{Value=remove?(byte)2:dividerStyle});
                     CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
-                    UpgradeFeedback.Report(_selected.name,remove?"Interior lane lines removed; center and edge lines kept.":LaneDividerPolicy.Label(dividerStyle)+" applied; center and edge lines kept.");return default;
+                    UpgradeFeedback.Report(_selected.name,remove?"Interior lane lines removed; center and edge lines kept.":LaneDividerPolicy.Label(dividerStyle)+" applied; center and edge lines kept.");return deps;
                 }
                 if(centerStyle!=0)
                 {
                     World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(road);
                     byte old=CenterlineUpgradePolicy.Mode(EntityManager,road);
-                    if(!remove&&!World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().TryCenterUpgradePlan(road,centerStyle,out _,out var reason)){UpgradeFeedback.Report(_selected.name,reason);return default;}
+                    if(!remove&&!World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().TryCenterUpgradePlan(road,centerStyle,out _,out var reason)){UpgradeFeedback.Report(_selected.name,reason);return deps;}
                     byte next=remove?CenterlineUpgradePolicy.Removed:centerStyle;
                     if(next!=old){if(next==0)EntityManager.RemoveComponent<MGRCenterlineStyle>(road);else {if(!EntityManager.HasComponent<MGRCenterlineStyle>(road))EntityManager.AddComponent<MGRCenterlineStyle>(road);EntityManager.SetComponentData(road,new MGRCenterlineStyle{Value=next});}}
                     if(EntityManager.HasComponent<MGRHideCenterline>(road))EntityManager.RemoveComponent<MGRHideCenterline>(road);
                     CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
-                    UpgradeFeedback.Report(_selected.name,remove?"Centerline removed. Use Restore line defaults to restore native markings.":CenterlineUpgradePolicy.Pattern(centerStyle)==2?"Double centerline replacement queued.":"Single centerline replacement queued.");return default;
+                    UpgradeFeedback.Report(_selected.name,remove?"Centerline removed. Use Restore line defaults to restore native markings.":CenterlineUpgradePolicy.Pattern(centerStyle)==2?"Double centerline replacement queued.":"Single centerline replacement queued.");return deps;
                 }
-                if(_selected?.name==StreetLightingSystem.AssetName){World.GetOrCreateSystemManaged<StreetLightingSystem>().Apply(road,!remove);return default;}
+                if(_selected?.name==StreetLightingSystem.AssetName){World.GetOrCreateSystemManaged<StreetLightingSystem>().Apply(road,!remove);return deps;}
                 if(hideCenter)
                 {
                     if(!remove&&EntityManager.HasComponent<MGRCenterlineStyle>(road))EntityManager.RemoveComponent<MGRCenterlineStyle>(road);
@@ -187,7 +187,7 @@ namespace MedianGrassReplacement.Systems
                         if(remove)EntityManager.RemoveComponent<MGRHideCenterline>(road);else EntityManager.AddComponent<MGRHideCenterline>(road);
                         CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
                     }
-                    return default;
+                    return deps;
                 }
                 if(ban)
                 {
@@ -199,10 +199,10 @@ namespace MedianGrassReplacement.Systems
                         if(next==0)EntityManager.RemoveComponent<MGRParkingBanSides>(road);
                         else {if(!EntityManager.HasComponent<MGRParkingBanSides>(road))EntityManager.AddComponent<MGRParkingBanSides>(road);EntityManager.SetComponentData(road,new MGRParkingBanSides{Mask=next});}
                         
-                        FixedParkingSystem.QueueRoad(road);CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
+                        FixedParkingSystem.QueueRoad(World,road);CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
                     }
                     UpgradeFeedback.Report(_selected.name,remove?"No parking removed on this side; prior parking style restored.":"No parking applied on this side; bay parking is suspended here.");
-                    return default;
+                    return deps;
                 }
 
                 if(_selected?.name==VisualPowerlineSystem.AssetName)
@@ -226,7 +226,7 @@ namespace MedianGrassReplacement.Systems
                     }
 
                     if(remove&&next==old)World.GetOrCreateSystemManaged<VisualPowerlineSystem>().QueueRoad(road,true);
-                    return default;
+                    return deps;
 
                 }
 
@@ -251,7 +251,7 @@ namespace MedianGrassReplacement.Systems
                     // the user frees capacity or changes the decal budget.
                     if(sides!=oldSides||!remove)World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);
                     UpgradeFeedback.Report(_selected.name,Mod.Settings.DecalsBothSides?"Road wear targets both roadsides.":"Road wear targets the highlighted roadside.");
-                    return default;
+                    return deps;
 
                 }
 
@@ -289,13 +289,13 @@ namespace MedianGrassReplacement.Systems
 
                     }
 
-                    DecalVisibilitySystem.QueueRoad(road);
+                    DecalVisibilitySystem.QueueRoad(World,road);
 
                 }
 
             }
 
-            return default;
+            return deps;
 
         }
 

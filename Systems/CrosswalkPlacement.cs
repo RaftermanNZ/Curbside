@@ -114,6 +114,9 @@ namespace MedianGrassReplacement.Systems
 
         }
 
+        internal static bool TryFiniteIntersection(Bezier4x3 line, Bezier4x3 curb, out float t)
+            => FiniteIntersection(line, Sample(curb), out t);
+
         private static float2[] Sample(Bezier4x3 curve) { var points = new float2[65]; for (int i = 0; i <= 64; i++) points[i] = MathUtils.Position(curve, i / 64f).xz; return points; }
 
         private static bool FiniteIntersection(Bezier4x3 line, float2[] curb, out float t)

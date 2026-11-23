@@ -1,3 +1,15 @@
+# Curbside 0.6.3
+
+- Added a preview setting for road and building tools. Vanilla previews are the default. Experimental Curbside previews can show saved signals, crosswalk styles and line visibility where supported. Both modes support the same upgrades.
+- Switching preview modes clears Curbside's temporary visuals and refreshes the active preview.
+- Improved line-style crosswalk ends and junction edge lines where the road's curb geometry can be resolved.
+- Applying a Curbside traffic-light style clears conflicting vanilla traffic controls and preserves saved Curbside stop and yield choices.
+- Removed the in-game diagnostics panel, recording, screenshots, snapshot export and test-save controls.
+
+Experimental previews can still differ from the placed result at some junctions.
+
+---
+
 # Curbside 0.6.2
 
 This is an icon-packaging hotfix based directly on 0.6.1.

@@ -519,5 +519,8 @@
   "upgrades": "upgrades",
   "− Applied upgrades": "− Applied upgrades",
   "− Diagnostics": "− Diagnostics",
-  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Apply road and sidewalk textures to assets and surfaces (Experimental)"
+  "Apply road and sidewalk textures to assets and surfaces (Experimental)": "Apply road and sidewalk textures to assets and surfaces (Experimental)",
+  "Tool previews": "Tool previews",
+  "Vanilla previews (performance)": "Vanilla previews (performance)",
+  "Curbside previews": "Curbside previews"
 }

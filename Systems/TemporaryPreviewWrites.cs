@@ -99,9 +99,7 @@ namespace MedianGrassReplacement.Systems
                     // light allocation or pose and requests no extra refresh.
                     if (delta != 0)
                     {
-                        if (!manager.HasComponent<Updated>(actor)) commands.AddComponent<Updated>(actor);
-                        if (!manager.HasComponent<BatchesUpdated>(actor)) commands.AddComponent<BatchesUpdated>(actor);
-                        if (!manager.HasComponent<EffectsUpdated>(actor)) commands.AddComponent<EffectsUpdated>(actor);
+                        NativeVisualInvalidation.QueuePreviewRefresh(manager, commands, actor);
                     }
                     changed++;
                 }

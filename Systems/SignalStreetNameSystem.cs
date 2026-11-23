@@ -176,7 +176,7 @@ namespace MedianGrassReplacement.Systems
         private void UpdateNames()
         {
             if(labels.Count==0||Mod.Saving||UnityEngine.Time.realtimeSinceStartup<next)return;next=UnityEngine.Time.realtimeSinceStartup+2;
-            Dependency.Complete();epoch++;removed.Clear();var camera=World.GetOrCreateSystemManaged<Game.Rendering.CameraUpdateSystem>().activeCamera;
+            { CompleteDependency(); Dependency = default; }epoch++;removed.Clear();var camera=World.GetOrCreateSystemManaged<Game.Rendering.CameraUpdateSystem>().activeCamera;
             // Remove invalid owners before touching the shared font/atlas or rebuilding letters.
             foreach(var item in labels)
             {

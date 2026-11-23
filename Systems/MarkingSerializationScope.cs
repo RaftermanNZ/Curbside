@@ -57,6 +57,9 @@ namespace MedianGrassReplacement.Systems
         {
             if (!MarkingRetention.Active) return;
             NativeVisualInvalidation.CompleteReaders(World);
+            // This entry is registered after native BeginPrefabSerialization.
+            // The early ticket, actor exclusions and native data remain frozen.
+            MarkingRetention.NativePrefabSerialization = true;
             ValidateMarkingRetention();
             foreach (var actor in serializationExcludedMarkings)
             {

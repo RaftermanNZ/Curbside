@@ -18,10 +18,15 @@ namespace MedianGrassReplacement.Systems
         internal void BeginBatch(EntityManager manager, EntityQuery objectReaders, EntityQuery laneReaders,
             bool supported, int frame, ulong selection, Func<Entity, bool> interested)
         {
-            // Idle gaps and version wrap are cold starts. No independent sweep
-            // is needed to prune old tools, saves, entity identities or roots.
+            // Load/world reset, backwards frame clocks and version wrap are
+            // cold starts. Ordinary quiet gaps do not invalidate buffer data:
+            // the next requested visit still checks readiness, entity identity,
+            // chunk/order/data stamps and managed selection revisions.
             uint version = manager.GlobalSystemVersion;
-            if (!haveFrame || frame < previousFrame || frame - previousFrame > 1 || version < previousVersion) Reset();
+            // Bound history across long unobserved periods, including a possible
+            // whole uint version cycle between requests. This is a cold-start
+            // hint only; every short-gap hit still requires the native proof.
+            if (!haveFrame || frame < previousFrame || frame - previousFrame > 256 || version < previousVersion) Reset();
             previousFrame = frame; previousVersion = version; haveFrame = true;
             objects.BeginBatch(manager, objectReaders, supported, selection, interested);
             lanes.BeginBatch(manager, laneReaders, supported, selection, interested);
@@ -39,7 +44,7 @@ namespace MedianGrassReplacement.Systems
 
     internal sealed class PreviewBufferList<T> where T : unmanaged, IBufferElementData
     {
-        internal const int Slots = 64;
+        internal const int Slots = 256;
         internal const int MinimumChildren = 16;
         internal const int MaximumChildren = 512;
         internal const int ChangedVisitBypass = 16;

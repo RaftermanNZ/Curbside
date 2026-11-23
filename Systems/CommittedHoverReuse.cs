@@ -67,13 +67,13 @@ namespace MedianGrassReplacement.Systems
                     || !MarkingPreviewPolicy.SameCurve(EntityManager.GetComponentData<Curve>(stroke.Actor).m_Bezier, stroke.Curve)
                     || !EntityManager.HasComponent<NetLaneArchetypeData>(stroke.Prefab)
                     || !EntityManager.GetComponentData<NetLaneArchetypeData>(stroke.Prefab).m_LaneArchetype.Valid) return false;
-            aliases[lane] = native;
-            TemporaryPreviewWrites.QueueLanePrefab(writes, lane, current, HiddenDefinition(native));
+            HideNativePreview(lane, current, native);
             return true;
         }
 
         private void RestoreAlias(Entity lane)
         {
+            visibility.Release(lane);
             if (!aliases.TryGetValue(lane, out var native)) return;
             if (Alive(lane) && EntityManager.HasComponent<PrefabRef>(lane)
                 && reverse.TryGetValue(EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab, out var original) && original == native)
@@ -114,8 +114,7 @@ namespace MedianGrassReplacement.Systems
                     EntityManager.GetComponentData<Owner>(lane).m_Owner, binding.PreviewOwner,
                     native, binding.Native, EntityManager.GetComponentData<Curve>(binding.Source).m_Bezier, binding.SourceCurve,
                     EntityManager.GetComponentData<Curve>(lane).m_Bezier, binding.PreviewCurve)) return false;
-            aliases[lane] = native;
-            TemporaryPreviewWrites.QueueLanePrefab(writes, lane, current, HiddenDefinition(native));
+            HideNativePreview(lane, current, native);
             return true;
         }
 

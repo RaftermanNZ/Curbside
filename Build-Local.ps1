@@ -31,9 +31,13 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'obj\Release\net48\MedianGrassReplacement.dll'),(Join-Path $PSScriptRoot 'obj\Release\net48\MedianGrassReplacement.pdb') -Destination $stage
 
+$dependencies = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'Dependencies') -Filter '*.dll' -File
+$dependencies | Copy-Item -Destination $stage -Force
+
 $postArgs = @('PostProcess',(Join-Path $stage 'MedianGrassReplacement.dll'),'-u',$unity,'-p','Windows','-d')
 
 foreach ($reference in Get-ChildItem -LiteralPath $managed -Filter '*.dll') { $postArgs += @('-r',$reference.FullName) }
+foreach ($reference in $dependencies) { $postArgs += @('-r',$reference.FullName) }
 
 $quotedArgs = ($postArgs | ForEach-Object { '"' + $_.Replace('"','\"') + '"' }) -join ' '
 
@@ -81,6 +85,7 @@ Get-ChildItem -LiteralPath $stage -File | Where-Object Extension -in '.dll','.pd
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UI\build\curbside.mjs') -Destination $OutputFolder -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UI\build\curbside.css') -Destination $OutputFolder -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UI\build\curbside.mjs.LICENSE.txt') -Destination $OutputFolder -Force
 
 Write-Output "Windows test build ready: $OutputFolder. Installed mod was not replaced."
 

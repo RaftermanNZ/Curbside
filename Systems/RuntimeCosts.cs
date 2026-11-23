@@ -12,7 +12,7 @@ namespace ModDiagnostics
         internal static long Begin()=>TraceBuffer.Enabled?Stopwatch.GetTimestamp():0;
         internal static void End(string name,long start)
         {
-            if(start==0||!TraceBuffer.Enabled)return;long end=Stopwatch.GetTimestamp();long ticks=end-start;
+            if(start==0||!TraceBuffer.Enabled)return;long end=Stopwatch.GetTimestamp();if(!RuntimeCostEvents.Accepts(start,end))return;long ticks=end-start;
             RuntimeCostEvents.Record(FrameNumber?.Invoke()??-1,name,start,end);
             if(!Costs.TryGetValue(name,out var cost))Costs[name]=cost=new Cost();cost.Count++;cost.Ticks+=ticks;if(ticks>cost.Maximum)cost.Maximum=ticks;
             double ms=ticks*(1000d/Stopwatch.Frequency);

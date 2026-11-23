@@ -8,7 +8,13 @@ namespace MedianGrassReplacement.Systems
 
     {
 
-        protected override void OnUpdate() {World.GetOrCreateSystemManaged<NativeCrosswalkResetSystem>().CaptureCrosswalkInput();}
+        protected override void OnCreate() { base.OnCreate(); Enabled = false; }
+        protected override void OnUpdate()
+        {
+            if (Mod.Saving) return;
+            try { World.GetExistingSystemManaged<CrosswalkUpgradeSystem>()?.ApplyPendingNativeMode(); }
+            finally { Enabled = false; }
+        }
 
     }
 

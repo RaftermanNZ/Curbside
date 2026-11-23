@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Game;
 using Game.Common;
 using Game.Net;
@@ -14,25 +15,79 @@ namespace MedianGrassReplacement.Systems
     {
         internal static void RetireSaveBatch(World world,NativeArray<Entity> entities)
         {
+            RetireSaveBatch(world, entities, world.GetExistingSystemManaged<VisualLifecycleSystem>()?.LaneOwners);
+        }
+
+        // A null history means the caller owns release of all recorded IDs.
+        // Preview cleanup also has already-destroyed actors outside this array.
+        internal static void RetireSaveBatch(World world, NativeArray<Entity> entities, GeneratedLaneOwnerHistory historyToRelease)
+        {
+            UnregisterBatch(world, entities);
+            MarkRetiredBatch(world, entities, historyToRelease);
+        }
+
+        private static void UnregisterBatch(World world, NativeArray<Entity> entities)
+        {
             var em=world.EntityManager;
             // Finish both tree-access scopes before structural changes. The
             // entity array is an owned snapshot, not an ECS buffer/chunk view.
-            var objects=world.GetExistingSystemManaged<Game.Objects.SearchSystem>();
+            int firstObject = 0;
+            while (firstObject < entities.Length && (!em.Exists(entities[firstObject]) || !em.HasComponent<Game.Objects.Transform>(entities[firstObject]))) firstObject++;
+            var objects=firstObject < entities.Length ? world.GetExistingSystemManaged<Game.Objects.SearchSystem>() : null;
             if(objects!=null)
             {
                 var tree=objects.GetStaticSearchTree(false,out var jobs);jobs.Complete();
-                foreach(var entity in entities)if(em.Exists(entity)&&em.HasComponent<Game.Objects.Transform>(entity))tree.TryRemove(entity);
+                for (int i = firstObject; i < entities.Length; i++)
+                    if (em.Exists(entities[i]) && em.HasComponent<Game.Objects.Transform>(entities[i])) tree.TryRemove(entities[i]);
             }
-            var lanes=world.GetExistingSystemManaged<Game.Net.SearchSystem>();
+            int firstLane = 0;
+            while (firstLane < entities.Length && (!em.Exists(entities[firstLane]) || !em.HasComponent<Game.Net.Lane>(entities[firstLane]))) firstLane++;
+            var lanes=firstLane < entities.Length ? world.GetExistingSystemManaged<Game.Net.SearchSystem>() : null;
             if(lanes!=null)
             {
                 var tree=lanes.GetLaneSearchTree(false,out var jobs);jobs.Complete();
-                foreach(var entity in entities)if(em.Exists(entity)&&em.HasComponent<Game.Net.Lane>(entity))tree.TryRemove(entity);
+                for (int i = firstLane; i < entities.Length; i++)
+                    if (em.Exists(entities[i]) && em.HasComponent<Game.Net.Lane>(entities[i])) tree.TryRemove(entities[i]);
             }
+        }
+
+        private static void MarkRetiredBatch(World world, NativeArray<Entity> entities, GeneratedLaneOwnerHistory historyToRelease)
+        {
+            var em = world.EntityManager;
             using(var deleted=new NativeList<Entity>(entities.Length,Allocator.Temp))
             {
-                foreach(var entity in entities){world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);if(em.Exists(entity)&&!em.HasComponent<Deleted>(entity))deleted.Add(entity);}
+                var cleanup = world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>();
+                foreach(var entity in entities){cleanup?.Untrack(entity);if(em.Exists(entity)&&!em.HasComponent<Deleted>(entity))deleted.Add(entity);}
                 if(deleted.Length>0)em.AddComponent(deleted.AsArray(),ComponentType.ReadWrite<Deleted>());
+            }
+            if (historyToRelease != null) foreach (var entity in entities) historyToRelease.Forget(entity);
+        }
+
+        // FlushPending already completed culling/effect readers. Use an owned ID
+        // snapshot, finish both search-tree scopes, detach grouped memberships,
+        // then tag Deleted. No borrowed view survives a structural change.
+        internal static void RetireQueuedBatch(World world, HashSet<Entity> queued, GeneratedLaneOwnerHistory history)
+        {
+            if (queued.Count == 0) return;
+            if (queued.Count == 1)
+            {
+                foreach (var entity in queued) RetireNow(world, entity);
+                return;
+            }
+            var manager = world.EntityManager;
+            var save = Mod.Saving ? world.GetExistingSystemManaged<GeneratedVisualSaveSystem>() : null;
+            using (var actors = new NativeList<Entity>(queued.Count, Allocator.Temp))
+            {
+                foreach (var entity in queued)
+                {
+                    if (Mod.Saving && manager.Exists(entity) && save?.CompletedEarlyRetirement(entity) == true) continue;
+                    actors.Add(entity);
+                }
+                if (actors.Length == 0) return;
+                var snapshot = actors.AsArray();
+                UnregisterBatch(world, snapshot);
+                DetachSaveLanes(world, snapshot);
+                MarkRetiredBatch(world, snapshot, history);
             }
         }
 
@@ -63,7 +118,9 @@ namespace MedianGrassReplacement.Systems
         internal static void Retire(World world, Entity entity)
         {
             world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
-            if(world.EntityManager.Exists(entity))world.GetExistingSystemManaged<VisualLifecycleSystem>()?.Retire(entity);
+            // A foreign deletion can leave recorded membership to detach even
+            // after the actor itself is gone. Keep its exact entity version.
+            world.GetExistingSystemManaged<VisualLifecycleSystem>()?.Retire(entity);
         }
 
         internal static void RetireDefinition(World world, Entity entity, Entity original)
@@ -76,28 +133,30 @@ namespace MedianGrassReplacement.Systems
         internal static void RetireNow(World world, Entity entity)
         {
             var manager = world.EntityManager;
-            if (!manager.Exists(entity)) return;
+            var history = world.GetExistingSystemManaged<VisualLifecycleSystem>()?.LaneOwners;
+            if (!manager.Exists(entity))
+            {
+                DetachGeneratedLaneMembership(world, entity, history);
+                history?.Forget(entity);
+                return;
+            }
             if (Mod.Saving && world.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.CompletedEarlyRetirement(entity) == true) return;
             world.GetExistingSystemManaged<GeneratedPaintOwnerCleanupSystem>()?.Untrack(entity);
             Unregister(world, entity);
             manager.CompleteAllTrackedJobs();
             // A generated lane can have been picked up by a native reference
             // pass. Remove that membership too, before the child is destroyed.
-            if (manager.HasComponent<Lane>(entity) && manager.HasComponent<Owner>(entity))
-            {
-                var owner = manager.GetComponentData<Owner>(entity).m_Owner;
-                if (manager.Exists(owner) && manager.HasBuffer<Game.Net.SubLane>(owner))
-                {
-                    DetachLaneMembership(manager, owner, entity);
-                }
-            }
+            DetachGeneratedLaneMembership(world, entity, history);
             if (!manager.HasComponent<Deleted>(entity)) manager.AddComponent<Deleted>(entity);
+            history?.Forget(entity);
         }
     }
 
     public partial class GeneratedVisualRegistrationSystem : GameSystemBase
     {
         private EntityQuery pending, spatial;
+        private static readonly ComponentTypeSet RegistrationFlags = new ComponentTypeSet(
+            ComponentType.ReadWrite<Created>(), ComponentType.ReadWrite<Updated>());
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -108,8 +167,15 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             if(Mod.Saving)return;
+            World.GetExistingSystemManaged<NativeCrosswalkDragSystem>()?.PublishPreview();
+            World.GetExistingSystemManaged<NativeSignalProjectionSystem>()?.RunIfWork();
+            World.GetExistingSystemManaged<NativePaintProjectionSystem>()?.RunIfWork();
+            // Complete native crossing-key handoff before committed marking readers.
+            // No pending handoff means a managed count check only.
+            World.GetExistingSystemManaged<CrosswalkVisualSystem>()?.FinishNetworkRefresh();
             World.GetOrCreateSystemManaged<VisualLifecycleSystem>().RepairDefinitionReferences();
-            Dependency.Complete();
+            if(pending.IsEmptyIgnoreFilter&&spatial.IsEmptyIgnoreFilter)return;
+            { CompleteDependency(); Dependency = default; }
             using (var entities = pending.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
             {
                 if (EntityManager.HasComponent<Owner>(entity))
@@ -122,8 +188,11 @@ namespace MedianGrassReplacement.Systems
                     }
                 }
                 GeneratedVisualLifecycle.Unregister(World, entity);
-                if (!EntityManager.HasComponent<Created>(entity)) EntityManager.AddComponent<Created>(entity);
-                if (!EntityManager.HasComponent<Updated>(entity)) EntityManager.AddComponent<Updated>(entity);
+                bool created = EntityManager.HasComponent<Created>(entity);
+                bool updated = EntityManager.HasComponent<Updated>(entity);
+                if (!created && !updated) EntityManager.AddComponent(entity, RegistrationFlags);
+                else if (!created) EntityManager.AddComponent<Created>(entity);
+                else if (!updated) EntityManager.AddComponent<Updated>(entity);
                 EntityManager.RemoveComponent<MGRPendingVisualRegistration>(entity);
             }
             using (var entities = spatial.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
@@ -142,7 +211,7 @@ namespace MedianGrassReplacement.Systems
         private readonly System.Collections.Generic.HashSet<Entity> earlyRetired = new System.Collections.Generic.HashSet<Entity>();
         internal void PrepareBeforeSaveFrame()
         {
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             earlyRetired.Clear();
             ClearEarlyCompletion();
             BeginMarkingRetention();
@@ -181,7 +250,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate(){}
         public void PreSerialize(Colossal.Serialization.Entities.Context context)
         {
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             // Keep the final sweep for late visuals and actors revived since
             // early retirement. Only skip IDs we retired and still own as Deleted.
             ValidateMarkingRetention();
@@ -220,7 +289,7 @@ namespace MedianGrassReplacement.Systems
         }
         protected override void OnUpdate()
         {
-            if(Mod.Saving)return;Dependency.Complete();
+            if(Mod.Saving)return;{ CompleteDependency(); Dependency = default; }
             using(var entities=_deleted.ToEntityArray(Allocator.Temp))foreach(var entity in entities)GeneratedVisualLifecycle.Retire(World,entity);
         }
     }

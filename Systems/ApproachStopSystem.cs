@@ -32,14 +32,14 @@ namespace MedianGrassReplacement.Systems
     {
         private static readonly ComponentType[] ApproachChanges={ComponentType.ReadOnly<Game.Net.SubLane>(),ComponentType.ReadOnly<ConnectedEdge>()};
 
-        private EntityQuery _nodes,_changedRoads;
+        private EntityQuery _nodes,_updatedNodes,_changedRoads;
         private bool _initial=true;
         private readonly Dictionary<Entity,CarLaneFlags> _original=new Dictionary<Entity,CarLaneFlags>();
         private readonly Dictionary<Entity,CarLaneFlags> _applied=new Dictionary<Entity,CarLaneFlags>();
         private void Forget(Entity entity){_original.Remove(entity);_applied.Remove(entity);}
         private readonly HashSet<Entity> _queued=new HashSet<Entity>();
         internal void Queue(Entity node){_queued.Add(node);}
-        protected override void OnCreate(){base.OnCreate();_nodes=GetEntityQuery(ComponentType.ReadOnly<MGRStopApproach>(),ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.ReadOnly<Game.Net.SubLane>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());_changedRoads=GetEntityQuery(ComponentType.ReadOnly<Road>(),ComponentType.ReadOnly<Edge>(),ComponentType.ReadOnly<Updated>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());}
+        protected override void OnCreate(){base.OnCreate();_nodes=GetEntityQuery(ComponentType.ReadOnly<MGRStopApproach>(),ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.ReadOnly<Game.Net.SubLane>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());_updatedNodes=GetEntityQuery(ComponentType.ReadOnly<MGRStopApproach>(),ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<Updated>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());_changedRoads=GetEntityQuery(ComponentType.ReadOnly<Road>(),ComponentType.ReadOnly<Edge>(),ComponentType.ReadOnly<Updated>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());}
         protected override void OnGamePreload(Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);_original.Clear();_applied.Clear();_queued.Clear();_initial=true;}
         protected override void OnGameLoadingComplete(Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);_initial=true;}
         internal static float3 Away(EntityManager em,Entity road,Entity node)
@@ -50,7 +50,7 @@ namespace MedianGrassReplacement.Systems
         }
         public void PreSerialize(Context context)
         {
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             foreach(var pair in _original)if(EntityManager.HasComponent<Game.Net.CarLane>(pair.Key)&&!EntityManager.HasComponent<Deleted>(pair.Key))
             {var lane=EntityManager.GetComponentData<Game.Net.CarLane>(pair.Key);if(!_applied.TryGetValue(pair.Key,out var applied)||!ApproachStopPolicy.OwnsPriority(lane.m_Flags,applied))continue;lane.m_Flags=(lane.m_Flags&~ApproachStopPolicy.Mask)|pair.Value;EntityManager.SetComponentData(pair.Key,lane);}
             _original.Clear();_applied.Clear();_initial=true;
@@ -58,7 +58,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnDestroy(){PreSerialize(default);base.OnDestroy();}
         internal void ResetApproach(Entity road,Entity node)
         {
-            Dependency.Complete();if(!EntityManager.HasBuffer<MGRStopApproach>(node))return;
+            { CompleteDependency(); Dependency = default; }if(!EntityManager.HasBuffer<MGRStopApproach>(node))return;
             if(EntityManager.HasBuffer<Game.Net.SubLane>(node))foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))
             {
                 var lane=entry.m_SubLane;if(!EntityManager.HasComponent<Game.Net.Lane>(lane)||!EntityManager.HasComponent<Game.Net.CarLane>(lane)||EntityManager.GetComponentData<Game.Net.Lane>(lane).m_StartNode.GetOwnerIndex()!=road.Index||!_original.TryGetValue(lane,out var flags))continue;
@@ -83,19 +83,20 @@ namespace MedianGrassReplacement.Systems
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_Start))_queued.Add(edge.m_Start);
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_End))_queued.Add(edge.m_End);
             }
+            using(var nodes=_updatedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
             if(!_initial)_nodes.SetChangedVersionFilter(ApproachChanges);
             using(var nodes=_nodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
             _nodes.ResetFilter();_initial=false;
             if(_queued.Count==0)return;
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             foreach(var node in _queued)
             {
-                if(!EntityManager.HasBuffer<MGRStopApproach>(node)||!EntityManager.HasBuffer<Game.Net.SubLane>(node)||!EntityManager.HasBuffer<ConnectedEdge>(node))continue;
+                if(EntityManager.HasComponent<Deleted>(node)||EntityManager.HasComponent<Game.Tools.Temp>(node)||!EntityManager.HasBuffer<MGRStopApproach>(node)||!EntityManager.HasBuffer<Game.Net.SubLane>(node)||!EntityManager.HasBuffer<ConnectedEdge>(node))continue;
                 bool nativeAllWay=EntityManager.HasComponent<Upgraded>(node)&&(EntityManager.GetComponentData<Upgraded>(node).m_Flags.m_General&CompositionFlags.General.AllWayStop)!=0;
                 if(EntityManager.HasComponent<TrafficLights>(node)||nativeAllWay)
                 {
                     foreach(var lane in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))Forget(lane.m_SubLane);
-                    if(nativeAllWay)EntityManager.RemoveComponent<MGRStopApproach>(node);
+                    // Native controls take precedence while active. Keep saved approach choices for when they are removed.
                     continue;
                 }
                 var choices=EntityManager.GetBuffer<MGRStopApproach>(node,true);

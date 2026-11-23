@@ -250,6 +250,7 @@ namespace MedianGrassReplacement.Systems
                     // Capture intent independently of tool-list ordering; hand off only after
                     // ActivatePrefabTool has finished its selection loop.
                     _pendingNativeMode=prefab.name==LineName?(byte)1:(byte)2;
+                    World.GetOrCreateSystemManaged<InvisibleCrosswalkInputSystem>().Enabled=true;
                     CrossingStatus="Crosswalk appearance selected; preparing native crossing tool.";
                     return;
                 }
@@ -275,6 +276,8 @@ namespace MedianGrassReplacement.Systems
         {
 
             if (NativeCrosswalkPrefab == null) return false;
+            if ((line || invisible) && World.GetExistingSystemManaged<NativeCrosswalkDragSystem>()?.Ready != true)
+            { CrossingStatus="Native crosswalk appearance upgrades are unavailable on this game runtime."; return false; }
 
             _launchingNative = true;
 
@@ -287,6 +290,7 @@ namespace MedianGrassReplacement.Systems
                 var native=World.GetOrCreateSystemManaged<NetToolSystem>();
                 var activated = native.TrySetPrefab(NativeCrosswalkPrefab);
                 if(activated)_tools.activeTool=native;
+                if(activated)_tools.RequireFullUpdate(); // Mode-only changes still need one native producer event.
 
                 if (!activated) { NativeLineMode = false; NativeInvisibleMode = false; }
 

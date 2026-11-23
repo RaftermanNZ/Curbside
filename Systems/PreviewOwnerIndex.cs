@@ -11,6 +11,7 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<Entity, HashSet<Entity>> owners = new Dictionary<Entity, HashSet<Entity>>();
         private readonly HashSet<Entity> selected = new HashSet<Entity>();
         internal ulong Revision { get; private set; }
+        internal int Count => owners.Count;
 
         // Matches the two ways Select can find an actor: a tracked actor key,
         // or a native/source owner key. No native state is retained here.
@@ -66,6 +67,18 @@ namespace MedianGrassReplacement.Systems
                     foreach (var actor in values) if (selected.Add(actor)) output.Add(actor);
             }
             selected.Clear();
+        }
+
+        // A single owner already has unique members. Avoid an input array,
+        // enumerable interface and a second deduplication set for this case.
+        internal void Select(Entity key, List<Entity> output)
+        {
+            output.Clear();
+            bool includesKey = owners.ContainsKey(key);
+            if (includesKey) output.Add(key);
+            if (actors.TryGetValue(key, out var values))
+                foreach (var actor in values)
+                    if (!includesKey || actor != key) output.Add(actor);
         }
 
         internal void Clear() { actors.Clear(); owners.Clear(); selected.Clear(); unchecked { Revision++; } }

@@ -58,6 +58,7 @@ namespace MedianGrassReplacement
             if(start)
             {
                 if(world!=null&&world.IsCreated)world.GetExistingSystemManaged<SaveRecoverySystem>()?.Observe();
+                if(world!=null&&world.IsCreated)world.GetExistingSystemManaged<TemporaryPaintVisibilitySystem>()?.RestoreAll();
                 SignalSaveAnimationGuard.Begin(world);
                 if(world!=null&&world.IsCreated)world.GetOrCreateSystemManaged<GeneratedVisualSaveSystem>().PrepareBeforeSaveFrame();
             }
@@ -82,6 +83,19 @@ namespace MedianGrassReplacement
         {
 
             AppDomain.CurrentDomain.SetData("Curbside.Active.v1",true);Log.Info("Loading The Curbside Mod "+BuildIdentity.Label+".");
+
+            CurbsideReadPhase.Initialize(updateSystem.World);
+            if (NativeSignalProjectionSystem.Supported)
+            {
+                updateSystem.World.GetOrCreateSystemManaged<NativeCrosswalkDragSystem>();
+                updateSystem.World.GetOrCreateSystemManaged<NativeSignalProjectionSystem>();
+                updateSystem.World.GetOrCreateSystemManaged<NativePaintProjectionSystem>();
+                updateSystem.UpdateBefore<NativeProjectionBoundarySystem, Game.Tools.ToolApplySystem>(SystemUpdatePhase.ApplyTool);
+                updateSystem.UpdateBefore<NativeProjectionBoundarySystem, Game.Tools.ToolClearSystem>(SystemUpdatePhase.ClearTool);
+                updateSystem.UpdateBefore<NativeApproachStopPreviewSystem, Game.Objects.SecondaryObjectSystem>(SystemUpdatePhase.Modification4B);
+                updateSystem.UpdateAfter<NativeApproachStopPreviewRestoreSystem, Game.Net.SecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
+            }
+            Log.Info("Native preview preservation: Vanilla previews are the default; native changed-actor signal and paint projection. Explicit saved preview preferences are retained. Legacy cosmetic consumers remain disabled.");
 
 
 
@@ -189,6 +203,7 @@ namespace MedianGrassReplacement
             updateSystem.UpdateBefore<VisualPowerlineSystem,Game.Common.ModificationBarrier4B>(SystemUpdatePhase.Modification4B);
 
             updateSystem.UpdateBefore<GeneratedVisualRegistrationSystem,Game.Objects.SearchSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateBefore<GeneratedVisualRegistrationSystem,CurbLineEmissionSystem>(SystemUpdatePhase.Modification5);
 
 
             WorldToolSetup(updateSystem);
@@ -201,16 +216,8 @@ namespace MedianGrassReplacement
 
             updateSystem.UpdateAfter<MedianMaterialSystem, RoadGrassCompositionTriggerSystem>(SystemUpdatePhase.Rendering);
 
-            updateSystem.UpdateBefore<CrosswalkPreviewRestoreSystem,Game.Tools.ApplyNetSystem>(SystemUpdatePhase.ApplyTool);
             // Object placement commits before ApplyNetSystem too. Restore all
             // temporary cosmetic refs once, before the native apply phase starts.
-            updateSystem.UpdateBefore<SignalPreviewRestoreSystem,Game.Tools.ToolApplySystem>(SystemUpdatePhase.ApplyTool);
-            updateSystem.UpdateBefore<SignalPreviewSystem,Game.Objects.SubObjectHiddenSystem>(SystemUpdatePhase.Modification5);
-            updateSystem.UpdateAt<CrosswalkAppearancePreviewSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAfter<DecalHoverPreviewSystem,CrosswalkAppearancePreviewSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateBefore<PreviewRefreshRestoreSystem,Game.Objects.SubObjectSystem>(SystemUpdatePhase.Modification2B);
-            updateSystem.UpdateBefore<PreviewPaintInheritanceSystem,Game.Net.InitializeSystem>(SystemUpdatePhase.Modification5);
-            updateSystem.UpdateAfter<CrosswalkPreviewSystem,IntersectionPaintSystem>(SystemUpdatePhase.PreCulling);
             
             // Restore matching keys after native geometry, before components/
             // lane production. Another mod's before-Lane sibling otherwise has
@@ -226,8 +233,6 @@ namespace MedianGrassReplacement
             updateSystem.UpdateBefore<JunctionMarkingSystem, Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
             updateSystem.UpdateAfter<IntersectionPaintSystem, JunctionMarkingSystem>(SystemUpdatePhase.PreCulling);
-            updateSystem.UpdateAfter<MarkingPreviewSystem,CrosswalkPreviewSystem>(SystemUpdatePhase.PreCulling);
-            updateSystem.UpdateBefore<MarkingPreviewRestoreSystem,Game.Tools.ToolSystem>(SystemUpdatePhase.MainLoop);
             updateSystem.UpdateBefore<VisualMutationBoundarySystem,Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
 
             
@@ -274,7 +279,6 @@ namespace MedianGrassReplacement
             var decals = world.GetOrCreateSystemManaged<DecalUpgradeTool>(); tools.Remove(decals); tools.Insert(0, decals);
 
             updateSystem.UpdateAt<DecalUpgradeTool>(SystemUpdatePhase.ToolUpdate);
-            updateSystem.UpdateAfter<UpgradePreviewSystem,DecalUpgradeTool>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<ApproachStopTool>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateBefore<GeneratedVisualRetirementSystem,Game.Rendering.PreCullingSystem>(SystemUpdatePhase.PreCulling);
             updateSystem.UpdateBefore<ApproachStopSystem,Game.Net.LaneOverlapSystem>(SystemUpdatePhase.Modification4B);
@@ -293,7 +297,13 @@ namespace MedianGrassReplacement
 
             updateSystem.UpdateBefore<InvisibleCrosswalkInputSystem,Game.Tools.NetToolSystem>(SystemUpdatePhase.ToolUpdate);
 
-            updateSystem.UpdateAfter<NativeCrosswalkResetSystem, Game.Tools.NetToolSystem>(SystemUpdatePhase.ToolUpdate);
+            updateSystem.UpdateAfter<NativeCrosswalkDragSystem, Game.Tools.ToolOutputBarrier>(SystemUpdatePhase.ToolUpdate);
+            try
+            {
+                var drag = world.GetOrCreateSystemManaged<NativeCrosswalkDragSystem>();
+                if (!NativeCrosswalkDragHooks.Install(drag)) Log.Warn("Native Curbside crosswalk dragging unavailable on this runtime.");
+            }
+            catch (Exception error) { Log.Warn("Native drag hooks not loaded: " + error.Message); }
 
         }
 
@@ -312,6 +322,8 @@ namespace MedianGrassReplacement
             var world = Unity.Entities.World.DefaultGameObjectInjectionWorld;
 
             if (world != null && !world.IsCreated) world = null;
+            try { NativeCrosswalkDragHooks.Uninstall(); }
+            catch (Exception error) { Log.Error(error, "Could not release native crosswalk handoff."); }
 
             // A disposal during an exceptional save must release temporary
             // serializer exclusion before normal ownership queries run.
@@ -351,6 +363,8 @@ namespace MedianGrassReplacement
             Cleanup(() => world?.GetExistingSystemManaged<SignalPreviewSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<PreviewPaintInheritanceSystem>()?.Restore());
             Cleanup(() => world?.GetExistingSystemManaged<CrosswalkAppearancePreviewSystem>()?.Restore());
+            try { world?.GetExistingSystemManaged<TemporaryPaintVisibilitySystem>()?.RestoreAll(); }
+            catch (Exception error) { Log.Warn("Temporary paint visibility cleanup could not complete: " + error.Message); }
             Cleanup(() => world?.GetExistingSystemManaged<SignalWireSystem>()?.Clear());
             Cleanup(() => world?.GetExistingSystemManaged<DecalVisibilitySystem>()?.Restore());
 
@@ -372,6 +386,8 @@ namespace MedianGrassReplacement
             Cleanup(() => world?.GetExistingSystemManaged<SignalAssetSaveSystem>()?.RevertToVanilla());
             Cleanup(() => world?.GetExistingSystemManaged<VisualLifecycleSystem>()?.PrepareForSerialization());
             Cleanup(NativeLaneVisibilityOwnership.Restore);
+            try { if (world != null) CurbsideChangePipeline.Reset(world); }
+            catch (Exception error) { Log.Error(error, "Could not clear shared road-change state during disposal."); }
             AppDomain.CurrentDomain.SetData("Curbside.GardenCitySignals.ActiveModels.v1",false);
             Cleanup(() => world?.GetExistingSystemManaged<SignalStreetNameSystem>()?.Clear());
 
@@ -383,6 +399,8 @@ namespace MedianGrassReplacement
             Cleanup(() => Settings?.UnregisterInOptionsUI());
 
             Cleanup(LocalizationService.Dispose);
+            Cleanup(() => world?.GetExistingSystemManaged<NativeSignalProjectionSystem>()?.ReleaseAndReset());
+            Cleanup(() => world?.GetExistingSystemManaged<NativePaintProjectionSystem>()?.ReleaseAndReset());
             Settings = null;
 
             Log.Info("Disposed The Curbside Mod.");

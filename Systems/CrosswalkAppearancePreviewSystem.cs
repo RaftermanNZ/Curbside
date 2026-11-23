@@ -32,6 +32,29 @@ namespace MedianGrassReplacement.Systems
         private static CrosswalkAppearancePreviewSystem active;
         private EntityQuery changes, restoreRequests;
         private readonly Dictionary<Entity, Binding> bindings = new Dictionary<Entity, Binding>();
+        private readonly NotificationLookup<PreviewNotificationKey> sourceNotifications = new NotificationLookup<PreviewNotificationKey>();
+        private readonly HashSet<Entity> notificationCandidates = new HashSet<Entity>();
+        private readonly List<PreviewNotificationKey> notificationKeys = new List<PreviewNotificationKey>();
+        private bool notificationsReady = true;
+        private int notificationDepth;
+        private void TrackBindingNotification(Entity lane, Binding binding)
+        {
+            notificationKeys.Clear();
+            try
+            {
+                notificationKeys.Add(PreviewNotificationKey.Source(binding.Source));
+                foreach (var source in binding.PaintSources) notificationKeys.Add(PreviewNotificationKey.Source(source));
+                notificationKeys.Add(PreviewNotificationKey.Approach(binding.Road, binding.Node));
+                sourceNotifications.Replace(lane, notificationKeys);
+            }
+            finally { notificationKeys.Clear(); }
+        }
+        private void RebuildSourceNotifications()
+        {
+            sourceNotifications.Clear();
+            foreach (var pair in bindings) TrackBindingNotification(pair.Key, pair.Value);
+        }
+
         private readonly Dictionary<Entity, List<PreviewCrosswalkApproach>> approaches = new Dictionary<Entity, List<PreviewCrosswalkApproach>>();
         private readonly Dictionary<Entity, Entity> aliases = new Dictionary<Entity, Entity>();
         private readonly Dictionary<Entity, Entity> definitions = new Dictionary<Entity, Entity>();
@@ -43,12 +66,13 @@ namespace MedianGrassReplacement.Systems
         private readonly List<Entity> legacySources = new List<Entity>();
         private readonly ExternalPaintOwnership external = new ExternalPaintOwnership();
 
-        internal bool HasRefreshWork => aliases.Count != 0 || writes.Count != 0;
+        internal bool HasRefreshWork => aliasOwners.Count != 0 || writes.Count != 0;
 
         protected override void OnCreate()
         {
             base.OnCreate();
             active = this;
+            visibility = World.GetOrCreateSystemManaged<TemporaryPaintVisibilitySystem>();
             changes = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<PedestrianLane>(), ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<PrefabRef>() },
@@ -62,25 +86,13 @@ namespace MedianGrassReplacement.Systems
         private bool Alive(Entity entity) => EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity);
 
         internal static bool KeepsOriginal(World world, Entity source)
-            => active != null && active.World == world && active.retained.Contains(source);
+            { return false; }
 
         internal static void SourceChanged(World world, Entity source)
-        {
-            var system = active;
-            if (system == null || system.World != world || Mod.Saving) return;
-            var choices = world.GetExistingSystemManaged<CrosswalkUpgradeSystem>();
-            Entity road = Entity.Null, node = Entity.Null;
-            bool resolved = choices != null && choices.TryResolveApproach(source, out road, out node);
-            foreach (var pair in system.bindings)
-                if ((pair.Value.Source == source || pair.Value.PaintSources.Contains(source)
-                    || resolved && pair.Value.Road == road && pair.Value.Node == node)
-                    && system.Alive(pair.Key) && system.EntityManager.HasComponent<Temp>(pair.Key)
-                    && !system.EntityManager.HasComponent<MGRCrosswalkPreviewRequest>(pair.Key))
-                {
-                    pair.Value.Dirty = true;
-                    system.EntityManager.AddComponent<MGRCrosswalkPreviewRequest>(pair.Key);
-                }
-        }
+            => NativePaintProjectionSystem.SourceChanged(world, source);
+
+        internal static void ApplySourceChange(World world, Entity source)
+        {  }
 
         private Entity Original(Entity entity)
         {
@@ -88,7 +100,7 @@ namespace MedianGrassReplacement.Systems
             {
                 if (!EntityManager.HasComponent<Temp>(entity)) return entity;
                 var temp = EntityManager.GetComponentData<Temp>(entity);
-                if (!PreviewVisualPolicy.Active(temp.m_Flags) || temp.m_Original == entity) return Entity.Null;
+                if (!visibility.IsActive(entity, temp.m_Flags) || temp.m_Original == entity) return Entity.Null;
                 entity = temp.m_Original;
             }
             return Entity.Null;
@@ -167,81 +179,8 @@ namespace MedianGrassReplacement.Systems
         }
 
         protected override void OnUpdate()
-        {
-            if (Mod.Saving) return;
-            approaches.Clear();
-            stale.Clear();
-            foreach (var pair in bindings)
-                if (!Alive(pair.Key) || !EntityManager.HasComponent<Temp>(pair.Key)
-                    || !PreviewVisualPolicy.Active(EntityManager.GetComponentData<Temp>(pair.Key).m_Flags)) stale.Add(pair.Key);
-            foreach (var lane in stale) Remove(lane);
-            var choices = World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
-            var paint = World.GetOrCreateSystemManaged<IntersectionPaintSystem>();
-            using (var lanes = changes.ToEntityArray(Allocator.Temp))
-                foreach (var lane in lanes)
-                {
-                    if (EntityManager.HasComponent<MGRCrosswalkRestoreRequest>(lane))
-                    {
-                        EntityManager.RemoveComponent<MGRCrosswalkRestoreRequest>(lane);
-                        // This entity can also be a crossing; process it below
-                        // only if it satisfies the temporary crossing contract.
-                        if (!EntityManager.HasComponent<Temp>(lane) || !EntityManager.HasComponent<PedestrianLane>(lane)) continue;
-                    }
-                    if (EntityManager.HasComponent<MGRCrosswalkPreviewRequest>(lane)) EntityManager.RemoveComponent<MGRCrosswalkPreviewRequest>(lane);
-                    if (!Alive(lane) || !PreviewVisualPolicy.Active(EntityManager.GetComponentData<Temp>(lane).m_Flags)
-                        || (EntityManager.GetComponentData<PedestrianLane>(lane).m_Flags & PedestrianLaneFlags.Crosswalk) == 0
-                        || external.Contains(EntityManager, lane))
-                    { Remove(lane); continue; }
-                    if (TryKeepCommittedCrosswalk(lane, choices)) continue;
-                    if (!Resolve(lane, choices, out var road, out var node, out var source))
-                    { Remove(lane); continue; }
-                    byte appearance = choices.CommittedAppearance(road, node);
-                    // Legacy individually selected crossings retain their own
-                    // appearance; IsSourceSelected honours explicit native intent.
-                    if (appearance == 0 && Alive(source))
-                        appearance = choices.IsSourceInvisible(source) ? (byte)2 : choices.IsSourceSelected(source) ? (byte)1 : (byte)0;
-                    if (appearance == 0 && source == Entity.Null)
-                    {
-                        // Older saves can contain an individual curve choice
-                        // without a road-end record. A single owned committed
-                        // crossing on this exact approach can supply that choice.
-                        // Multiple candidates remain unresolved, never guessed.
-                        paint.ReadCommittedCrosswalkSources(road, node, legacySources, scratch);
-                        if (legacySources.Count == 1)
-                        {
-                            source = legacySources[0];
-                            appearance = choices.IsSourceInvisible(source) ? (byte)2 : choices.IsSourceSelected(source) ? (byte)1 : (byte)0;
-                        }
-                    }
-                    if (appearance == 0) { Remove(lane); continue; }
-                    var current = EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab;
-                    var native = reverse.TryGetValue(current, out var original) ? original : current;
-                    if (!EntityManager.HasComponent<NetLaneGeometryData>(native)) { Remove(lane); continue; }
-                    if (!bindings.TryGetValue(lane, out var binding) || binding.Road != road || binding.Node != node)
-                        binding = new Binding { Road = road, Node = node };
-                    binding.Source = source;
-                    if (appearance == 1)
-                    {
-                        bool dirty = binding.Dirty || binding.PaintSources.Count == 0;
-                        foreach (var item in binding.PaintSources) dirty |= !Alive(item);
-                        if (dirty) paint.ReadCommittedCrosswalkSources(road, node, binding.PaintSources, scratch);
-                    }
-                    else binding.PaintSources.Clear();
-                    binding.Dirty = false;
-                    RememberCommittedCrosswalk(lane, binding, native, appearance);
-                    bindings[lane] = binding;
-                    aliases[lane] = native;
-                    var previewOwner = EntityManager.GetComponentData<Owner>(lane).m_Owner;
-                    aliasOwners.Track(lane, previewOwner, road, node);
-                    TemporaryPreviewWrites.QueueLanePrefab(writes, lane, current, HiddenDefinition(native));
-                }
-            retained.Clear();
-            foreach (var binding in bindings.Values)
-                foreach (var source in binding.PaintSources) if (Alive(source)) retained.Add(source);
-            TemporaryPreviewWrites.Apply(World, writes);
-            paint.RevealCommittedCrosswalkPaint(retained);
-            World.GetExistingSystemManaged<CrosswalkVisualSystem>()?.FinishNetworkRefresh();
-        }
+        { // Native-preview-only isolation test.
+         }
 
         private Entity HiddenDefinition(Entity native)
         {
@@ -260,12 +199,13 @@ namespace MedianGrassReplacement.Systems
 
         private void Remove(Entity lane)
         {
-            bindings.Remove(lane);
+            bindings.Remove(lane); sourceNotifications.Remove(lane);
             RestoreAlias(lane);
         }
 
         private void RestoreAlias(Entity lane)
         {
+            visibility.Release(lane);
             aliasOwners.Remove(lane);
             if (!aliases.TryGetValue(lane, out var native)) return;
             if (Alive(lane) && EntityManager.HasComponent<Temp>(lane) && EntityManager.HasComponent<PrefabRef>(lane)
@@ -280,7 +220,7 @@ namespace MedianGrassReplacement.Systems
             // changed-lane batch replaces it, so no intermediate paint rebuild.
             stale.Clear(); stale.AddRange(aliases.Keys);
             foreach (var lane in stale) RestoreAlias(lane);
-            TemporaryPreviewWrites.Apply(World, writes);
+            FlushPreviewWrites();
         }
 
         internal void Restore()
@@ -288,7 +228,7 @@ namespace MedianGrassReplacement.Systems
             RestoreForRefresh();
             foreach (var lane in bindings.Keys)
                 if (EntityManager.Exists(lane) && EntityManager.HasComponent<MGRCrosswalkPreviewRequest>(lane)) EntityManager.RemoveComponent<MGRCrosswalkPreviewRequest>(lane);
-            bindings.Clear(); retained.Clear(); approaches.Clear(); external.Clear();
+            bindings.Clear(); sourceNotifications.Clear(); notificationCandidates.Clear(); notificationKeys.Clear(); notificationsReady = true; retained.Clear(); approaches.Clear(); external.Clear();
             using (var requests = restoreRequests.ToEntityArray(Allocator.Temp))
                 foreach (var entity in requests) EntityManager.RemoveComponent<MGRCrosswalkRestoreRequest>(entity);
             foreach (var copy in definitions.Values)

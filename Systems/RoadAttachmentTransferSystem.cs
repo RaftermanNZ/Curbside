@@ -128,7 +128,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            if(Mod.Saving || _commits.Count==0) return;Dependency.Complete();
+            if(Mod.Saving || _commits.Count==0) return;{ CompleteDependency(); Dependency = default; }
 
             foreach(var target in new List<Entity>(_commits.Keys))
 
@@ -158,8 +158,8 @@ namespace MedianGrassReplacement.Systems
 
                     {
 
-                        if((pending.Selection.ParkingLeft|pending.Selection.ParkingRight)!=0){FixedParkingSystem.QueueRoad(road);CurbLineEmissionSystem.QueueRoad(road);}
-                        if((pending.Selection.HiddenLeft|pending.Selection.HiddenRight)!=0)DecalVisibilitySystem.QueueRoad(road);
+                        if((pending.Selection.ParkingLeft|pending.Selection.ParkingRight)!=0){FixedParkingSystem.QueueRoad(World,road);CurbLineEmissionSystem.QueueRoad(road);}
+                        if((pending.Selection.HiddenLeft|pending.Selection.HiddenRight)!=0)DecalVisibilitySystem.QueueRoad(World,road);
                         if(pending.Selection.StreetLighting!=0)StreetLightingSystem.QueueRoad(road);
                         if(pending.Selection.LineVisibility!=0||pending.Selection.EdgeStyle!=0||(pending.Selection.EdgeLeft|pending.Selection.EdgeRight)!=0||pending.Selection.DividerStyle!=0||pending.Selection.CenterStyle!=0||pending.Selection.HideCenter)
                         {
@@ -172,7 +172,7 @@ namespace MedianGrassReplacement.Systems
 
                         if(pending.Selection.Decals!=0) World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);
 
-                        if(pending.Selection.ParkingBans!=0){FixedParkingSystem.QueueRoad(road);CurbLineEmissionSystem.QueueRoad(road);}
+                        if(pending.Selection.ParkingBans!=0){FixedParkingSystem.QueueRoad(World,road);CurbLineEmissionSystem.QueueRoad(road);}
 
                     }
 
@@ -224,7 +224,7 @@ namespace MedianGrassReplacement.Systems
         {
 
             if(Mod.Saving || _previews.IsEmptyIgnoreFilter){_sourceSelections.Clear();return;}
-            Dependency.Complete();var sources=_sourceSelections;sources.Clear();
+            { CompleteDependency(); Dependency = default; }var sources=_sourceSelections;sources.Clear();
 
             using(var previews=_previews.ToEntityArray(Allocator.Temp)) foreach(var preview in previews)
 

@@ -69,6 +69,8 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnUpdate()
         {
+            // An empty structural query needs no change-filter synchronization.
+            if (sources.IsEmptyIgnoreFilter) return;
             sources.ResetFilter();
             try
             {

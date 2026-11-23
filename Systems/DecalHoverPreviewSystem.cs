@@ -65,6 +65,7 @@ namespace MedianGrassReplacement.Systems
         private readonly List<Entity> stale = new List<Entity>();
         private readonly Dictionary<Entity, bool> ownerGeometry = new Dictionary<Entity, bool>();
         private readonly Dictionary<Entity, List<Entity>> candidates = new Dictionary<Entity, List<Entity>>();
+        private readonly DecalPreviewSourceIndex sourceIndex = new DecalPreviewSourceIndex();
 
         internal bool HasRefreshWork => bindings.Count != 0;
 
@@ -153,21 +154,33 @@ namespace MedianGrassReplacement.Systems
                 candidates[originalOwner] = list;
             }
             Entity match = Entity.Null;
+            if (list.Count > 32 && sourceIndex.TryQuery(EntityManager, originalOwner, prefab, pose, list, out var query))
+            {
+                while (query.MoveNext())
+                    if (SameObject(actor, query.Current, prefab, pose, owner))
+                    { if (match != Entity.Null) return Entity.Null; match = query.Current; }
+                return match;
+            }
+            int scanned = 0;
             foreach (var candidate in list)
+            {
+                scanned++;
                 if (SameObject(actor, candidate, prefab, pose, owner))
-                { if (match != Entity.Null) return Entity.Null; match = candidate; }
+                {
+                    if (match != Entity.Null)
+                    { if (list.Count > 32) sourceIndex.Record(originalOwner, scanned); return Entity.Null; }
+                    match = candidate;
+                }
+            }
+            if (list.Count > 32) sourceIndex.Record(originalOwner, scanned);
             return match;
         }
 
         internal static void RoadChanged(Entity road)
-        {
-            var system = active;
-            if (system == null || Mod.Saving) return;
-            system.owners.Select(new[] { road }, system.stale);
-            foreach (var actor in system.stale)
-                if (system.Alive(actor) && system.EntityManager.HasComponent<Temp>(actor)
-                    && !system.EntityManager.HasComponent<MGRDecalPreviewRequest>(actor)) system.EntityManager.AddComponent<MGRDecalPreviewRequest>(actor);
-        }
+            {  }
+
+        internal static void ApplyRoadChange(Entity road)
+        {  }
 
         private bool Release(Entity actor, EntityCommandBuffer commands)
         {
@@ -189,44 +202,8 @@ namespace MedianGrassReplacement.Systems
         { if (changed) { NativeVisualInvalidation.CompleteReaders(World); commands.Playback(EntityManager); } }
 
         protected override void OnUpdate()
-        {
-            if (Mod.Saving) return;
-            ownerGeometry.Clear(); candidates.Clear(); stale.Clear();
-            foreach (var pair in bindings)
-                if (!Alive(pair.Key) || !EntityManager.HasComponent<Temp>(pair.Key)) stale.Add(pair.Key);
-            var visibility = World.GetOrCreateSystemManaged<DecalVisibilitySystem>();
-            using (var actors = changes.ToEntityArray(Allocator.Temp))
-            using (var commands = new EntityCommandBuffer(Allocator.Temp))
-            {
-                bool changed = false;
-                foreach (var actor in stale) changed |= Release(actor, commands);
-                foreach (var actor in actors)
-                {
-                    if (EntityManager.HasComponent<MGRDecalPreviewRequest>(actor)) EntityManager.RemoveComponent<MGRDecalPreviewRequest>(actor);
-                    var temp = EntityManager.GetComponentData<Temp>(actor);
-                    var prefab = EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab;
-                    var owner = EntityManager.GetComponentData<Owner>(actor).m_Owner;
-                    byte kind = Alive(actor) && PreviewVisualPolicy.Active(temp.m_Flags) ? visibility.PreviewKind(prefab) : (byte)0;
-                    if (kind == 0 || !UnchangedOwner(owner)) { changed |= Release(actor, commands); continue; }
-                    var pose = EntityManager.GetComponentData<Transform>(actor);
-                    var source = Source(actor, temp, prefab, pose, owner);
-                    if (source == Entity.Null || !visibility.ReadPreviewChoice(source, out var road, out byte hidden))
-                    { changed |= Release(actor, commands); continue; }
-                    bool hide = DecalHoverPolicy.Hide(temp.m_Flags, true, true, kind, hidden);
-                    if (!hide) { changed |= Release(actor, commands); }
-                    if (!bindings.TryGetValue(actor, out var binding)) binding = new Binding();
-                    binding.Road = road; binding.Owner = owner;
-                    if (DecalHoverPolicy.VisibilityDelta(true, true, hide, EntityManager.HasComponent<Hidden>(actor), binding.OwnsHidden, false) == 1)
-                    {
-                        commands.AddComponent<Hidden>(actor);
-                        if (!EntityManager.HasComponent<BatchesUpdated>(actor)) commands.AddComponent<BatchesUpdated>(actor);
-                        binding.OwnsHidden = true; changed = true;
-                    }
-                    bindings[actor] = binding; owners.Track(actor, owner, road, source);
-                }
-                Apply(commands, changed);
-            }
-        }
+        { // Native-preview-only isolation test.
+         }
 
         internal void RestoreForOwners(PreviewRefreshScope scope)
         {
@@ -241,7 +218,7 @@ namespace MedianGrassReplacement.Systems
             stale.Clear(); stale.AddRange(bindings.Keys);
             using (var commands = new EntityCommandBuffer(Allocator.Temp))
             { bool changed = false; foreach (var actor in stale) changed |= Release(actor, commands); Apply(commands, changed); }
-            ownerGeometry.Clear(); candidates.Clear(); owners.Clear();
+            ownerGeometry.Clear(); candidates.Clear(); sourceIndex.Clear(); owners.Clear();
         }
         public void PreSerialize(Context context) { Restore(); }
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { Restore(); base.OnGamePreload(purpose, mode); }

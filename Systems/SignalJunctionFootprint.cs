@@ -47,7 +47,7 @@ namespace MedianGrassReplacement.Systems
                 math.lerp(left.c, right.c, middle), math.lerp(left.d, right.d, end));
         }
 
-        private static Bezier4x3 Curb(EdgeNodeGeometry geometry, NetCompositionData data, float x)
+        internal static Bezier4x3 Curb(EdgeNodeGeometry geometry, NetCompositionData data, float x)
         {
             float width = math.max(1, data.m_Width);
             float t = x / width + .5f, middle = data.m_MiddleOffset / width + .5f;

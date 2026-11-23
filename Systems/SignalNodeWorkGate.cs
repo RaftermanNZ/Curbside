@@ -61,15 +61,30 @@ namespace MedianGrassReplacement.Systems
                     Prefab=prefab, Pose=pose, Vehicle=binding.m_GroupMask0, Pedestrian=binding.m_GroupMask1 });
             }
         }
-        private bool UnchangedSignalNode(Entity node)
+        private struct SignalNetworkObservation
         {
+            internal Entity Node;
+            internal SignalLayoutEntry Network;
+            internal bool Valid, Same;
+        }
+        private bool UnchangedSignalNode(Entity node) => UnchangedSignalNode(node, out _);
+        private bool UnchangedSignalNode(Entity node, out SignalNetworkObservation observed)
+        {
+            observed = default;
             if (forcedSignalWork.Contains(node) || waitingSignalDefinitions.Contains(node) || !signalTickets.TryGetValue(node, out var before)) return false;
-            if (before.Network == null || !SameNetwork(node,before.Network)) return false;
+            if (before.Network == null) return false;
+            bool networkSame = SameNetwork(node, before.Network);
+            observed = new SignalNetworkObservation { Node = node, Network = before.Network, Valid = true, Same = networkSame };
+            if (!networkSame) return false;
             var now = ReadSignalTicket(node);
             if (now.Network == null || !ReferenceEquals(now.Network,before.Network) || now.Enabled != before.Enabled || now.Custom != before.Custom || now.Style != before.Style || now.Actors.Count != before.Actors.Count) return false;
             for (int i=0;i<now.Actors.Count;i++) if (!now.Actors[i].Equals(before.Actors[i])) return false;
             unchangedSignalNotifications++; return true;
         }
-        private void RememberSignalNode(Entity node) => signalTickets[node] = ReadSignalTicket(node);
+        private void RememberSignalNode(Entity node)
+        {
+            var ticket = ReadSignalTicket(node);
+            ReplaceSignalTicket(node, ticket);
+        }
     }
 }

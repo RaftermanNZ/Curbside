@@ -33,6 +33,7 @@ namespace MedianGrassReplacement.Systems
         private void Change(Entity source,Entity prefab)
         {
             NativeVisualInvalidation.SetPrefab(World,source,prefab);
+            NativePaintProjectionSystem.SourceChanged(World,source);
         }
         internal void Suppress(Entity source)
         {
@@ -72,9 +73,10 @@ namespace MedianGrassReplacement.Systems
         {
             Suppress(source);if(_sources.Contains(source))_previewSources.Add(source);
         }
+        internal bool HasPreviewReferences => _previewSources.Count != 0;
         internal void RestorePreviewReferences()
         {
-            if(_previewSources.Count==0)return;Dependency.Complete();
+            if(_previewSources.Count==0)return;{ CompleteDependency(); Dependency = default; }
             foreach(var source in _previewSources)RestoreSource(source);
             _previewSources.Clear();
         }
@@ -86,7 +88,7 @@ namespace MedianGrassReplacement.Systems
         {
             if(_copies.Count==0)return;
             if(ModDiagnostics.TraceBuffer.Enabled)ModDiagnostics.TraceBuffer.Record("crosswalk.restoreAll","definitions="+_copies.Count+" sources="+_sources.Count);
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             // Save/disposal only: also find references copied by native temp or
             // road regeneration jobs, not just the originally selected lanes.
             using(var refs=_references.ToEntityArray(Allocator.Temp))foreach(var entity in refs)RestoreSource(entity);

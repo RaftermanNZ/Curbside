@@ -19,15 +19,21 @@ namespace MedianGrassReplacement.Systems
     internal struct PreviewPaintStroke
     {
         internal Bezier4x3 Curve;
-        internal Entity Prefab, Actor;
+        internal Entity Prefab, Actor, NativeSource;
     }
 
     public partial class IntersectionPaintSystem
     {
+        internal bool OwnsPreviewPaint(Entity source)
+            => Alive(source) && !EntityManager.HasComponent<Temp>(source) && !_externalPaint.Contains(EntityManager, source);
+
+        internal bool HasEmptyPreviewPaint(Entity source)
+            => OwnsPreviewPaint(source) && _replacements.TryGetValue(source, out var replacement) && replacement.Paint.Count == 0;
+
         internal bool ReadPreviewPaint(Entity source, List<PreviewPaintStroke> output)
         {
             output.Clear();
-            if (!Alive(source) || EntityManager.HasComponent<Temp>(source) || _externalPaint.Contains(EntityManager, source)) return false;
+            if (!OwnsPreviewPaint(source)) return false;
             if (EntityManager.HasComponent<MGRHiddenJunctionLine>(source)) return true;
             if (!_replacements.TryGetValue(source, out var replacement)) return false;
             foreach (var actor in replacement.Paint)
@@ -63,16 +69,26 @@ namespace MedianGrassReplacement.Systems
             internal readonly List<Entity> Actors = new List<Entity>();
         }
 
-        private EntityQuery changes;
-        private struct SourceCandidate
-        {
-            internal Entity Actor, Prefab;
-            internal Bezier4x3 Curve;
-        }
-        private readonly Dictionary<Entity, List<SourceCandidate>> ownerSources = new Dictionary<Entity, List<SourceCandidate>>();
+        private EntityQuery changes, groupCurveReaders;
+        private readonly PreviewSourceLookup ownerSources = new PreviewSourceLookup();
         private static PreviewPaintInheritanceSystem active;
         private readonly Dictionary<Entity, Entity> sources = new Dictionary<Entity, Entity>();
+        private readonly PreviewSourceGroups sourceNotifications = new PreviewSourceGroups();
+        private readonly HashSet<Entity> notificationCandidates = new HashSet<Entity>();
+        private bool notificationsReady = true;
+        private int notificationDepth;
+        private void SetSource(Entity lane, Entity source)
+        { sources[lane] = source; sourceNotifications.Replace(lane, source); }
+        private void RemoveSource(Entity lane)
+        { sources.Remove(lane); sourceNotifications.Remove(lane); }
+        private void RebuildSourceNotifications()
+        {
+            sourceNotifications.Clear();
+            foreach (var pair in sources) sourceNotifications.Replace(pair.Key, pair.Value);
+        }
+
         private readonly Dictionary<Entity, bool> identicalSources = new Dictionary<Entity, bool>();
+        private readonly PreviewSourcePaths sharedSourcePaths = new PreviewSourcePaths();
         private readonly HashSet<Entity> retainedOriginals = new HashSet<Entity>();
         private readonly HashSet<Entity> work = new HashSet<Entity>();
         private readonly Dictionary<Entity, Entry> entries = new Dictionary<Entity, Entry>();
@@ -88,13 +104,14 @@ namespace MedianGrassReplacement.Systems
         private readonly HashSet<Entity> retiredOwners = new HashSet<Entity>();
         private readonly ExternalPaintOwnership external = new ExternalPaintOwnership();
 
-        internal bool HasRefreshWork => aliases.Count != 0 || entries.Count != 0 || writes.Count != 0
-            || retired.Count != 0 || retainedOriginals.Count != 0;
+        internal bool HasRefreshWork => entryOwners.Count != 0 || writes.Count != 0 || retired.Count != 0;
 
         protected override void OnCreate()
         {
             base.OnCreate();
             active = this;
+            visibility = World.GetOrCreateSystemManaged<TemporaryPaintVisibilitySystem>();
+            groupCurveReaders = GetEntityQuery(ComponentType.ReadOnly<Curve>());
             changes = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Lane>(), ComponentType.ReadOnly<Curve>(), ComponentType.ReadOnly<PrefabRef>(), ComponentType.ReadOnly<Owner>() },
@@ -105,21 +122,13 @@ namespace MedianGrassReplacement.Systems
         }
 
         internal static void SourceChanged(World world, Entity source)
-        {
-            CrosswalkAppearancePreviewSystem.SourceChanged(world,source);
-            if (active == null || active.World != world || Mod.Saving) return;
-            foreach (var pair in active.sources)
-                if (pair.Value == source && active.Alive(pair.Key) && active.EntityManager.HasComponent<Temp>(pair.Key))
-                {
-                    if (active.entries.TryGetValue(pair.Key, out var entry)) entry.Dirty = true;
-                    if (!active.EntityManager.HasComponent<MGRPreviewPaintRequest>(pair.Key))
-                        active.EntityManager.AddComponent<MGRPreviewPaintRequest>(pair.Key);
-                }
-        }
+            => NativePaintProjectionSystem.SourceChanged(world, source);
+
+        internal static void ApplySourceChange(World world, Entity source)
+        {  }
 
         internal static bool KeepsOriginal(World world, Entity source)
-            => active != null && active.World == world && active.retainedOriginals.Contains(source)
-                || CrosswalkAppearancePreviewSystem.KeepsOriginal(world,source);
+            => Mod.Settings?.CurbsidePreviews == true && world.GetExistingSystemManaged<NativePaintProjectionSystem>()?.KeepsSource(source) == true;
 
         private bool Alive(Entity actor) => EntityManager.Exists(actor) && !EntityManager.HasComponent<Deleted>(actor);
 
@@ -148,9 +157,8 @@ namespace MedianGrassReplacement.Systems
                 var to = EntityManager.GetComponentData<Curve>(original).m_Bezier;
                 if (!PreviewPaintGeometry.Map(path, from, to, out path)) return Entity.Null;
             }
-            if (!ownerSources.TryGetValue(original, out var candidates))
+            if (!ownerSources.HasOwner(original))
             {
-                candidates = new List<SourceCandidate>();
                 foreach (var item in EntityManager.GetBuffer<Game.Net.SubLane>(original, true))
                 {
                     var source = item.m_SubLane;
@@ -160,141 +168,18 @@ namespace MedianGrassReplacement.Systems
                         || EntityManager.HasComponent<MGRCurbMarking>(source) || EntityManager.HasComponent<MGRIntersectionPaint>(source)
                         || EntityManager.HasComponent<Game.Net.CarLane>(source) || EntityManager.HasComponent<Game.Net.ParkingLane>(source)
                         || EntityManager.HasComponent<Game.Net.TrackLane>(source) || external.Contains(EntityManager, source)) continue;
-                    candidates.Add(new SourceCandidate
-                    {
-                        Actor = source, Prefab = visual.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab),
-                        Curve = EntityManager.GetComponentData<Curve>(source).m_Bezier
-                    });
+                    ownerSources.Add(original, source,
+                        visual.Original(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab),
+                        EntityManager.GetComponentData<Curve>(source).m_Bezier);
                 }
-                ownerSources[original] = candidates;
+                ownerSources.CompleteOwner(original);
             }
-            var key = new MarkingKey(path, prefab);
-            Entity result = Entity.Null;
-            foreach (var candidate in candidates)
-            {
-                if (!key.Equals(new MarkingKey(candidate.Curve, candidate.Prefab))) continue;
-                if (result != Entity.Null) return Entity.Null; // Ambiguous fork: never borrow another line's choice.
-                result = candidate.Actor;
-            }
-            return result;
+            return ownerSources.Resolve(original, path, prefab);
         }
 
         protected override void OnUpdate()
-        {
-            if (Mod.Saving) return;
-            ownerSources.Clear();
-            var replacements = World.GetOrCreateSystemManaged<IntersectionPaintSystem>();
-            stale.Clear();
-            foreach (var entry in sources)
-                if (!Alive(entry.Key) || !EntityManager.HasComponent<Temp>(entry.Key)
-                    || !PreviewVisualPolicy.Active(EntityManager.GetComponentData<Temp>(entry.Key).m_Flags)
-                    || !EntityManager.HasComponent<Owner>(entry.Key)
-                    || !Alive(EntityManager.GetComponentData<Owner>(entry.Key).m_Owner)) stale.Add(entry.Key);
-            foreach (var lane in stale) { Remove(lane); sources.Remove(lane); }
-            using (var lanes = changes.ToEntityArray(Allocator.Temp))
-            {
-                work.Clear();
-                // Resolve the changed batch first, so duplicate native copies
-                // cannot each retain the one original actor as their own view.
-                foreach (var lane in lanes)
-                {
-                    work.Add(lane);
-                    if (!Alive(lane) || !PreviewVisualPolicy.Active(EntityManager.GetComponentData<Temp>(lane).m_Flags)
-                        || external.Contains(EntityManager, lane)) { sources.Remove(lane); continue; }
-                    var source = ResolveSource(lane, EntityManager.GetComponentData<Temp>(lane));
-                    if (source == Entity.Null) sources.Remove(lane); else sources[lane] = source;
-                }
-                identicalSources.Clear();
-                foreach (var pair in sources)
-                {
-                    var source = pair.Value;
-                    bool same = Alive(source) && EntityManager.HasComponent<Curve>(source)
-                        && PreviewPaintGeometry.SamePath(EntityManager.GetComponentData<Curve>(source).m_Bezier,
-                            EntityManager.GetComponentData<Curve>(pair.Key).m_Bezier);
-                    identicalSources[source] = (!identicalSources.TryGetValue(source, out var priorSame) || priorSame) && same;
-                }
-                foreach (var pair in entries)
-                    if (identicalSources.TryGetValue(pair.Value.Source, out var unchanged) && unchanged != pair.Value.UsingOriginal)
-                        work.Add(pair.Key);
-                foreach (var lane in work)
-                {
-                    if (!Alive(lane)) continue;
-                    if (EntityManager.HasComponent<MGRPreviewPaintRequest>(lane)) EntityManager.RemoveComponent<MGRPreviewPaintRequest>(lane);
-                    var temp = EntityManager.GetComponentData<Temp>(lane);
-                    if (!PreviewVisualPolicy.Active(temp.m_Flags) || external.Contains(EntityManager, lane)) { Remove(lane); continue; }
-                    var source = sources.TryGetValue(lane, out var resolved) ? resolved : Entity.Null;
-                    if (!EntityManager.Exists(source) || !EntityManager.HasComponent<Curve>(source)) { Remove(lane); sources.Remove(lane); continue; }
-                    sources[lane] = source;
-                    if (TryKeepCommitted(lane, source, replacements)) continue;
-                    if (!replacements.ReadPreviewPaint(source, strokes)) { Remove(lane); continue; }
-                    var owner = EntityManager.GetComponentData<Owner>(lane).m_Owner;
-                    if (!EntityManager.Exists(owner) || !EntityManager.HasComponent<Temp>(owner)) continue;
-                    var original = EntityManager.GetComponentData<Curve>(source).m_Bezier;
-                    var preview = EntityManager.GetComponentData<Curve>(lane).m_Bezier;
-                    bool useOriginal = identicalSources.TryGetValue(source, out var allUnchanged) && allUnchanged;
-                    mapped.Clear();
-                    bool valid = true;
-                    foreach (var stroke in strokes)
-                    {
-                        if (!PreviewPaintGeometry.Map(stroke.Curve, original, preview, out var curve)
-                            || !EntityManager.HasComponent<NetLaneArchetypeData>(stroke.Prefab)
-                            || !EntityManager.GetComponentData<NetLaneArchetypeData>(stroke.Prefab).m_LaneArchetype.Valid)
-                        { valid = false; break; }
-                        useOriginal &= Alive(stroke.Actor);
-                        mapped.Add(new PreviewPaintStroke { Curve = curve, Prefab = stroke.Prefab, Actor = stroke.Actor });
-                    }
-                    if (!valid) { Remove(lane); continue; }
-                    var current = EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab;
-                    var native = reverse.TryGetValue(current, out var restored) ? restored : current;
-                    if (!EntityManager.HasComponent<NetLaneGeometryData>(native)) continue;
-                    bool same = entries.TryGetValue(lane, out var prior) && !prior.Dirty
-                        && object.ReferenceEquals(prior.Intent, replacements.PreviewIntentToken(source)) && prior.Source == source && prior.Prefab == native && prior.Owner == owner
-                        && MarkingPreviewPolicy.SameCurve(prior.Curve, preview) && prior.Keys.Count == mapped.Count && prior.UsingOriginal == useOriginal;
-                    for (int i = 0; same && i < mapped.Count; i++)
-                        same = prior.Keys[i].Equals(new MarkingKey(mapped[i].Curve, mapped[i].Prefab)) && (useOriginal || Alive(prior.Actors[i]));
-                    if (!same)
-                    {
-                        Remove(lane);
-                        var next = new Entry { Source = source, Prefab = native, Owner = owner, Curve = preview, UsingOriginal = useOriginal };
-                        try
-                        {
-                            foreach (var stroke in mapped)
-                            {
-                                if (!useOriginal) next.Actors.Add(CreateActor(owner, stroke));
-                                next.Keys.Add(new MarkingKey(stroke.Curve, stroke.Prefab));
-                            }
-                        }
-                        catch
-                        {
-                            retired.AddRange(next.Actors);
-                            FlushRetired();
-                            throw;
-                        }
-                        entries[lane] = next;
-                        var sourceOwner = EntityManager.HasComponent<Owner>(source) ? EntityManager.GetComponentData<Owner>(source).m_Owner : Entity.Null;
-                        entryOwners.Track(lane, owner, sourceOwner);
-                    }
-                    // A third-party actor/reference edit can leave the same
-                    // output keys. Refresh the value snapshot on that slow
-                    // path too, rather than retrying a stale snapshot forever.
-                    var remembered = entries[lane];
-                    remembered.Intent = replacements.PreviewIntentToken(source);
-                    remembered.Original = original;
-                    remembered.SourceOwner = EntityManager.HasComponent<Owner>(source) ? EntityManager.GetComponentData<Owner>(source).m_Owner : Entity.Null;
-                    remembered.SourcePrefab = EntityManager.HasComponent<PrefabRef>(source) ? EntityManager.GetComponentData<PrefabRef>(source).m_Prefab : Entity.Null;
-                    remembered.Committed.Clear(); remembered.Committed.AddRange(strokes);
-                    remembered.Dirty = false;
-                    var hidden = HiddenDefinition(native);
-                    aliases[lane] = native;
-                    TemporaryPreviewWrites.QueueLanePrefab(writes, lane, current, hidden);
-                }
-            }
-            retainedOriginals.Clear();
-            foreach (var entry in entries.Values)
-                if (entry.UsingOriginal && identicalSources.TryGetValue(entry.Source, out var unchanged) && unchanged) retainedOriginals.Add(entry.Source);
-            FlushRetired();
-            TemporaryPreviewWrites.Apply(World, writes);
-        }
+        { // Native-preview-only isolation test.
+         }
 
         private Entity HiddenDefinition(Entity native)
         {
@@ -330,6 +215,7 @@ namespace MedianGrassReplacement.Systems
             });
             EntityManager.SetComponentData(actor, new Curve { m_Bezier = stroke.Curve, m_Length = MathUtils.Length(stroke.Curve) });
             EntityManager.AddComponentData(actor, new Owner(owner));
+            GeneratedVisualLifecycle.RememberLaneOwner(World, actor, owner);
             EntityManager.AddComponentData(actor, new Temp { m_Original = Entity.Null, m_Flags = TempFlags.Select });
             EntityManager.AddComponent<Elevation>(actor);
             EntityManager.AddComponent<MGRTemporaryPreviewPaint>(actor);
@@ -348,32 +234,43 @@ namespace MedianGrassReplacement.Systems
         {
             if (retired.Count == 0) return;
             retiredActors.Clear(); retiredOwners.Clear();
+            var history = World.GetExistingSystemManaged<VisualLifecycleSystem>()?.LaneOwners;
             using (var actors = new NativeList<Entity>(retired.Count, Allocator.Temp))
             {
                 foreach (var actor in retired)
-                    if (EntityManager.Exists(actor) && retiredActors.Add(actor))
+                    if (retiredActors.Add(actor))
                     {
-                        actors.Add(actor);
-                        if (EntityManager.HasComponent<Owner>(actor)) retiredOwners.Add(EntityManager.GetComponentData<Owner>(actor).m_Owner);
+                        Entity current = Entity.Null;
+                        if (EntityManager.Exists(actor))
+                        {
+                            actors.Add(actor);
+                            if (EntityManager.HasComponent<Owner>(actor))
+                            {
+                                current = EntityManager.GetComponentData<Owner>(actor).m_Owner;
+                                retiredOwners.Add(current);
+                            }
+                        }
+                        history?.CopyOwners(actor, retiredOwners, current);
                     }
+                // A second native modification pass or another mod can
+                // discover a fresh lane. Remove only our copied actors
+                // from those affected owners before deleting the actors.
+                foreach (var owner in retiredOwners)
+                {
+                    if (!EntityManager.Exists(owner) || !EntityManager.HasBuffer<Game.Net.SubLane>(owner)) continue;
+                    var lanes = EntityManager.GetBuffer<Game.Net.SubLane>(owner);
+                    for (int i = lanes.Length - 1; i >= 0; i--)
+                        if (retiredActors.Contains(lanes[i].m_SubLane)) lanes.RemoveAt(i);
+                }
                 if (actors.Length != 0)
                 {
-                    // A second native modification pass or another mod can
-                    // discover a fresh lane. Remove only our copied actors
-                    // from those affected owners before deleting the actors.
-                    foreach (var owner in retiredOwners)
-                    {
-                        if (!EntityManager.Exists(owner) || !EntityManager.HasBuffer<Game.Net.SubLane>(owner)) continue;
-                        var lanes = EntityManager.GetBuffer<Game.Net.SubLane>(owner);
-                        for (int i = lanes.Length - 1; i >= 0; i--)
-                            if (retiredActors.Contains(lanes[i].m_SubLane)) lanes.RemoveAt(i);
-                    }
                     // ApplyNetSystem does not exclude Deleted entities. Remove
                     // Temp as well, so preview-only paint can never be committed.
                     EntityManager.RemoveComponent(actors.AsArray(), ComponentType.ReadWrite<Temp>());
-                    GeneratedVisualLifecycle.RetireSaveBatch(World, actors.AsArray());
+                    GeneratedVisualLifecycle.RetireSaveBatch(World, actors.AsArray(), null);
                 }
             }
+            if (history != null) foreach (var actor in retiredActors) history.Forget(actor);
             retired.Clear();
             retiredActors.Clear(); retiredOwners.Clear();
         }
@@ -395,7 +292,7 @@ namespace MedianGrassReplacement.Systems
             stale.Clear(); stale.AddRange(entries.Keys);
             foreach (var lane in stale) Remove(lane);
             FlushRetired();
-            TemporaryPreviewWrites.Apply(World, writes);
+            FlushPreviewWrites();
         }
 
         internal void Restore()
@@ -406,7 +303,7 @@ namespace MedianGrassReplacement.Systems
             copies.Clear(); reverse.Clear(); aliases.Clear(); external.Clear();
             foreach (var lane in sources.Keys)
                 if (EntityManager.Exists(lane) && EntityManager.HasComponent<MGRPreviewPaintRequest>(lane)) EntityManager.RemoveComponent<MGRPreviewPaintRequest>(lane);
-            sources.Clear();
+            sources.Clear(); sourceNotifications.Clear(); notificationCandidates.Clear(); notificationsReady = true;
         }
 
         public void PreSerialize(Context context) { Restore(); }

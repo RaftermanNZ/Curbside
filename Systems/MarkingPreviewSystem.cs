@@ -77,9 +77,7 @@ namespace MedianGrassReplacement.Systems
         private readonly HashSet<Entity> candidates = new HashSet<Entity>();
 
         internal void Request(Entity owner, Bezier4x3 guide)
-        {
-            requests.Add(new Guide { Owner = owner, Curve = guide });
-        }
+        {  }
 
         // Keep geometry matches between frames. Hidden is still restored before
         // tools and network updates so producers never mistake it for an upgrade.
@@ -157,17 +155,14 @@ namespace MedianGrassReplacement.Systems
         }
 
         protected override void OnUpdate()
-        {
-            long started = ModDiagnostics.RuntimeCosts.Begin();
-            try { UpdatePreview(); }
-            finally { ModDiagnostics.RuntimeCosts.End("MarkingPreviewSystem", started); }
-        }
+        { // Native-preview-only isolation test.
+         }
 
         private void UpdatePreview()
         {
             if (Mod.Saving || UpgradeInputPolicy.PointerBlocked || requests.Count == 0) { Restore(); return; }
             PrepareMatches();
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             candidates.Clear();
             owners.Clear();
             var prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
@@ -223,9 +218,8 @@ namespace MedianGrassReplacement.Systems
     public partial class MarkingPreviewRestoreSystem : GameSystemBase
     {
         protected override void OnUpdate()
-        {
-            World.GetExistingSystemManaged<MarkingPreviewSystem>()?.BeginFrame();
-        }
+        { // Native-preview-only isolation test.
+         }
     }
 
     public partial class CurbLineEmissionSystem

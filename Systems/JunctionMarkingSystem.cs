@@ -37,6 +37,36 @@ namespace MedianGrassReplacement.Systems
         private EntityQuery _lines, _hidden, _changedNodes, _revealedHidden, _changedHidden;
         private readonly System.Collections.Generic.HashSet<Entity> _visibilityWork=new System.Collections.Generic.HashSet<Entity>();
 
+        // These zero-sized flags describe one visibility transition. Add/remove
+        // them together to avoid an intermediate archetype/chunk move.
+        private static readonly ComponentTypeSet OwnedHiddenFlags = new ComponentTypeSet(
+            ComponentType.ReadWrite<MGRHiddenJunctionLine>(), ComponentType.ReadWrite<Game.Tools.Hidden>());
+        private readonly System.Collections.Generic.List<Entity> _laneWork = new System.Collections.Generic.List<Entity>();
+        private readonly NotificationLookup<Entity> _hiddenOwners = new NotificationLookup<Entity>();
+        private readonly System.Collections.Generic.HashSet<Entity> _hiddenCandidates = new System.Collections.Generic.HashSet<Entity>();
+        private EntityQuery _hiddenStructuralChanges, _hiddenOwnerChanges;
+        private bool _hiddenOwnersReady, _ownsHiddenStructuralQuery, _ownsHiddenOwnerQuery;
+        private static readonly bool HiddenLookupSupported = typeof(EntityQuery).Module.ModuleVersionId
+            == new Guid("bfb47e8c-9b6e-4acf-8c6d-c80a7bff1c41");
+        private delegate void HiddenQueryVersionSetter(ref EntityQuery query, uint version);
+        private static readonly HiddenQueryVersionSetter SetHiddenQueryVersion = CreateHiddenQueryVersionSetter();
+        private static HiddenQueryVersionSetter CreateHiddenQueryVersionSetter()
+        {
+            if (!HiddenLookupSupported) return null;
+            try
+            {
+                // This installed-version method is internal; bind it once rather
+                // than allocating reflection arguments on every update.
+                var method = typeof(EntityQuery).GetMethod("SetChangedFilterRequiredVersion",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
+                    null, new[] { typeof(uint) }, null);
+                return method == null ? null : (HiddenQueryVersionSetter)Delegate.CreateDelegate(typeof(HiddenQueryVersionSetter), method);
+            }
+            catch { return null; }
+        }
+
+
+
         private PrefabSystem _prefabs;
 
         private bool _active, _initial = true, _previousEnabled, _previousCurbs, _previousParkingCurbs;
@@ -80,6 +110,7 @@ namespace MedianGrassReplacement.Systems
 
 
             _hidden = GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>());
+
             _revealedHidden=GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>(),ComponentType.Exclude<Game.Tools.Hidden>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
             _changedHidden=GetEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>(),ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>());
             _changedHidden.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<PrefabRef>(),ComponentType.ReadOnly<Owner>()});
@@ -87,7 +118,44 @@ namespace MedianGrassReplacement.Systems
             _changedNodes = GetEntityQuery(ComponentType.ReadOnly<Game.Net.Node>(), ComponentType.ReadOnly<ConnectedEdge>(), ComponentType.ReadOnly<Game.Net.SubLane>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
 
             _changedNodes.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<ConnectedEdge>(), ComponentType.ReadOnly<Game.Net.SubLane>() });
+            CreateHiddenOwnerQueries();
 
+        }
+
+        private void CreateHiddenOwnerQueries()
+        {
+            if (SetHiddenQueryVersion == null) return;
+            // System.GetEntityQuery caches identical descriptions. Private
+            // queries keep these filters isolated from the full restore query.
+            try
+            {
+                _hiddenStructuralChanges = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>());
+                _ownsHiddenStructuralQuery = true;
+                _hiddenOwnerChanges = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<MGRHiddenJunctionLine>(), ComponentType.ReadOnly<Owner>());
+                _ownsHiddenOwnerQuery = true;
+                _hiddenStructuralChanges.SetOrderVersionFilter();
+                _hiddenOwnerChanges.SetChangedVersionFilter(ComponentType.ReadOnly<Owner>());
+            }
+            catch { DisposeHiddenOwnerQueries(); }
+        }
+        private void DisposeHiddenOwnerQueries()
+        {
+            if (_ownsHiddenStructuralQuery)
+            {
+                try { if (World.IsCreated) _hiddenStructuralChanges.Dispose(); } catch { }
+                finally { _ownsHiddenStructuralQuery = false; }
+            }
+            if (_ownsHiddenOwnerQuery)
+            {
+                try { if (World.IsCreated) _hiddenOwnerChanges.Dispose(); } catch { }
+                finally { _ownsHiddenOwnerQuery = false; }
+            }
+        }
+        protected override void OnDestroy()
+        {
+            _hiddenOwners.Clear(); _hiddenCandidates.Clear(); _hiddenOwnersReady = false;
+            DisposeHiddenOwnerQueries();
+            base.OnDestroy();
         }
 
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _externalPaint.Clear(); _active = false; Restore(); }
@@ -98,7 +166,7 @@ namespace MedianGrassReplacement.Systems
 
             base.OnGameLoadingComplete(purpose, mode);
 
-            Restore(); RequestedNodes.Clear();
+            Restore(); RequestedNodes.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Junction);
 
             _active = (mode & GameMode.GameOrEditor) != GameMode.None;
 
@@ -106,7 +174,14 @@ namespace MedianGrassReplacement.Systems
 
         }
 
+        private readonly JunctionReadBatch<Entity> _junctionReadBatch = new JunctionReadBatch<Entity>();
+        private Func<Entity,int> _readConnectedRoadCount;
         private int RoadCount(Entity node)
+        {
+            if(_readConnectedRoadCount==null) _readConnectedRoadCount=ReadConnectedRoadCount;
+            return _junctionReadBatch.RoadCount(node,_readConnectedRoadCount);
+        }
+        private int ReadConnectedRoadCount(Entity node)
 
         {
 
@@ -147,8 +222,6 @@ namespace MedianGrassReplacement.Systems
             if(EntityManager.HasBuffer<MGRIndividualDivider>(owner)){var individual=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
             if(individual.KeepsIndividualDivider(owner,line))return false;
             if(individual.OwnsIndividualDivider(owner,line))return true;}
-            int roads = RoadCount(owner);
-
             // Defensive simulation guard: never hide a lane used by vehicles/pedestrians.
 
             if (EntityManager.HasComponent<Game.Net.CarLane>(line) || EntityManager.HasComponent<Game.Net.ParkingLane>(line)
@@ -156,6 +229,10 @@ namespace MedianGrassReplacement.Systems
                 || EntityManager.HasComponent<Game.Net.PedestrianLane>(line) || EntityManager.HasComponent<Game.Net.TrackLane>(line)) return false;
 
             if (!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(line).m_Prefab, out var prefab) || prefab == null) return false;
+            // Vehicle/path lanes and non-paint prefabs cannot reach the generic
+            // junction rules. Preserve the individual-divider override above,
+            // then admit only paint geometry to connected-road validation.
+            int roads = RoadCount(owner);
             if(World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().OwnsHighwayNodePaint(owner,line))return true;
             if(EntityManager.HasComponent<Curve>(line)&&NodeLinePolicy.IsLineGeometry(prefab)&&HighwayNodePaintPolicy.Role(prefab.name,World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().IsYellowNodeBoundary(owner,EntityManager.GetComponentData<Curve>(line).m_Bezier))==1&&World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().OwnsExplicitNodeCenter(owner))return true;
             if((NodeLinePolicy.IsLineGeometry(prefab)||(SegmentUpgradePolicy.Mode(EntityManager,owner)&SegmentUpgradePolicy.HideNative)!=0&&NodeLinePolicy.IsPaintFill(prefab.name))&&!NodeLinePolicy.IsProtected(prefab.name)&&EntityManager.HasComponent<Curve>(line))
@@ -233,15 +310,84 @@ namespace MedianGrassReplacement.Systems
 
         }
 
+        private bool TrackHiddenOwner(Entity line)
+        {
+            try
+            {
+                if (!EntityManager.Exists(line) || !EntityManager.HasComponent<MGRHiddenJunctionLine>(line))
+                    _hiddenOwners.Remove(line);
+                else
+                    _hiddenOwners.Replace(line, EntityManager.HasComponent<Owner>(line)
+                        ? EntityManager.GetComponentData<Owner>(line).m_Owner : Entity.Null);
+                return true;
+            }
+            catch { _hiddenOwners.Clear(); _hiddenOwnersReady = false; return false; }
+        }
+        private void RebuildHiddenOwners()
+        {
+            _hiddenOwnersReady = false; _hiddenOwners.Clear();
+            using (var hidden = _hidden.ToEntityArray(Allocator.Temp))
+                foreach (var line in hidden) if (!TrackHiddenOwner(line)) return;
+            _hiddenOwnersReady = true;
+        }
+        private void SyncHiddenOwners()
+        {
+            if (!HiddenLookupSupported || SetHiddenQueryVersion == null || !_ownsHiddenStructuralQuery || !_ownsHiddenOwnerQuery) { _hiddenOwners.Clear(); _hiddenOwnersReady = false; return; }
+            try
+            {
+                if (!_hiddenOwnersReady || _initial) { RebuildHiddenOwners(); return; }
+                // Private queries are not advanced by SystemState's cache.
+                SetHiddenQueryVersion(ref _hiddenStructuralChanges, LastSystemVersion);
+                SetHiddenQueryVersion(ref _hiddenOwnerChanges, LastSystemVersion);
+                // Structural events also include Owner removal/new loaded tags;
+                // Owner-value writes need their separate change-version query.
+                using (var changed = _hiddenStructuralChanges.ToEntityArray(Allocator.Temp))
+                    foreach (var line in changed) if (!TrackHiddenOwner(line)) return;
+                using (var changed = _hiddenOwnerChanges.ToEntityArray(Allocator.Temp))
+                    foreach (var line in changed) if (!TrackHiddenOwner(line)) return;
+                // Direct destruction is absent from a current query. A count
+                // mismatch also detects destroy+create batches after new keys
+                // have been added above; reseed from authoritative membership.
+                if (_hiddenOwners.Count != _hidden.CalculateEntityCount()) RebuildHiddenOwners();
+            }
+            catch { _hiddenOwners.Clear(); _hiddenOwnersReady = false; }
+        }
+        private void RecheckHiddenOwners()
+        {
+            if (_initial || !_hiddenOwnersReady)
+            {
+                using (var hidden = _hidden.ToEntityArray(Allocator.Temp))
+                    foreach (var line in hidden)
+                        if ((_initial || !EntityManager.HasComponent<Owner>(line)
+                            || _nodeWork.Contains(EntityManager.GetComponentData<Owner>(line).m_Owner))
+                            && !ShouldHide(line)) Reveal(line);
+                return;
+            }
+            _hiddenCandidates.Clear();
+            try
+            {
+                // Ownerless records were always reconsidered on a node edit.
+                _hiddenOwners.Collect(Entity.Null, _hiddenCandidates);
+                foreach (var node in _nodeWork) _hiddenOwners.Collect(node, _hiddenCandidates);
+                foreach (var line in _hiddenCandidates)
+                    if (EntityManager.Exists(line) && EntityManager.HasComponent<MGRHiddenJunctionLine>(line)
+                        && (!EntityManager.HasComponent<Owner>(line)
+                            || _nodeWork.Contains(EntityManager.GetComponentData<Owner>(line).m_Owner))
+                        && !ShouldHide(line)) Reveal(line);
+            }
+            finally { _hiddenCandidates.Clear(); }
+        }
+
         private bool HideIfNeeded(Entity line)
 
         {
 
             if (!EntityManager.Exists(line) || EntityManager.HasComponent<Deleted>(line) || EntityManager.HasComponent<Game.Tools.Temp>(line) || EntityManager.HasComponent<MGRCurbMarking>(line) || EntityManager.HasComponent<MGRIntersectionPaint>(line) || EntityManager.HasComponent<MGRHiddenJunctionLine>(line) || !ShouldHide(line) || EntityManager.HasComponent<Game.Tools.Hidden>(line)) return false;
 
-            EntityManager.AddComponent<MGRHiddenJunctionLine>(line); EntityManager.AddComponent<Game.Tools.Hidden>(line);PreviewPaintInheritanceSystem.SourceChanged(World,line);
+            EntityManager.AddComponent(line, OwnedHiddenFlags);PreviewPaintInheritanceSystem.SourceChanged(World,line);
 
-            if (!EntityManager.HasComponent<BatchesUpdated>(line)) EntityManager.AddComponent<BatchesUpdated>(line); return true;
+            if (!EntityManager.HasComponent<BatchesUpdated>(line)) EntityManager.AddComponent<BatchesUpdated>(line);
+            TrackHiddenOwner(line); return true;
 
         }
 
@@ -249,13 +395,16 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            if (!EntityManager.Exists(line) || !EntityManager.HasComponent<MGRHiddenJunctionLine>(line)) return;
+            if (!EntityManager.Exists(line) || !EntityManager.HasComponent<MGRHiddenJunctionLine>(line)) { _hiddenOwners.Remove(line); return; }
 
             bool parentHidden = EntityManager.HasComponent<Owner>(line) && EntityManager.HasComponent<Game.Tools.Hidden>(EntityManager.GetComponentData<Owner>(line).m_Owner);
 
-            if (EntityManager.HasComponent<Game.Tools.Hidden>(line) && !parentHidden && !EntityManager.HasComponent<MGRReplacedPaint>(line)) EntityManager.RemoveComponent<Game.Tools.Hidden>(line);
-
-            EntityManager.RemoveComponent<MGRHiddenJunctionLine>(line);PreviewPaintInheritanceSystem.SourceChanged(World,line);
+            if (EntityManager.HasComponent<Game.Tools.Hidden>(line) && !parentHidden && !EntityManager.HasComponent<MGRReplacedPaint>(line))
+                EntityManager.RemoveComponent(line, OwnedHiddenFlags);
+            else
+                EntityManager.RemoveComponent<MGRHiddenJunctionLine>(line);
+            _hiddenOwners.Remove(line);
+            PreviewPaintInheritanceSystem.SourceChanged(World,line);
 
             if (!EntityManager.HasComponent<Deleted>(line) && !EntityManager.HasComponent<BatchesUpdated>(line)) EntityManager.AddComponent<BatchesUpdated>(line);
 
@@ -265,9 +414,10 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
 
-            using (var lines = _hidden.ToEntityArray(Allocator.Temp)) foreach (var line in lines) Reveal(line);
+            try { using (var lines = _hidden.ToEntityArray(Allocator.Temp)) foreach (var line in lines) Reveal(line); }
+            finally { _hiddenOwners.Clear(); _hiddenCandidates.Clear(); _hiddenOwnersReady = false; }
 
             _initial = true;
 
@@ -278,7 +428,12 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             long started=ModDiagnostics.RuntimeCosts.Begin();
-            try{UpdatePerformanceCore();}finally{ModDiagnostics.RuntimeCosts.End("JunctionMarkingSystem",started);}
+            // This system only changes line visibility/ownership tags. It does
+            // not write Node, Road, ConnectedEdge, Temp or Deleted topology.
+            // Cache integer counts only; structural line-tag edits retain no
+            // borrowed buffers or native component views in the memo.
+            _junctionReadBatch.Clear();
+            try{UpdatePerformanceCore();}finally{_junctionReadBatch.Clear();ModDiagnostics.RuntimeCosts.End("JunctionMarkingSystem",started);}
         }
         private void UpdatePerformanceCore()
         {
@@ -286,6 +441,7 @@ namespace MedianGrassReplacement.Systems
             if (Mod.Saving) return;
 
             if (!_active) return;
+            CurbsideChangePipeline.For(World).Drain(ChangeConsumer.Junction, RequestedNodes);
 
 
 
@@ -307,7 +463,7 @@ namespace MedianGrassReplacement.Systems
 
             _previousEnabled = true; _refresh = false;
 
-            _nodeWork.Clear(); foreach (var node in RequestedNodes) _nodeWork.Add(node); RequestedNodes.Clear();
+            _nodeWork.Clear(); foreach (var node in RequestedNodes) _nodeWork.Add(node); RequestedNodes.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Junction);
 
             if(World.GetExistingSystemManaged<CurbLineEmissionSystem>()?.UsesMarkingSpecificChanges != true)
                 using (var nodes = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) _nodeWork.Add(node);
@@ -320,13 +476,14 @@ namespace MedianGrassReplacement.Systems
 
             var query = _lines;
 
-            if (query.IsEmpty && !nodeChange && _hidden.IsEmpty) { _initial = false; return; }
+            if (query.IsEmpty && !nodeChange && _hidden.IsEmpty) { _hiddenOwners.Clear(); _hiddenCandidates.Clear(); _hiddenOwnersReady = false; _initial = false; return; }
 
-            Dependency.Complete();
+            // Public ECS APIs below join the component types they access.
 
             try
 
             {
+                SyncHiddenOwners();
 
                 // LaneHiddenSystem removes per-lane Hidden when the parent is
 
@@ -368,11 +525,7 @@ namespace MedianGrassReplacement.Systems
 
                 // Recheck owned flags when the node topology changes or refresh is pressed.
 
-                if (_initial || nodeChange)
-
-                    using (var hidden = _hidden.ToEntityArray(Allocator.Temp))
-
-                        foreach (var line in hidden) if ((_initial || !EntityManager.HasComponent<Owner>(line) || _nodeWork.Contains(EntityManager.GetComponentData<Owner>(line).m_Owner)) && !ShouldHide(line)) Reveal(line);
+                if (_initial || nodeChange) RecheckHiddenOwners();
 
                 int added = 0;
 
@@ -390,9 +543,9 @@ namespace MedianGrassReplacement.Systems
 
                     {
 
-                        var lanes = new System.Collections.Generic.List<Entity>(); foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node, true)) lanes.Add(entry.m_SubLane);
+                        _laneWork.Clear(); foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(node, true)) _laneWork.Add(entry.m_SubLane);
 
-                        foreach (var lane in lanes) if (HideIfNeeded(lane)) added++;
+                        foreach (var lane in _laneWork) if (HideIfNeeded(lane)) added++;
 
                     }
 
@@ -404,7 +557,14 @@ namespace MedianGrassReplacement.Systems
 
             catch (Exception error) { Restore(); Enabled = false; Mod.Log.Error("Junction cleanup paused: " + error); }
 
-            finally { _lines.ResetFilter(); }
+            finally
+            {
+                _laneWork.Clear();
+                // Process large foreign graphs in full without retaining an
+                // unbounded peak-capacity snapshot after the update.
+                if (_laneWork.Capacity > 2048) _laneWork.Capacity = 2048;
+                _lines.ResetFilter();
+            }
 
         }
 

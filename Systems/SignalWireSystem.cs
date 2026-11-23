@@ -40,7 +40,7 @@ namespace MedianGrassReplacement.Systems
                 if(!notified)
                 {
                     notified=true;
-                    using(var nodes=styles.ToEntityArray(Allocator.Temp))foreach(var node in nodes)if(GardenCityLightPolicy.IsWireStyle(EntityManager.GetComponentData<MGRSignalStyle>(node).Value))FarSideLightSystem.Queue(node);
+                    using(var nodes=styles.ToEntityArray(Allocator.Temp))foreach(var node in nodes)if(GardenCityLightPolicy.IsWireStyle(EntityManager.GetComponentData<MGRSignalStyle>(node).Value))FarSideLightSystem.Queue(World,node);
                 }
                 return;
             }
@@ -54,7 +54,7 @@ namespace MedianGrassReplacement.Systems
             }
             if(registered){if(pending!=null)prefabs.TryGetEntity(pending,out cable);return;}
             if(UnityEngine.Time.realtimeSinceStartup<retry)return;retry=UnityEngine.Time.realtimeSinceStartup+2;
-            Dependency.Complete();NetLaneGeometryPrefab source=null;
+            { CompleteDependency(); Dependency = default; }NetLaneGeometryPrefab source=null;
             using(var items=assets.ToEntityArray(Allocator.Temp))foreach(var item in items)
             {
                 var data=EntityManager.GetComponentData<UtilityLaneData>(item);
@@ -103,6 +103,7 @@ namespace MedianGrassReplacement.Systems
                     entry.Wires.Add(entity);
                 }
             }
+            NativePaintProjectionSystem.OwnerChanged(World,node);
             Mod.Log.Info("Native signal cables applied: node="+node+" supports="+supports.Count+" spans="+seen.Count+" lanes="+entry.Wires.Count+" thicknessScale=1.35; shared native cable geometry/material, shallow static sag.");
         }
         internal void RecordSnapshot()
@@ -119,13 +120,14 @@ namespace MedianGrassReplacement.Systems
             if(!entries.TryGetValue(node,out var entry))return;
             foreach(var entity in entry.Wires)if(EntityManager.Exists(entity)&&!EntityManager.HasComponent<Deleted>(entity))GeneratedVisualLifecycle.Retire(World,entity);
             entries.Remove(node);
+            NativePaintProjectionSystem.OwnerChanged(World,node);
         }
         protected override void OnUpdate()
         {long started=ModDiagnostics.RuntimeCosts.Begin();try{UpdateMeasuredCore();}finally{ModDiagnostics.RuntimeCosts.End("SignalWireSystem",started);}}
         private void UpdateMeasuredCore()
         {
             if(Mod.Saving||entries.Count==0||UnityEngine.Time.realtimeSinceStartup<next)return;next=UnityEngine.Time.realtimeSinceStartup+1;
-            Dependency.Complete();removed.Clear();foreach(var item in entries)
+            { CompleteDependency(); Dependency = default; }removed.Clear();foreach(var item in entries)
             {
                 var node=item.Key;if(!EntityManager.Exists(node)||EntityManager.HasComponent<Deleted>(node)||!EntityManager.HasComponent<TrafficLights>(node)||!EntityManager.HasComponent<MGRGardenCitySignals>(node)||!EntityManager.HasComponent<MGRSignalStyle>(node)||!GardenCityLightPolicy.IsWireStyle(EntityManager.GetComponentData<MGRSignalStyle>(node).Value))removed.Add(node);
             }
@@ -133,7 +135,7 @@ namespace MedianGrassReplacement.Systems
         }
         internal void Clear()
         {
-            Dependency.Complete();using(var items=owned.ToEntityArray(Allocator.Temp))foreach(var entity in items)GeneratedVisualLifecycle.Retire(World,entity);entries.Clear();
+            { CompleteDependency(); Dependency = default; }using(var items=owned.ToEntityArray(Allocator.Temp))foreach(var entity in items)GeneratedVisualLifecycle.Retire(World,entity);entries.Clear();
         }
         public void PreSerialize(Context context){Clear();}
         protected override void OnGameLoadingComplete(Purpose purpose,GameMode mode){base.OnGameLoadingComplete(purpose,mode);active=(mode&GameMode.GameOrEditor)!=GameMode.None;retry=next=0;}

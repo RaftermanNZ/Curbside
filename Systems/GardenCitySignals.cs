@@ -287,7 +287,7 @@ namespace MedianGrassReplacement.Systems
     else Mod.Log.Warn("Signal composite registration failed: "+item.Value.name);
     pending.Remove(key);pendingSources.Remove(key);
    }
-   foreach(var node in pendingNodes)FarSideLightSystem.Queue(node);if(pending.Count==0)pendingNodes.Clear();
+   foreach(var node in pendingNodes)FarSideLightSystem.Queue(p.World,node);if(pending.Count==0)pendingNodes.Clear();
   }
   internal static Entity SelectSuppressed(PrefabSystem p,EntityManager em,Entity node,Entity fallback)
   {

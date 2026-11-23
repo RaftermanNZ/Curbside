@@ -83,6 +83,8 @@ namespace MedianGrassReplacement.Systems
         private static FieldInfo field;
         private static EntityQuery original, filtered;
         private static bool installed;
+        internal static bool KeepsTemporaryPaint(World world)
+            { return false; }
         internal static bool SupportsModule(Guid module, Guid entities)
             => (module == new Guid("e15551e9-3dea-4855-8dde-1da3cea7d7ef")
                 && entities == new Guid("3d6b23ae-b281-44a6-a5f4-cbd5fd3d75e6"))

@@ -175,7 +175,6 @@ namespace MedianGrassReplacement.Systems
             if(target==0)return source;
             var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
             Entity color=target==1?palette.WhiteVariant(source):target==2?palette.Variant(source):Entity.Null;
-            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.colorDecision","sourcePrefab="+source+" opposing="+opposing+" edge="+edge+" targetColor="+target+" variant="+color+" missingVariant="+(target!=0&&color==Entity.Null));
             return color==Entity.Null?source:color;
         }
         internal Entity ResolveCenterStyle(Entity source)
@@ -486,7 +485,8 @@ namespace MedianGrassReplacement.Systems
         private readonly List<Entity> _deliveredParking = new List<Entity>(8), _retryRoadWork = new List<Entity>();
         private readonly List<Entity> _joinCandidates = new List<Entity>(8), _completedJoins = new List<Entity>(8);
         private readonly System.Diagnostics.Stopwatch _roadWatch = new System.Diagnostics.Stopwatch(), _joinWatch = new System.Diagnostics.Stopwatch();
-        private readonly PaintOwnerNotifications _ownerNotifications = new PaintOwnerNotifications();
+        private CurbsideChangePipeline changePipeline;
+        private readonly PaintOwnerNotifications _ownerNotifications = new PaintOwnerNotifications { SharedInputDiscovery = true };
         private readonly HashSet<Entity> _notifiedRoadWork = new HashSet<Entity>();
         private readonly List<Entity> _notifiedNodeWork = new List<Entity>();
         private MarkingChangeNotifications _markingChanges;
@@ -503,8 +503,12 @@ namespace MedianGrassReplacement.Systems
 
             base.OnCreate();
 
+            CurbsideReadPhase.Initialize(World);
+
             _prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
             _ownerNotifications.KnownNonPaintPrefab = new PaintLaneReadPolicy(_prefabs).IsNonPaint;
+            changePipeline = CurbsideChangePipeline.For(World);
+            changePipeline.Connect(World, _prefabs, _ownerNotifications, _externalPaint);
             _markingChanges = MarkingChangeNotifications.Supported
                 ? new MarkingChangeNotifications(descriptions => GetEntityQuery(descriptions)) : null;
 
@@ -546,7 +550,7 @@ namespace MedianGrassReplacement.Systems
 
         public void PreSerialize(Colossal.Serialization.Entities.Context context) { PrepareRetainedMarkingsForSerialization(); }
 
-        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; _diagnosticPaintTarget=Entity.Null; _nodeDividerExternal.Clear(); _externalPaint.Clear(); ClearOwned(); _catalogRequested=true; _definitionCount=-1; }
+        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); CurbsideChangePipeline.Reset(World); _active = false; _diagnosticPaintTarget=Entity.Null; _nodeDividerExternal.Clear(); _externalPaint.Clear(); ClearOwned(); _catalogRequested=true; _definitionCount=-1; }
 
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
 
@@ -650,7 +654,7 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                Dependency.Complete();
+                { CompleteDependency(); Dependency = default; }
 
                 // Retain old entities until reconciliation can reuse or replace them.
 
@@ -775,10 +779,16 @@ namespace MedianGrassReplacement.Systems
             // Apply each filter only while collecting that snapshot, then reset.
 
             bool specificChanges=UsesMarkingSpecificChanges;
+            var backlog=_backlogRoadWork;
+            var pending=directRoads;
+            bool ownerNotificationBatch = false;
+            try
+            {
             if (specificChanges)
             {
                 _notifiedRoadWork.Clear(); _notifiedNodeWork.Clear();
-                _markingChanges.Collect(EntityManager, _notifiedRoadWork, _notifiedNodeWork);
+                _markingChanges.Collect(EntityManager, _notifiedRoadWork, _notifiedNodeWork,
+                    _initial ? null : _ownerNotifications, _externalPaint, ref ownerNotificationBatch);
                 _backlogRoadWork.Clear(); _backlogRoadWork.UnionWith(_pendingRoads); _pendingRoads.Clear();
             }
             else
@@ -814,14 +824,17 @@ namespace MedianGrassReplacement.Systems
                 using(var changedNodes=_joinNodes.ToEntityArray(Allocator.Temp))foreach(var node in changedNodes)_notifiedNodeWork.Add(node);
 #endif
             }
-            var backlog=_backlogRoadWork;
-            var pending=directRoads;
-            _ownerNotifications.BeginBatch(_notifiedRoadWork.Count + _notifiedNodeWork.Count > 1);
-            try
+            // A coarse proof probe may already own this read-only phase.
+            // Empty callbacks still do not consume certificate lifetime.
+            int ownerCount = _notifiedRoadWork.Count + _notifiedNodeWork.Count;
+            if (!ownerNotificationBatch && ownerCount != 0)
             {
+                _ownerNotifications.BeginBatch(ownerCount > 1);
+                ownerNotificationBatch = true;
+            }
             foreach (var road in _notifiedRoadWork)
                 if (_ownerNotifications.Changed(EntityManager, _externalPaint, road, true))
-                { pending.Add(road); _paintRefreshReasons.Observe(road); if(specificChanges){IntersectionPaintSystem.RequestMarkingRoad(road);World.GetExistingSystemManaged<CurbDecalSystem>()?.NotifyMarkingRoad(road);} }
+                { pending.Add(road); _paintRefreshReasons.Observe(road); if(specificChanges){changePipeline.CommittedRoad(road);} }
             if(_initial)using(var roads=_roads.ToEntityArray(Allocator.Temp))foreach(var road in roads){pending.Add(road);_paintRefreshReasons.Require(road);}
             foreach(var road in backlog){pending.Add(road);_paintRefreshReasons.Require(road);}
             foreach(var node in _notifiedNodeWork)
@@ -829,12 +842,12 @@ namespace MedianGrassReplacement.Systems
                 bool changed = _ownerNotifications.Changed(EntityManager, _externalPaint, node);
                 if (!_initial && !changed) continue;
                 _dirtyNodes.Add(node);
-                if(specificChanges){IntersectionPaintSystem.RequestMarkingOwner(node);JunctionMarkingSystem.RequestNodeRefresh(node);}
+                if(specificChanges){changePipeline.CommittedOwner(node);}
                 foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(node,true))
-                    if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!EntityManager.HasComponent<Deleted>(connection.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(connection.m_Edge)){pending.Add(connection.m_Edge);_paintRefreshReasons.Observe(connection.m_Edge);if(specificChanges){IntersectionPaintSystem.RequestMarkingRoad(connection.m_Edge);World.GetExistingSystemManaged<CurbDecalSystem>()?.NotifyMarkingRoad(connection.m_Edge);}}
+                    if(EntityManager.HasComponent<Road>(connection.m_Edge)&&!EntityManager.HasComponent<Deleted>(connection.m_Edge)&&!EntityManager.HasComponent<Game.Tools.Temp>(connection.m_Edge)){pending.Add(connection.m_Edge);_paintRefreshReasons.Observe(connection.m_Edge);if(specificChanges){changePipeline.CommittedRoad(connection.m_Edge);}}
             }
             }
-            finally { _ownerNotifications.EndBatch(); }
+            finally { if (ownerNotificationBatch) _ownerNotifications.EndBatch(); }
             if (pending.Count == 0 && _roadWorkOrder.Count == 0 && _dirtyNodes.Count == 0) return;
 
             int catalogBeforeWork = CatalogRevision;
@@ -848,7 +861,9 @@ namespace MedianGrassReplacement.Systems
                     foreach (var road in roads) { pending.Add(road); _paintRefreshReasons.Require(road); }
             if (!ResolveLine()) { foreach (var road in pending) _pendingRoads.Add(road); return; }
 
-            Dependency.Complete();
+            // Public typed reads/writes below join their own producers/readers.
+            // No mod job or borrowed native accessor is owned by this fence.
+            
 
 
 
@@ -919,6 +934,7 @@ namespace MedianGrassReplacement.Systems
                     {
                         if(existing!=null)foreach(var entity in existing.Entities)GeneratedVisualLifecycle.Retire(World,entity);
                         _marks.Remove(road);
+                        NativePaintProjectionSystem.OwnerChanged(World, road);
                         // No previous replacement and no new replacement means
                         // a parking-only notification changed no paint ownership.
                         if (!parkingOnly || existing != null) QueueNativeEdges(road);
@@ -971,6 +987,7 @@ namespace MedianGrassReplacement.Systems
                         foreach (var entity in queue) if (EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity)) GeneratedVisualLifecycle.Retire(World,entity);
 
                     _marks[road] = next;
+                    NativePaintProjectionSystem.OwnerChanged(World, road);
                     if(ModDiagnostics.TraceBuffer.Enabled&&CenterlineUpgradePolicy.Mode(EntityManager,road)!=0){int emitted=next.Curves.FindAll(m=>m.CenterUpgrade).Count;ModDiagnostics.TraceBuffer.Record("center.emit",road+" style="+CenterlineUpgradePolicy.Mode(EntityManager,road)+" color="+(Mod.Settings.EuropeanMarkings?"White":"Yellow")+" visualCurves="+emitted+" (paired mesh only for double style)");}
 
                     QueueNativeEdges(road);
@@ -2300,6 +2317,7 @@ namespace MedianGrassReplacement.Systems
                 foreach (var queue in reusable.Values) foreach (var entity in queue) GeneratedVisualLifecycle.Retire(World,entity);
 
                 if (next.Entities.Count > 0) _joins[node] = next; else _joins.Remove(node);
+                NativePaintProjectionSystem.OwnerChanged(World, node);
 
             }
 
@@ -2611,7 +2629,6 @@ namespace MedianGrassReplacement.Systems
 
             GeneratedVisualLifecycle.Track(World,entity);
 
-            if(ModDiagnostics.ActionJournal.Active)ModDiagnostics.ActionJournal.Record("line.createdByCurbside","entity="+entity+" owner="+road+" prefab="+prefab+" curbOwned="+curbOwned+" a="+curve.a+" b="+curve.b+" c="+curve.c+" d="+curve.d);
             return entity;
 
         }
@@ -2632,6 +2649,7 @@ namespace MedianGrassReplacement.Systems
                 if (EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity)) GeneratedVisualLifecycle.Retire(World,entity);
 
             _marks.Remove(road);
+            NativePaintProjectionSystem.OwnerChanged(World, road);
 
         }
 
@@ -2641,7 +2659,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
 
             using (var entities = _owned.ToEntityArray(Allocator.Temp))
 

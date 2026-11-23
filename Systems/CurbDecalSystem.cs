@@ -132,7 +132,7 @@ namespace MedianGrassReplacement.Systems
 
         private readonly HashSet<Entity> _pending = new HashSet<Entity>();
         private readonly HashSet<Entity> _markingRoads = new HashSet<Entity>();
-        internal void NotifyMarkingRoad(Entity road) { if(_enabled) _markingRoads.Add(road); }
+        internal void NotifyMarkingRoad(Entity road) { if(_enabled) CurbsideChangePipeline.For(World).Publish(ChangeConsumer.RoadDecals, road); }
 
 
         private readonly Queue<Entity> _roadQueue=new Queue<Entity>();
@@ -164,6 +164,7 @@ namespace MedianGrassReplacement.Systems
         {
 
             base.OnCreate();
+            CurbsideChangePipeline.For(World).RegisterDecals(this);
 
             _roads = GetEntityQuery(ComponentType.ReadOnly<MGRCurbDecalSides>(), ComponentType.ReadOnly<Road>(), ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Composition>(), ComponentType.ReadOnly<Game.Net.SubLane>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
 
@@ -185,7 +186,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            CancelBuild(); foreach (var visual in _visuals.Values) Destroy(visual); _visuals.Clear(); _pending.Clear();_roadQueue.Clear(); _markingRoads.Clear(); _total = 0;
+            CancelBuild(); foreach (var visual in _visuals.Values) Destroy(visual); _visuals.Clear(); _pending.Clear();_roadQueue.Clear(); _markingRoads.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.RoadDecals); _total = 0;
 
             if (_volume != null) UnityEngine.Object.Destroy(_volume); _volume = null;
 
@@ -227,6 +228,7 @@ namespace MedianGrassReplacement.Systems
             if (_initial) { using (var items = _roads.ToEntityArray(Allocator.Temp)) foreach (var road in items) EnqueueRoad(road); _initial = false; }
             else if(World.GetExistingSystemManaged<CurbLineEmissionSystem>()?.UsesMarkingSpecificChanges == true)
             {
+                CurbsideChangePipeline.For(World).Drain(ChangeConsumer.RoadDecals, _markingRoads);
                 foreach(var road in _markingRoads)
                     if(Live(road)&&(EntityManager.HasComponent<MGRCurbDecalSides>(road)
                         ||_visuals.ContainsKey(road)||_build?.Road==road))EnqueueRoad(road);
@@ -259,10 +261,10 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            _markingRoads.Clear();
+            _markingRoads.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.RoadDecals);
 
             if (_build == null && _pending.Count == 0) return;
-            Dependency.Complete();
+            // Public ECS APIs below join the component types they access.
 
             // Allocation and projector registration are spread over frames, including paused simulation.
 

@@ -76,9 +76,9 @@ namespace MedianGrassReplacement.Systems
 
             if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit)) return deps;
 
-            deps.Complete();if(!SectionUpgradeTargeting.TryRoad(EntityManager,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))return default;
+            if (applyAction.WasPressedThisFrame() || remove) { deps.Complete(); deps = default; }if(!SectionUpgradeTargeting.TryRoad(EntityManager,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))return deps;
 
-            if (!EntityManager.HasComponent<Road>(road) || !EntityManager.HasComponent<Curve>(road) || !EntityManager.HasBuffer<Game.Net.SubLane>(road) || EntityManager.HasComponent<Deleted>(road) || EntityManager.HasComponent<Temp>(road)) return default;
+            if (!EntityManager.HasComponent<Road>(road) || !EntityManager.HasComponent<Curve>(road) || !EntityManager.HasBuffer<Game.Net.SubLane>(road) || EntityManager.HasComponent<Deleted>(road) || EntityManager.HasComponent<Temp>(road)) return deps;
 
             World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().RetainPaintTarget(road);
             bool left = RoadSideUpgrades.IsLeft(EntityManager, road, hit.m_Hit.m_HitPosition);
@@ -95,7 +95,7 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            if (!eligible) return default;
+            if (!eligible) return deps;
 
             var overlay = World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>(); var buffer = overlay.GetBuffer(out var pending); pending.Complete(); buffer.DrawCurve(new UnityEngine.Color(.15f, 1f, .3f, .8f), RoadSideUpgrades.Preview(EntityManager, road, left), 2f);
 
@@ -139,14 +139,14 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
-                FixedParkingSystem.QueueRoad(road); CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
+                FixedParkingSystem.QueueRoad(World,road); CurbLineEmissionSystem.QueueRoad(road);SegmentUpgradePolicy.QueuePaint(EntityManager,road);
                 UpgradeFeedback.Report(_selected.name,remove?"Parking bay upgrade removed on this side.":"Parking bays applied on this side; No parking cleared here.");
 
                 Mod.Debug(remove ? "Parking upgrade removed; native parking restored." : marked ? "Road section selected for marked parking bays." : "Road section restored to unmarked native parking.");
 
             }
 
-            return default;
+            return deps;
 
         }
 

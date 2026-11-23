@@ -42,13 +42,13 @@ namespace MedianGrassReplacement.Systems
             bool remove=UpgradeInputPolicy.RemovePressed(secondaryApplyAction.WasPressedThisFrame());
             if(UpgradeInputPolicy.CancelPressed(cancelAction.WasPressedThisFrame())){m_ToolSystem.activeTool=m_DefaultToolSystem;return deps;}
             if(!m_HasFocus||UpgradeInputPolicy.PointerBlocked||!m_ToolRaycastSystem.GetRaycastResult(out var hit))return deps;
-            deps.Complete();Entity road=hit.m_Owner;
+            if (applyAction.WasPressedThisFrame() || remove) { deps.Complete(); deps = default; }Entity road=hit.m_Owner;
             if(EntityManager.HasComponent<Temp>(road))road=EntityManager.GetComponentData<Temp>(road).m_Original;
             for(int i=0;i<8&&!EntityManager.HasComponent<Edge>(road)&&EntityManager.HasComponent<Owner>(road);i++)road=EntityManager.GetComponentData<Owner>(road).m_Owner;
-            if(!EntityManager.HasComponent<Road>(road)||!EntityManager.HasComponent<Edge>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return default;
+            if(!EntityManager.HasComponent<Road>(road)||!EntityManager.HasComponent<Edge>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return deps;
             var edge=EntityManager.GetComponentData<Edge>(road);bool end=NativeCrosswalkTargeting.NearEnd(EntityManager.GetComponentData<EdgeGeometry>(road),hit.m_Hit.m_HitPosition);var node=end?edge.m_End:edge.m_Start;
-            if(!EntityManager.HasBuffer<ConnectedEdge>(node)||EntityManager.HasComponent<Deleted>(node)||EntityManager.HasComponent<TrafficLights>(node))return default;
-            if(EntityManager.GetBuffer<ConnectedEdge>(node,true).Length<3)return default;
+            if(!EntityManager.HasBuffer<ConnectedEdge>(node)||EntityManager.HasComponent<Deleted>(node)||EntityManager.HasComponent<TrafficLights>(node))return deps;
+            if(EntityManager.GetBuffer<ConnectedEdge>(node,true).Length<3)return deps;
             var selected=ApproachStopSystem.Away(EntityManager,road,node);
             Entity opposite=Entity.Null;float best=-.85f;
             foreach(var entry in EntityManager.GetBuffer<ConnectedEdge>(node,true))
@@ -66,7 +66,7 @@ namespace MedianGrassReplacement.Systems
                     var connection=EntityManager.GetComponentData<Edge>(entry.m_Edge);bool start=connection.m_Start==node;
                     buffer.DrawCurve(new UnityEngine.Color(.2f,1,.3f,.8f),MathUtils.Cut(EntityManager.GetComponentData<Curve>(entry.m_Edge).m_Bezier,start?new float2(0,.15f):new float2(.85f,1)),2);
                 }
-                if(!applyAction.WasPressedThisFrame()&&!remove)return default;
+                if(!applyAction.WasPressedThisFrame()&&!remove)return deps;
                 bool allWay=EntityManager.HasComponent<Upgraded>(node)&&(EntityManager.GetComponentData<Upgraded>(node).m_Flags.m_General&CompositionFlags.General.AllWayStop)!=0;
                 if(!EntityManager.HasBuffer<MGRStopApproach>(node))EntityManager.AddBuffer<MGRStopApproach>(node);
                 // Finish structural changes before borrowing a dynamic buffer.
@@ -87,7 +87,7 @@ namespace MedianGrassReplacement.Systems
                 }
             }
             if(!EntityManager.HasComponent<Updated>(node))EntityManager.AddComponent<Updated>(node);
-            World.GetOrCreateSystemManaged<ApproachStopSystem>().Queue(node);return default;
+            World.GetOrCreateSystemManaged<ApproachStopSystem>().Queue(node);return deps;
         }
     }
 }

@@ -44,6 +44,13 @@ namespace MedianGrassReplacement.Systems
   {
    Mod.Log.Info("Save coordinator: preparation started.");
    World.GetOrCreateSystemManaged<SignalSaveFenceSystem>().Update();
+   // Temporary presentation must be released before private definitions are
+   // retired. IPreSerialize is not automatically invoked by this coordinator.
+   var previewContext=World.GetOrCreateSystemManaged<Game.Serialization.SaveGameSystem>().context;
+   World.GetExistingSystemManaged<NativeSignalProjectionSystem>()?.PreSerialize(previewContext);
+   World.GetExistingSystemManaged<NativePaintProjectionSystem>()?.PreSerialize(previewContext);
+   World.GetExistingSystemManaged<NativeCrosswalkDragSystem>()?.PreSerialize(previewContext);
+   World.GetExistingSystemManaged<NativeApproachStopPreviewSystem>()?.PreSerialize(previewContext);
    if(SaveDiagnostics.DeepEnabled)World.GetOrCreateSystemManaged<GeneratedVisualSaveSystem>().AuditRetirement();
    World.GetExistingSystemManaged<MarkingPreviewSystem>()?.Restore();
    World.GetExistingSystemManaged<VisualLifecycleSystem>()?.FlushPending();

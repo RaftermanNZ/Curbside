@@ -162,7 +162,7 @@ namespace MedianGrassReplacement.Systems
         private byte EffectiveMode(Entity owner){if(modeCache.TryGetValue(owner,out byte result))return result;result=EntityManager.HasComponent<Node>(owner)?NodeMode(owner):Mode(EntityManager,owner);modeCache[owner]=result;return result;}
         internal void Restore()
         {
-            Dependency.Complete();using(var lights=hidden.ToEntityArray(Allocator.Temp))foreach(var e in lights)Release(e);
+            { CompleteDependency(); Dependency = default; }using(var lights=hidden.ToEntityArray(Allocator.Temp))foreach(var e in lights)Release(e);
             owned.Clear();modeCache.Clear();priorOff.Clear();nodeWork.Clear();ownedNodes.Clear();initial=true;
         }
         public void PreSerialize(Context context)=>Restore();
@@ -176,7 +176,7 @@ namespace MedianGrassReplacement.Systems
             try
             {
                 if(requested.Count==0&&requestedNodes.Count==0&&owned.Count==0&&roads.IsEmptyIgnoreFilter&&selectedNodes.IsEmptyIgnoreFilter)return;
-                Dependency.Complete();
+                // Public ECS APIs below join the component types they access.
                 nodeWork.Clear();
                 foreach(var node in requestedNodes)nodeWork.Add(node);requestedNodes.Clear();
                 if(initial){using(var list=roads.ToEntityArray(Allocator.Temp))foreach(var road in list)requested.Add(road);using(var nodes=selectedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)nodeWork.Add(node);initial=false;}

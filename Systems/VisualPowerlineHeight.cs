@@ -43,7 +43,7 @@ namespace MedianGrassReplacement.Systems
         }
         private void RestorePoleDefinitions()
         {
-            if(_scaledPoles.Count==0)return;Dependency.Complete();
+            if(_scaledPoles.Count==0)return;{ CompleteDependency(); Dependency = default; }
             var reverse=new Dictionary<Entity,Entity>();foreach(var pair in _scaledPoles)reverse[pair.Value]=pair.Key;
             // Save/disposal only, including deleted/temp references not in the live pole pool.
             using(var refs=_poleReferences.ToEntityArray(Allocator.Temp))foreach(var e in refs)

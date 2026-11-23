@@ -36,7 +36,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            references = GetEntityQuery(new EntityQueryDesc { All = new[] { ComponentType.ReadOnly<PrefabRef>() }, Options = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IncludePrefab });
+            references = EntityManager.CreateEntityQuery(new EntityQueryDesc { All = new[] { ComponentType.ReadOnly<PrefabRef>() }, Options = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IncludePrefab });
         }
 
         private Change GetChange(Entity entity)
@@ -120,6 +120,7 @@ namespace MedianGrassReplacement.Systems
             if (entity == Entity.Null) return;
             TrackDefinition(entity, original, "retirement-only");
             definitions[entity] = Frame + (BeforeCulling ? 0 : 1);
+            if (!definitionSources.ContainsKey(entity)) DefinitionReferenceTargetsChanged();
             definitionSources[entity] = original;
             if (!definitionOrigins.HasDependents(entity)) readyDefinitions.Add(entity);
             definitionRepairPending = true;
@@ -127,12 +128,18 @@ namespace MedianGrassReplacement.Systems
 
         internal void RepairDefinitionReferences()
         {
-            if (definitions.Count == 0 || !definitionRepairPending && readyDefinitions.Count == 0) return;
+            if (definitions.Count == 0) { definitionReferenceCache.ReleaseMatches(); return; }
+            if (!definitionRepairPending && readyDefinitions.Count == 0) return;
             NativeVisualInvalidation.CompleteReaders(World);
-            using (var entities = references.ToEntityArray(Allocator.Temp)) foreach (var entity in entities)
+            // Collect owned IDs before writes: ApplyPrefab can move archetypes.
+            var targets = new List<DefinitionReference>();
+            CollectDefinitionReferences(targets);
+            foreach (var reference in targets)
             {
-                var prefab = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
-                if (definitionSources.ContainsKey(prefab) && OriginalDefinition(prefab, out var original))
+                var entity = reference.Actor;
+                if (!EntityManager.Exists(entity) || !EntityManager.HasComponent<PrefabRef>(entity)) continue;
+                var current = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
+                if (definitionSources.ContainsKey(current) && OriginalDefinition(current, out var original))
                 {
                     if (EntityManager.HasComponent<Deleted>(entity)) continue;
                     NativeVisualInvalidation.ApplyPrefab(World, entity, original);
@@ -167,6 +174,7 @@ namespace MedianGrassReplacement.Systems
             definitions.Clear();
             definitionSources.Clear();
             readyDefinitions.Clear(); definitionRepairPending = false;
+            definitionReferenceCache.Clear();
         }
 
         protected override void OnUpdate()
@@ -180,7 +188,7 @@ namespace MedianGrassReplacement.Systems
         internal void FlushPending()
         {
             if (changes.Count != 0 || retire.Count != 0) NativeVisualInvalidation.CompleteReaders(World);
-            foreach (var entity in retire) GeneratedVisualLifecycle.RetireNow(World, entity);
+            GeneratedVisualLifecycle.RetireQueuedBatch(World, retire, LaneOwners);
             retire.Clear();
             foreach (var pair in changes)
             {
@@ -214,10 +222,12 @@ namespace MedianGrassReplacement.Systems
 
         internal void FinishFrame()
         {
-            if (readyDefinitions.Count == 0) return;
+            if (readyDefinitions.Count == 0) { if (definitions.Count == 0) definitionReferenceCache.ReleaseMatches(); return; }
             NativeVisualInvalidation.CompleteReaders(World);
             var used = new HashSet<Entity>();
-            using (var values = references.ToComponentDataArray<PrefabRef>(Allocator.Temp)) foreach (var value in values) used.Add(value.m_Prefab);
+            var targets = new List<DefinitionReference>();
+            CollectDefinitionReferences(targets);
+            foreach (var reference in targets) used.Add(reference.Prefab);
             foreach (var entity in new List<Entity>(readyDefinitions))
             {
                 if (definitions[entity] > Frame || used.Contains(entity) || definitionOrigins.HasDependents(entity)) continue;
@@ -226,15 +236,21 @@ namespace MedianGrassReplacement.Systems
                 definitionSources.Remove(entity);
                 definitionOrigins.ReleaseDestroyed(entity, DefinitionExists, DefinitionDependencyReleased);
             }
+            if (definitions.Count == 0) definitionReferenceCache.ReleaseMatches();
         }
 
         protected override void OnDestroy()
         {
+            LaneOwners.Deactivate();
+            definitionReferenceCache.Clear();
+            references.Dispose();
             base.OnDestroy();
         }
 
         protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose, GameMode mode)
         {
+            LaneOwners.Clear();
+            definitionReferenceCache.Clear();
             changes.Clear(); retire.Clear(); BeforeCulling = false;
             definitions.Clear(); definitionSources.Clear(); definitionOrigins.Clear(); readyDefinitions.Clear(); definitionRepairPending = false;
             base.OnGamePreload(purpose, mode);
@@ -243,7 +259,13 @@ namespace MedianGrassReplacement.Systems
 
     public partial class VisualMutationBoundarySystem : GameSystemBase
     {
-        protected override void OnUpdate() { World.GetOrCreateSystemManaged<VisualLifecycleSystem>().CloseMutations(); }
+        protected override void OnUpdate()
+        {
+            World.GetOrCreateSystemManaged<VisualLifecycleSystem>().CloseMutations();
+            World.GetExistingSystemManaged<NativeSignalProjectionSystem>()?.RunPending();
+            World.GetExistingSystemManaged<NativePaintProjectionSystem>()?.RunPending();
+            World.GetExistingSystemManaged<NativeCrosswalkDragSystem>()?.DrawOverlay();
+        }
     }
 
     public partial class VisualLifecycleCompletionSystem : GameSystemBase

@@ -36,6 +36,8 @@ namespace MedianGrassReplacement.Systems
         {
             internal float Angle;
             internal JoinCap Left,Right;
+            internal Bezier4x3 LeftCurb,RightCurb;
+            internal bool HasCurbs;
             internal bool Hidden;
         }
         internal List<Bezier4x3> JunctionEdgePreview(Entity node,byte requestedStyle=0)
@@ -46,39 +48,7 @@ namespace MedianGrassReplacement.Systems
             foreach(var mark in marks)result.Add(mark.Curve);return result;
         }
         private bool TryNativeCorner(Entity node,JoinCap a,JoinCap b,out Bezier4x3 result)
-        {
-            result=default;if(!EntityManager.HasBuffer<Game.Net.SubLane>(node))return false;
-            float best=4.5f;bool found=false;int inspected=0;
-            foreach(var item in EntityManager.GetBuffer<Game.Net.SubLane>(node,true))
-            {
-                if(++inspected>256)break;var lane=item.m_SubLane;
-                if(!EntityManager.HasComponent<Game.Net.PedestrianLane>(lane)||!EntityManager.HasComponent<Curve>(lane)||!EntityManager.HasComponent<PrefabRef>(lane)||EntityManager.HasComponent<Deleted>(lane))continue;
-                if((EntityManager.GetComponentData<Game.Net.PedestrianLane>(lane).m_Flags&PedestrianLaneFlags.Crosswalk)!=0)continue;
-                var guide=EntityManager.GetComponentData<Curve>(lane).m_Bezier;
-                if(math.distance(guide.d,a.Point)+math.distance(guide.a,b.Point)<math.distance(guide.a,a.Point)+math.distance(guide.d,b.Point))
-                    guide=new Bezier4x3(guide.d,guide.c,guide.b,guide.a);
-                // Endpoints come from composed pavement/curb anchors. A grass strip
-                // changes their distance to the walking guide without changing lane width.
-                var unit=NetUtils.OffsetCurveLeftSmooth(guide,1);
-                if(!JunctionEdgePolicy.TryGuideOffsets(guide,unit,a.Point,b.Point,out float startOffset,out float endOffset))continue;
-                var start=NetUtils.OffsetCurveLeftSmooth(guide,startOffset);
-                var end=NetUtils.OffsetCurveLeftSmooth(guide,endOffset);
-                var candidate=new Bezier4x3(start.a,math.lerp(start.b,end.b,1f/3),math.lerp(start.c,end.c,2f/3),end.d);
-                float score=math.distance(candidate.a,a.Point)+math.distance(candidate.d,b.Point);
-                if(score>=best||math.distance(candidate.a,a.Point)>2.25f||math.distance(candidate.d,b.Point)>2.25f)continue;
-                if(math.dot(math.normalizesafe(MathUtils.Tangent(candidate,0)),a.Outward)<.7f||math.dot(math.normalizesafe(MathUtils.Tangent(candidate,1)),-b.Outward)<.7f)continue;
-                var first=a.Point-candidate.a;var last=b.Point-candidate.d;
-                candidate=new Bezier4x3(a.Point,candidate.b+math.lerp(first,last,1f/3),candidate.c+math.lerp(first,last,2f/3),b.Point);
-                bool clear=true;
-                float clearance=math.min(math.abs(startOffset),math.abs(endOffset));
-                for(int sample=0;sample<=12;sample++)
-                {
-                    var point=MathUtils.Position(candidate,sample/12f);float distance=MathUtils.Distance(guide,point,out float at);
-                    if(distance+.02f<clearance||math.abs(point.y-MathUtils.Position(guide,at).y)>.5f){clear=false;break;}
-                }
-                if(!clear||!Valid(candidate))continue;best=score;result=candidate;found=true;
-            }return found;
-        }
+            => TryNativeCorner(ReadNativeCornerGuides(node),a,b,out result);
         private void AddJunctionEdges(Entity node,List<Entity> roads,List<MarkCurve> output,byte requestedStyle=0)
         {
             if(SpecialPaintNode(node)&&AddNativeNodeEdges(node,output,requestedStyle))return;
@@ -140,21 +110,33 @@ namespace MedianGrassReplacement.Systems
                     }
                     if(cap.Side==1)approach.Left=cap;else approach.Right=cap;
                 }
+                if(TryReadPaintCurbs(road,node,Mod.Settings.CurbLineOffset,out var leftCurb,out var rightCurb))
+                {
+                    approach.HasCurbs=true;
+                    approach.LeftCurb=start?leftCurb:rightCurb;
+                    approach.RightCurb=start?rightCurb:leftCurb;
+                }
                 approaches.Add(approach);
             }
             approaches.Sort((a,b)=>a.Angle.CompareTo(b.Angle));
+            List<Bezier4x3> nativeGuides = null;
             for(int i=0;i<approaches.Count;i++)
             {
                 var first=approaches[i];var next=approaches[(i+1)%approaches.Count];if(first.Hidden||next.Hidden)continue;
                 var a=first.Right;var b=next.Left;
-                bool guided=TryNativeCorner(node,a,b,out var curve);
+                if(edgeMode>0){a.Prefab=asset;b.Prefab=asset;}
+                if(first.HasCurbs&&next.HasCurbs&&AddNativePaintCorner(first.RightCurb,next.LeftCurb,a,b,output))continue;
+                // This loop does not write ECS or schedule jobs. Copy eligible
+                // numeric guides once for all corners, preserving native order
+                // and the original first-256-member inspection limit.
+                if (nativeGuides == null) nativeGuides = ReadNativeCornerGuides(node);
+                bool guided=TryNativeCorner(nativeGuides,a,b,out var curve);
                 if(!guided&&!JunctionEdgePolicy.TryCorner(a.Point,a.Outward,b.Point,b.Outward,out curve))continue;
                 // A fallback without a curb guide must remain conservative.
                 // Inset the interior of the arc into the paved junction, keeping
                 // section endpoints fixed for continuity. Pairs need extra room.
                 if(!guided){var center=EntityManager.GetComponentData<Node>(node).m_Position;float inset=.35f+(EdgeUpgradePolicy.Paired(edgeMode)?EdgeSpacing(edgeMode):0);curve.b+=math.normalizesafe(new float3(center.x-curve.b.x,0,center.z-curve.b.z))*inset;curve.c+=math.normalizesafe(new float3(center.x-curve.c.x,0,center.z-curve.c.z))*inset;}
                 if(!Valid(curve))continue;
-                if(edgeMode>0){a.Prefab=asset;b.Prefab=asset;}
                 if(a.Prefab==b.Prefab)output.Add(new MarkCurve(curve,a.Prefab,.15f,false,true));
                 else {output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(0,.5f)),a.Prefab,.15f,false,true));output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(.5f,1)),b.Prefab,.15f,false,true));}
             }

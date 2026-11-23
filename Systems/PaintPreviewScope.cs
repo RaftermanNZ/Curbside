@@ -11,10 +11,15 @@ namespace MedianGrassReplacement.Systems
 
         internal void RestoreForOwners(PreviewRefreshScope scope)
         {
-            if (!scope.Complete) { RestoreForRefresh(); return; }
-            entryOwners.Select(scope.Owners, stale);
+            if (entryOwners.Count == 0) return;
+            if (!scope.Complete)
+            {
+                stale.Clear();
+                foreach (var lane in aliases.Keys) if (!visibility.Owns(lane)) stale.Add(lane);
+            }
+            else entryOwners.Select(scope.Owners, stale);
             foreach (var lane in stale)
-                if (entries.TryGetValue(lane, out var entry) && entry.UsingOriginal && entry.Actors.Count == 0)
+                if (scope.Complete && entries.TryGetValue(lane, out var entry) && entry.UsingOriginal && entry.Actors.Count == 0)
                     RestoreAlias(lane); // Native matching key restored; committed binding retained.
                 else Remove(lane);
             // Retaining unaffected actors must also retain their original-paint
@@ -23,7 +28,7 @@ namespace MedianGrassReplacement.Systems
             foreach (var entry in entries.Values)
                 if (entry.UsingOriginal && Alive(entry.Source)) retainedOriginals.Add(entry.Source);
             FlushRetired();
-            TemporaryPreviewWrites.Apply(World, writes);
+            FlushPreviewWrites();
         }
     }
 
@@ -34,12 +39,17 @@ namespace MedianGrassReplacement.Systems
 
         internal void RestoreForOwners(PreviewRefreshScope scope)
         {
-            if (!scope.Complete) { RestoreForRefresh(); return; }
-            aliasOwners.Select(scope.Owners, stale);
+            if (aliasOwners.Count == 0) return;
+            if (!scope.Complete)
+            {
+                stale.Clear();
+                foreach (var lane in aliases.Keys) if (!visibility.Owns(lane)) stale.Add(lane);
+            }
+            else aliasOwners.Select(scope.Owners, stale);
             foreach (var lane in stale) RestoreAlias(lane);
             // Binding/paint retention deliberately survives the refresh, as it
             // does in the existing full restore. Only native keys are returned.
-            TemporaryPreviewWrites.Apply(World, writes);
+            FlushPreviewWrites();
         }
     }
 }

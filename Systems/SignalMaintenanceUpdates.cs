@@ -23,8 +23,8 @@ namespace MedianGrassReplacement.Systems
             maintenanceChecks++;
             bool live = Live(entry.Actor); byte state = MaintenanceNode(entry.Node);
             if((entry.Kinds&SignalMaintenanceIndex<Entity>.LayoutNode)!=0&&((state&1)==0||!signalLayouts.ContainsKey(entry.Node)))
-            {signalLayouts.Remove(entry.Node);signalTickets.Remove(entry.Node);maintenance.Forget(entry.Actor,SignalMaintenanceIndex<Entity>.LayoutNode);}
-            if(!Live(entry.Node)){signalLayouts.Remove(entry.Node);signalTickets.Remove(entry.Node);}
+            {signalLayouts.Remove(entry.Node);RemoveSignalTicket(entry.Node);maintenance.Forget(entry.Actor,SignalMaintenanceIndex<Entity>.LayoutNode);}
+            if(!Live(entry.Node)){signalLayouts.Remove(entry.Node);RemoveSignalTicket(entry.Node);}
             if(!SignalMaintenancePolicy.KeepCustom(state))UnwatchLampRoads(entry.Node);
             if ((entry.Kinds & SignalMaintenanceIndex<Entity>.Moved) != 0 && _moved.TryGetValue(entry.Actor, out var moved))
             {
@@ -109,11 +109,18 @@ namespace MedianGrassReplacement.Systems
         {
             if (maintenance.TryGet(actor, out var entry))
             { if (!TrackedSignalChanged(actor, entry.Node)) return; nodes.Add(entry.Node); }
+            // Old ticket associations survive movement/reparenting/deletion.
+            // Current position alone cannot safely decide cleanup ownership.
+            if (signalRoutesReady) signalTicketRoutes.Collect(actor, nodes);
             if (!EntityManager.HasComponent<Owner>(actor)) return;
             var owner = EntityManager.GetComponentData<Owner>(actor).m_Owner;
             if (EnabledNode(owner)) {signalPresentationChecks.Add(owner);nodes.Add(owner);}
             else if (EntityManager.HasComponent<Edge>(owner))
-            { var edge = EntityManager.GetComponentData<Edge>(owner); if (EnabledNode(edge.m_Start)) {signalPresentationChecks.Add(edge.m_Start);nodes.Add(edge.m_Start);} if (EnabledNode(edge.m_End)) {signalPresentationChecks.Add(edge.m_End);nodes.Add(edge.m_End);} }
+            {
+                var edge = EntityManager.GetComponentData<Edge>(owner);
+                if (EnabledNode(edge.m_Start) && RoadSignalEventRelevant(actor, edge.m_Start, edge.m_End)) {signalPresentationChecks.Add(edge.m_Start);nodes.Add(edge.m_Start);}
+                if (EnabledNode(edge.m_End) && RoadSignalEventRelevant(actor, edge.m_End, edge.m_Start)) {signalPresentationChecks.Add(edge.m_End);nodes.Add(edge.m_End);}
+            }
         }
     }
 }

@@ -74,7 +74,7 @@ namespace MedianGrassReplacement.Systems
             if(Mod.Saving||!GranularHighwayLinePolicy.ValidStyle(style)||HighwayNodeSourceRole(node,source)==0)return;
             var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;if(!Valid(path))return;
             // Complete the system's scheduled readers before adding an intent buffer.
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             if(!EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.AddBuffer<MGRHighwayLineIntent>(node);
             var intents=EntityManager.GetBuffer<MGRHighwayLineIntent>(node);int index=-1;
             for(int i=0;i<intents.Length;i++)if(GranularHighwayLinePolicy.Matches(GranularHighwayLinePolicy.Path(intents[i]),path)){index=i;break;}

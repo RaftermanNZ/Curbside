@@ -91,8 +91,16 @@ namespace MedianGrassReplacement.Systems
             return new SignalLayoutEntry{Centre=EntityManager.GetComponentData<Node>(node).m_Position,Inputs=inputs.ToArray(),Roads=new List<FarSideLightPolicy.Approach>(roads),HasCrosswalk=HasNativeCrosswalk(node)};
         }
         private List<FarSideLightPolicy.Approach> ReadApproaches(Entity node)
+            => ReadApproaches(node, default(SignalNetworkObservation));
+        private List<FarSideLightPolicy.Approach> ReadApproaches(Entity node, SignalNetworkObservation observed)
         {
-            if(signalLayouts.TryGetValue(node,out var entry)&&SameNetwork(node,entry))
+            // Only the explicit pre-write call below supplies an observation.
+            // Other consumers retain a fresh comparison. Identity also checks
+            // that the cached network was not replaced between the two reads.
+            bool same = signalLayouts.TryGetValue(node, out var entry)
+                && (observed.Valid && observed.Node == node && ReferenceEquals(observed.Network, entry)
+                    ? observed.Same : SameNetwork(node, entry));
+            if(same)
             {
                 networkGeometryHits++;TrackLayoutNode(node);_approaches.Clear();
                 foreach(var cached in entry.Roads){var road=cached;road.VehicleMask=0;road.LaneMasks=new List<ushort>(new ushort[road.Incoming.Count]);_approaches.Add(road);}

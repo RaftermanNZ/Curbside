@@ -121,7 +121,7 @@ namespace MedianGrassReplacement.Systems
 
             if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit)) return deps;
 
-            deps.Complete(); var node = hit.m_Owner;
+            if (applyAction.WasPressedThisFrame() || remove) { deps.Complete(); deps = default; } var node = hit.m_Owner;
 
             if (EntityManager.HasComponent<Temp>(node)) node = EntityManager.GetComponentData<Temp>(node).m_Original;
 
@@ -135,13 +135,13 @@ namespace MedianGrassReplacement.Systems
 
                 if (EntityManager.HasComponent<EdgeGeometry>(node)) end = NativeCrosswalkTargeting.NearEnd(EntityManager.GetComponentData<EdgeGeometry>(node), hit.m_Hit.m_HitPosition);
 
-                else if (EntityManager.HasComponent<Curve>(node)) { MathUtils.Distance(EntityManager.GetComponentData<Curve>(node).m_Bezier, hit.m_Hit.m_HitPosition, out float t); end = t > .5f; } else return default;
+                else if (EntityManager.HasComponent<Curve>(node)) { MathUtils.Distance(EntityManager.GetComponentData<Curve>(node).m_Bezier, hit.m_Hit.m_HitPosition, out float t); end = t > .5f; } else return deps;
 
                 node = end ? edge.m_End : edge.m_Start;
 
             }
 
-            if (!EntityManager.HasComponent<Node>(node) || EntityManager.HasComponent<Deleted>(node) || EntityManager.HasComponent<Temp>(node) || !EntityManager.HasBuffer<ConnectedEdge>(node)) return default;
+            if (!EntityManager.HasComponent<Node>(node) || EntityManager.HasComponent<Deleted>(node) || EntityManager.HasComponent<Temp>(node) || !EntityManager.HasBuffer<ConnectedEdge>(node)) return deps;
 
             var overlay = World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>(); var buffer = overlay.GetBuffer(out var pending); pending.Complete(); bool roadFound = false;
 
@@ -157,11 +157,11 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            if (!roadFound || (!applyAction.WasPressedThisFrame() && !remove)) return default;
+            if (!roadFound || (!applyAction.WasPressedThisFrame() && !remove)) return deps;
 
             bool edges=_selected?.name==EdgeAssetName;
             bool has=edges?EntityManager.HasComponent<MGRJunctionEdgeLines>(node):EntityManager.HasComponent<MGRHideNodeLines>(node);
-            if(!edges&&has==!remove){UpgradeFeedback.Report(_selected.name,remove?"This junction upgrade is already removed.":"This junction upgrade is already applied.");return default;}
+            if(!edges&&has==!remove){UpgradeFeedback.Report(_selected.name,remove?"This junction upgrade is already removed.":"This junction upgrade is already applied.");return deps;}
             if(edges)
             {
                 if(remove){if(has)EntityManager.RemoveComponent<MGRJunctionEdgeLines>(node);if(!EntityManager.HasComponent<MGRRemoveJunctionEdges>(node))EntityManager.AddComponent<MGRRemoveJunctionEdges>(node);}
@@ -175,7 +175,7 @@ namespace MedianGrassReplacement.Systems
 
             World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().QueueNodeRefresh(node);
 
-            return default;
+            return deps;
 
         }
 

@@ -45,7 +45,7 @@ namespace MedianGrassReplacement.Systems
         {
             // ToolSystem may stop us outside the ToolOutputBarrier recording phase.
             // Retire only our owned definitions synchronously, never native temp roads.
-            try{Dependency.Complete();if(!definitions.IsEmptyIgnoreFilter)EntityManager.DestroyEntity(definitions);}
+            try{if(!definitions.IsEmptyIgnoreFilter){{ CompleteDependency(); Dependency = default; }EntityManager.DestroyEntity(definitions);}}
             finally{applyMode=ApplyMode.Clear;target=Entity.Null;clickPending=false;base.OnStopRunning();}
         }
         public override void InitializeRaycast(){base.InitializeRaycast();m_ToolRaycastSystem.typeMask=TypeMask.Net;m_ToolRaycastSystem.netLayerMask=Layer.Road;m_ToolRaycastSystem.collisionMask=CollisionMask.OnGround|CollisionMask.Overground;}

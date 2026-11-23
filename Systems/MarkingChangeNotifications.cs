@@ -24,7 +24,9 @@ namespace MedianGrassReplacement.Systems
         private readonly EntityQuery geometry, topology, owners, inputs, events;
         private readonly Dictionary<Entity,Entity> previousOwners = new Dictionary<Entity,Entity>();
         private readonly Dictionary<Entity,bool> ownerStatus = new Dictionary<Entity,bool>();
+        private readonly List<Entity> unchangedRoads = new List<Entity>();
         private bool seeded;
+        private readonly PaintInputReadScope ownerReads = new PaintInputReadScope();
 
         internal MarkingChangeNotifications(Func<EntityQueryDesc[],EntityQuery> query)
         {
@@ -75,20 +77,38 @@ namespace MedianGrassReplacement.Systems
 
         internal void Collect(EntityManager em,HashSet<Entity> roads,List<Entity> nodes)
         {
+            bool phaseStarted = false;
+            Collect(em, roads, nodes, null, null, ref phaseStarted);
+        }
+
+        internal void Collect(EntityManager em,HashSet<Entity> roads,List<Entity> nodes,
+            PaintOwnerNotifications proof, ExternalPaintOwnership external, ref bool phaseStarted)
+        {
+            try { CollectOwners(em, roads, nodes, proof, external, ref phaseStarted); }
+            finally { ownerReads.End(); }
+        }
+
+        private void CollectOwners(EntityManager em,HashSet<Entity> roads,List<Entity> nodes,
+            PaintOwnerNotifications proof, ExternalPaintOwnership external, ref bool phaseStarted)
+        {
             ownerStatus.Clear();
             // Structural lifecycle queries need no change-version synchronization
             // on Owner, Curve, parking state or the shared SubLane buffer.
             using(var changed=owners.ToEntityArray(Allocator.Temp))foreach(var owner in changed)AddOwner(em,owner,roads,nodes);
             var selected=seeded?events:inputs;
-            using(var changed=selected.ToEntityArray(Allocator.Temp))foreach(var lane in changed)
+            using(var changed=selected.ToEntityArray(Allocator.Temp))
             {
-                if(!em.Exists(lane))continue;
-                var owner=em.GetComponentData<Owner>(lane).m_Owner;
-                if(previousOwners.TryGetValue(lane,out var oldOwner)&&oldOwner!=owner)AddOwner(em,oldOwner,roads,nodes);
-                bool relevant=AddOwner(em,owner,roads,nodes);
-                if(em.HasComponent<Deleted>(lane))previousOwners.Remove(lane);
-                else if(relevant)previousOwners[lane]=owner;
-                else previousOwners.Remove(lane);
+                if (changed.Length > 1 && PaintInputReadScope.Supported) ownerReads.Begin();
+                foreach(var lane in changed)
+                {
+                    if(!em.Exists(lane))continue;
+                    var owner=ownerReads.Component<Owner>(em,lane).m_Owner;
+                    if(previousOwners.TryGetValue(lane,out var oldOwner)&&oldOwner!=owner)AddOwner(em,oldOwner,roads,nodes);
+                    bool relevant=AddOwner(em,owner,roads,nodes);
+                    if(em.HasComponent<Deleted>(lane))previousOwners.Remove(lane);
+                    else if(relevant)previousOwners[lane]=owner;
+                    else previousOwners.Remove(lane);
+                }
             }
             seeded=true;
             // No relevant committed event means no geometry/topology filter wait.
@@ -99,19 +119,96 @@ namespace MedianGrassReplacement.Systems
             try
             {
                 geometry.SetChangedVersionFilter(GeometryFilter);
-                using(var changed=geometry.ToEntityArray(Allocator.Temp))foreach(var owner in changed)AddOwner(em,owner,roads,nodes);
+                if (proof != null && proof.UsesTopologyChunks(em, external))
+                {
+                    using(var changed=geometry.ToArchetypeChunkArray(Allocator.Temp))
+                    {
+                        int count = 0; foreach(var chunk in changed) count += chunk.Count;
+                        var entityType = em.GetEntityTypeHandle();
+                        foreach(var chunk in changed)
+                        {
+                            if (proof.UnchangedGeometryChunk(em, external, chunk, count, true, ref phaseStarted)) continue;
+                            foreach(var owner in chunk.GetNativeArray(entityType)) AddCommittedOwner(em, owner, true, roads, nodes);
+                        }
+                    }
+                }
+                else using(var changed=geometry.ToEntityArray(Allocator.Temp))
+                    foreach(var owner in changed) AddCommittedOwner(em, owner, true, roads, nodes);
             }
             finally{geometry.ResetFilter();}
             try
             {
                 topology.SetChangedVersionFilter(TopologyFilter);
-                using(var changed=topology.ToEntityArray(Allocator.Temp))foreach(var owner in changed)AddOwner(em,owner,roads,nodes);
+                if (proof != null && proof.UsesTopologyChunks(em, external))
+                {
+                    using(var changed=topology.ToArchetypeChunkArray(Allocator.Temp))
+                    {
+                        int count = 0; foreach(var chunk in changed) count += chunk.Count;
+                        var entityType = em.GetEntityTypeHandle();
+                        foreach(var chunk in changed)
+                        {
+                            if (proof.UnchangedTopologyChunk(em, external, chunk, count, ref phaseStarted)) continue;
+                            var entities = chunk.GetNativeArray(entityType);
+                            foreach(var owner in entities) AddCommittedOwner(em, owner, false, roads, nodes);
+                        }
+                    }
+                }
+                else using(var changed=topology.ToEntityArray(Allocator.Temp))
+                    foreach(var owner in changed) AddCommittedOwner(em, owner, false, roads, nodes);
             }
             finally{topology.ResetFilter();}
 
+            // Native lifecycle tags are also candidate notifications: reused
+            // lanes and their owners can receive Updated with equal paint inputs.
+            // Keep the direct event as the discovery trigger above, including
+            // old/new owner bookkeeping, before suppressing its proven no-ops.
+            // Missing, changed, unsupported and busy inputs remain admitted.
+            if (proof != null)
+            {
+                // Collect native candidates first, deduplicating lifecycle,
+                // geometry and topology notifications before any paint proof.
+                // This snapshot contains committed roads/nodes only. Temporary
+                // previews remain owned by the existing preview systems.
+                proof.PrepareInputCohort(roads.Count + nodes.Count, ref phaseStarted);
+                RemoveUnchangedCandidates(em, roads, nodes, proof, external, ref phaseStarted);
+            }
         }
 
-        internal void Clear(){previousOwners.Clear();seeded=false;}
+        private void RemoveUnchangedCandidates(EntityManager em, HashSet<Entity> roads,
+            List<Entity> nodes, PaintOwnerNotifications proof, ExternalPaintOwnership external,
+            ref bool phaseStarted)
+        {
+            unchangedRoads.Clear();
+            foreach (var road in roads)
+                if (proof.UnchangedForCollectedInput(em, external, road, true, ref phaseStarted))
+                    unchangedRoads.Add(road);
+            foreach (var road in unchangedRoads) roads.Remove(road);
+            unchangedRoads.Clear();
+            int retained = 0;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var node = nodes[i];
+                if (!proof.UnchangedForCollectedInput(em, external, node, false, ref phaseStarted))
+                    nodes[retained++] = node;
+            }
+            if (retained != nodes.Count) nodes.RemoveRange(retained, nodes.Count - retained);
+        }
+
+        private void AddCommittedOwner(EntityManager em, Entity owner, bool roadContext,
+            HashSet<Entity> roads, List<Entity> nodes)
+        {
+            // Both coarse queries exclude Deleted/Temp. No mutation occurs
+            // while collecting their snapshots. The topology query can still
+            // contain a foreign hybrid with both node and road roles; preserve
+            // AddOwner's road precedence for that case.
+            if (ownerStatus.ContainsKey(owner)) return;
+            ownerStatus.Add(owner, true);
+            if (!roadContext) roadContext = em.HasComponent<Road>(owner) && em.HasComponent<Edge>(owner);
+            if (roadContext) roads.Add(owner);
+            else nodes.Add(owner);
+        }
+
+        internal void Clear(){ownerReads.End();previousOwners.Clear();ownerStatus.Clear();unchangedRoads.Clear();seeded=false;}
     }
 
     public partial class IntersectionPaintSystem

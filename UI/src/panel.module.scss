@@ -25,14 +25,15 @@
 .description > div { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; min-width: 0; white-space: normal; overflow-wrap: break-word; margin-bottom: 6rem; }
 .contextTitle { color: var(--accentColorNormal); font-weight: 700; font-size: var(--fontSizeS); margin-bottom: 4rem; }
 .status { color: var(--normalTextColor); }
-.details, .diagnostics { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; margin: 6rem 0; font-size: var(--fontSizeXS); }
+.details { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; margin: 6rem 0; font-size: var(--fontSizeXS); }
 .foldout { display: flex; flex: 0 0 auto; justify-content: flex-start; width: 100%; padding: 4rem 0; color: var(--normalTextColor); white-space: normal; font-size: var(--fontSizeXS); }
 .features { white-space: pre-wrap; margin: 4rem 0; }
 .footer { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; padding: 8rem 12rem 10rem; background-color: var(--panelColorDark); border-top: var(--stroke1, 1rem) solid var(--sectionBorderColor); }
 .leave, .secondary { display: flex; flex-direction: row; flex: 0 0 auto; align-items: center; justify-content: center; width: 100%; min-height: 32rem; padding: 6rem 10rem; color: var(--normalTextColor); background-color: var(--panelButtonColor); border-radius: var(--panelRadius); font-size: var(--fontSizeXS); white-space: normal; }
-.diagnosticActions { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; margin-top: 4rem; }
 .secondary { margin-bottom: 4rem; }
 .help, .empty { margin: 8rem 0 0; color: var(--normalTextColorDim); }
 .empty { padding: 8rem; }
 
 .pinnedFooter { display: flex; flex-direction: column; flex: 0 0 auto; width: 100%; padding: 8rem 12rem; background-color: var(--panelColorDark); border-top: var(--stroke1, 1rem) solid var(--sectionBorderColor); }
+
+.previewModes { display: flex; flex-wrap: wrap; gap: 4rem; padding: 6rem 12rem; flex-shrink: 0; }

@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-This is the source for **Curbside 0.6.2**, an icon-packaging hotfix on the 0.6.1 public baseline. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
+This is the source for **Curbside 0.6.3**, based on the Test 9 preview rollback. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
 
 ## Build locally on Windows
 
@@ -21,7 +21,7 @@ GitHub checks build the UI without proprietary game assemblies. Full native comp
 
 ## Reporting issues
 
-Include game/mod versions, the enabled playset, exact road type/width, steps to reproduce and a Curbside diagnostic snapshot. Remove personal information from logs before posting. Native crashes and FPS changes need matching evidence; similar symptoms do not establish the same cause.
+Include game/mod versions, the enabled playset, exact road type/width, steps to reproduce and the relevant game log. Remove personal information from logs before posting. Native crashes and FPS changes need matching evidence; similar symptoms do not establish the same cause.
 
 ## Licensing and credits
 

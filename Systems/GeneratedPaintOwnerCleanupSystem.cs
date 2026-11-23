@@ -24,12 +24,22 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<Entity, bool> _ownerStatus = new Dictionary<Entity, bool>();
         private readonly ManagedWorkIndex<Entity,Entity> _index=new ManagedWorkIndex<Entity,Entity>();
         private readonly List<Entity> _work=new List<Entity>(), _audit=new List<Entity>(64);
+        private readonly HashSet<Entity> _copiedOwners = new HashSet<Entity>();
         private bool _initialized;
-        internal void Track(Entity entity,Entity owner)=>_index.Add(owner,entity);
+        private GeneratedLaneOwnerHistory _laneOwners;
+        internal void Track(Entity entity,Entity owner)
+        {
+            // Cache managed IDs only, never a system state or borrowed ECS view.
+            // A lifecycle replacement invalidates this ledger in OnDestroy.
+            if (_laneOwners == null || !_laneOwners.IsActive)
+                _laneOwners = World.GetOrCreateSystemManaged<VisualLifecycleSystem>().LaneOwners;
+            _laneOwners.Remember(entity, owner);
+            _index.Add(owner,entity);
+        }
         internal void Untrack(Entity entity)=>_index.Remove(entity);
         protected override void OnGamePreload(Colossal.Serialization.Entities.Purpose purpose,GameMode mode)
-        {_index.Clear();_work.Clear();_audit.Clear();_initialized=false;base.OnGamePreload(purpose,mode);}
-        protected override void OnDestroy(){_index.Clear();base.OnDestroy();}
+        {_index.Clear();_work.Clear();_audit.Clear();_copiedOwners.Clear();_initialized=false;base.OnGamePreload(purpose,mode);}
+        protected override void OnDestroy(){_laneOwners=null;_copiedOwners.Clear();_index.Clear();base.OnDestroy();}
 
         protected override void OnCreate()
         {
@@ -64,7 +74,7 @@ namespace MedianGrassReplacement.Systems
         {
             if (Mod.Saving) return;
             if(_paint.IsEmpty){_index.Clear();_initialized=false;return;}
-            Dependency.Complete();
+            // Public ECS APIs below join the component types they access.
             _ownerStatus.Clear();
             int removed = 0;
             // One bootstrap covers pre-existing entities. New visuals register
@@ -73,18 +83,16 @@ namespace MedianGrassReplacement.Systems
             {
                 using(var entities=_paint.ToEntityArray(Allocator.Temp))
                 using(var owners=_paint.ToComponentDataArray<Owner>(Allocator.Temp))
-                    for(int i=0;i<entities.Length;i++)_index.Add(owners[i].m_Owner,entities[i]);
+                    for(int i=0;i<entities.Length;i++)Track(entities[i],owners[i].m_Owner);
                 _initialized=true;
             }
-            _work.Clear();_audit.Clear();
-            using(var owners=_networkChanges.ToEntityArray(Allocator.Temp))foreach(var owner in owners)_index.CopyOwner(owner,_work);
-            _index.Rotate(_audit,64);_work.AddRange(_audit);
+            using(var owners=_networkChanges.ToEntityArray(Allocator.Temp)) CollectMaintenanceWork(owners);
             foreach(var entity in _work)
             {
                 if(!EntityManager.Exists(entity)||EntityManager.HasComponent<Deleted>(entity)){_index.Remove(entity);continue;}
                 if(!EntityManager.HasComponent<Owner>(entity)){_index.Remove(entity);continue;}
                 Entity owner=EntityManager.GetComponentData<Owner>(entity).m_Owner;
-                _index.Add(owner,entity); // Refresh if another system changed the owner.
+                Track(entity,owner); // Preserve the observed old owner before refreshing the index.
                 if(!_ownerStatus.TryGetValue(owner,out bool retire))
                 {
                     bool exists=EntityManager.Exists(owner);
@@ -98,6 +106,16 @@ namespace MedianGrassReplacement.Systems
             }
             _ownerStatus.Clear();
             if (removed > 0) Mod.Log.Info("Retired " + removed + " generated paint lanes before ground-height update: road/node owner removed or unavailable.");
+        }
+
+        internal void CollectMaintenanceWork(NativeArray<Entity> owners)
+        {
+            _work.Clear(); _audit.Clear(); _copiedOwners.Clear();
+            foreach (var owner in owners)
+                if (_copiedOwners.Add(owner)) _index.CopyOwner(owner, _work);
+            if (_work.Count == 0) _index.Rotate(_audit, 64);
+            else _index.RotateExceptOwners(_audit, 64, _copiedOwners);
+            _work.AddRange(_audit);
         }
     }
 }

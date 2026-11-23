@@ -279,7 +279,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            Dependency.Complete();using(var owned=_owned.ToEntityArray(Allocator.Temp)) foreach(var e in owned) Delete(e);
+            { CompleteDependency(); Dependency = default; }using(var owned=_owned.ToEntityArray(Allocator.Temp)) foreach(var e in owned) Delete(e);
 
             _visuals.Clear();_poles.Clear();_poleEntities.Clear();_orphans.Clear();_spans.Clear();_joins.Clear();_pending.Clear();_roadQueue.Clear();_dirtyNodes.Clear();_withdrawals.Clear();_scopeRoads.Clear();_junctionScope.Clear();_scopeSeeded=false;_scopeComplete=false;_initial=true;Status="Not applied";
 
@@ -838,7 +838,7 @@ namespace MedianGrassReplacement.Systems
 
             {
 
-                if (!PowerlineJunctionScope.Supported) Dependency.Complete();
+                if (!PowerlineJunctionScope.Supported) { CompleteDependency(); Dependency = default; }
                 _tick++;
                 foreach(var road in _withdrawals)RemoveRoad(road,true);
                 _withdrawals.Clear();

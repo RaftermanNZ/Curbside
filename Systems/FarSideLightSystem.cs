@@ -507,6 +507,8 @@ namespace MedianGrassReplacement.Systems
         private readonly Queue<Entity> _reconcileNodes=new Queue<Entity>();private readonly HashSet<Entity> _reconcileSet=new HashSet<Entity>();private float _nextReconcile;
 
         internal static void Queue(Entity node) { Requested.Add(node); }
+        internal static void Queue(World world, Entity node)
+            => CurbsideChangePipeline.For(world).Publish(ChangeConsumer.Signals, node);
 
         private EntityQuery _upgrades;
 
@@ -531,7 +533,7 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; junctionFootprints.Clear(); sidewalkFootprints.Clear(); Restore(); }
 
-        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); ClearSignalLayouts(); nativeSignalChildren.BeginPass(); waitingSignalDefinitions.Clear();signalPresentationChecks.Clear(); _moved.Clear(); maintenance.Clear(); signalTickets.Clear(); ClearLampTracking(); Requested.Clear(); _active = (mode & GameMode.GameOrEditor) != GameMode.None; _initial = true; }
+        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); ClearSignalLayouts(); nativeSignalChildren.BeginPass(); waitingSignalDefinitions.Clear();signalPresentationChecks.Clear(); _moved.Clear(); maintenance.Clear(); ClearSignalTickets(); ClearLampTracking(); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Signals); _active = (mode & GameMode.GameOrEditor) != GameMode.None; _initial = true; }
 
         protected override void OnDestroy() { Restore(); base.OnDestroy(); }
 
@@ -541,7 +543,10 @@ namespace MedianGrassReplacement.Systems
 
         internal void RecordSnapshot()
         {
-            Dependency.Complete();
+            World.GetExistingSystemManaged<NativeSignalProjectionSystem>()?.RecordSnapshot();
+            World.GetExistingSystemManaged<NativePaintProjectionSystem>()?.RecordSnapshot();
+            World.GetExistingSystemManaged<NativeCrosswalkDragSystem>()?.RecordSnapshot();
+            { CompleteDependency(); Dependency = default; }
             Mod.Log.Info("Signal layout reuse snapshot: geometryReads="+networkGeometryReads+" geometryHits="+networkGeometryHits+
                 " nativeNodeEvents="+nativeNodeEvents+" nativeRoadEvents="+nativeRoadEvents+" nativeActorEvents="+nativeActorEvents+" pendingOwnerChildren="+nativeSignalChildren.Count+" waitingDefinitions="+waitingSignalDefinitions.Count+" presentationReviews="+signalPresentationReviews+" lampRoadChecks="+lampRoadChecks+" lampStateChanges="+lampStateChanges+" maintenanceChecks="+maintenanceChecks+" recoveryChecks="+recoveryChecks+" unchangedNotifications="+unchangedSignalNotifications+" trackedActors="+maintenance.Count+" wirePlansBuilt="+wirePlansBuilt+" wirePlansReused="+wirePlansReused+" cachedNodes="+signalLayouts.Count+" lastResult="+lastLayoutResult);
             foreach(var cached in signalLayouts)Mod.Log.Info("Signal cached layout snapshot: node="+cached.Key+" supports="+(cached.Value.Wire?.Supports.Length??0)+
@@ -661,6 +666,7 @@ namespace MedianGrassReplacement.Systems
 
             if(!SignalNativePhasePolicy.CanApply(signalUpdateSystem.currentPhase,Mod.Saving,_active))return;
 
+            CurbsideChangePipeline.For(World).Drain(ChangeConsumer.Signals, Requested);
             if (!_active || (!_initial && Requested.Count == 0 && _moved.Count == 0 && _lamps.Count==0 && _generatedLamps.Count==0 && _hiddenSignals.Count==0 && maintenance.Count==0 && _upgrades.IsEmptyIgnoreFilter)) return;
 
             // No jobs are scheduled by this managed path. Actual EntityManager
@@ -668,7 +674,7 @@ namespace MedianGrassReplacement.Systems
             // by lamp handles or an earlier explicit diagnostic lookup here.
             SynchronizeChangedLampStates();
 
-            var nodes = _nodeWork; nodes.Clear(); forcedSignalWork.Clear(); foreach (var node in Requested) { nodes.Add(node); forcedSignalWork.Add(node); } Requested.Clear();
+            var nodes = _nodeWork; nodes.Clear(); forcedSignalWork.Clear(); foreach (var node in Requested) { nodes.Add(node); forcedSignalWork.Add(node); } Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Signals);
             if (_initial) { using (var items = _upgrades.ToEntityArray(Allocator.Temp)) foreach (var node in items) nodes.Add(node); _initial = false; }
 
             GatherNativeSignalEvents(nodes);
@@ -708,11 +714,14 @@ namespace MedianGrassReplacement.Systems
                 // Keep the existing native assembly intact until every custom span has a continuous cable.
                 if(EntityManager.HasComponent<MGRGardenCitySignals>(node)&&EntityManager.HasComponent<MGRSignalStyle>(node)&&!GardenCityLightPolicy.WireAssemblyReady(EntityManager.GetComponentData<MGRSignalStyle>(node).Value,World.GetOrCreateSystemManaged<SignalWireSystem>().Ready))continue;
 
-                if(UnchangedSignalNode(node)){if(signalPresentationChecks.Contains(node))ReviewSignalPresentation(node);continue;}
+                if(UnchangedSignalNode(node, out var networkObservation)){if(signalPresentationChecks.Contains(node))ReviewSignalPresentation(node);continue;}
                 waitingSignalDefinitions.Remove(node);
                 var props=_props;CopySignalChildren(node,props);
 
-                var approaches=ReadApproaches(node);
+                // No ECS writes or job scheduling occurs between the network
+                // comparison above and this read. Consume the local proof now;
+                // it is never retained across PrepareSupports/Move or nodes.
+                var approaches=ReadApproaches(node, networkObservation);
                 var surface=ReadLayoutSurface(node);
                 if(EntityManager.HasComponent<MGRGardenCitySignals>(node))if(GardenCityLightPolicy.TraceEnabled)GardenCityLightPolicy.Trace(node,"custom node processed: approaches="+approaches.Count+" props="+props.Count+" surfaceSamples="+surface.Count);
 
@@ -1548,7 +1557,7 @@ namespace MedianGrassReplacement.Systems
             bool changed=EntityManager.HasComponent<PrefabRef>(actor)&&EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab!=prefab;
             if(changed)PreviewRevision++;
             NativeVisualInvalidation.SetPrefab(World,actor,prefab);
-            if(changed)SignalPreviewSystem.SourceChanged(World,actor);
+            if(changed) { SignalPreviewSystem.SourceChanged(World,actor); NativeSignalProjectionSystem.SourceChanged(World,actor); }
         }
 
         private void Write(Entity prop, ObjectTransform transform)
@@ -1556,7 +1565,7 @@ namespace MedianGrassReplacement.Systems
             bool changed=EntityManager.HasComponent<ObjectTransform>(prop)&&!EntityManager.GetComponentData<ObjectTransform>(prop).Equals(transform);
             if(changed)PreviewRevision++;
             NativeVisualInvalidation.SetTransform(World,prop,transform);
-            if(changed)SignalPreviewSystem.SourceChanged(World,prop);
+            if(changed) { SignalPreviewSystem.SourceChanged(World,prop); NativeSignalProjectionSystem.SourceChanged(World,prop); }
         }
 
         private void Undo(Entity prop, Moved moved,bool serializing=false)
@@ -1582,16 +1591,16 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        internal void Restore() { ClearSignalLayouts(); nativeSignalChildren.BeginPass(); waitingSignalDefinitions.Clear();signalPresentationChecks.Clear(); Dependency.Complete();_reconcileNodes.Clear();_reconcileSet.Clear();_nextReconcile=0;ClearGeneratedLamps(); var hidden=new List<Entity>(_hiddenSignals.Keys);foreach(var prop in hidden)ReleaseHiddenSignal(prop); foreach (var item in _moved) Undo(item.Key, item.Value);foreach(var item in _lamps)Undo(item.Key,item.Value);_lamps.Clear(); _moved.Clear(); maintenance.Clear(); signalTickets.Clear(); ClearLampTracking(); Requested.Clear(); }
+        internal void Restore() { ClearSignalLayouts(); nativeSignalChildren.BeginPass(); waitingSignalDefinitions.Clear();signalPresentationChecks.Clear(); { CompleteDependency(); Dependency = default; }_reconcileNodes.Clear();_reconcileSet.Clear();_nextReconcile=0;ClearGeneratedLamps(); var hidden=new List<Entity>(_hiddenSignals.Keys);foreach(var prop in hidden)ReleaseHiddenSignal(prop); foreach (var item in _moved) Undo(item.Key, item.Value);foreach(var item in _lamps)Undo(item.Key,item.Value);_lamps.Clear(); _moved.Clear(); maintenance.Clear(); ClearSignalTickets(); ClearLampTracking(); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Signals); }
 
         public void PreSerialize(Context context)
         {
-            Dependency.Complete();ClearGeneratedLamps(true);var hidden=new List<Entity>(_hiddenSignals.Keys);foreach(var prop in hidden)ReleaseHiddenSignal(prop);Mod.Log.Info("Signal save preparation: restoring "+_moved.Count+" controlled props.");
+            { CompleteDependency(); Dependency = default; }ClearGeneratedLamps(true);var hidden=new List<Entity>(_hiddenSignals.Keys);foreach(var prop in hidden)ReleaseHiddenSignal(prop);Mod.Log.Info("Signal save preparation: restoring "+_moved.Count+" controlled props.");
             foreach(var item in _moved)Undo(item.Key,item.Value,true);
             foreach(var item in _lamps)Undo(item.Key,item.Value,true);_lamps.Clear();
             int remaining=0;
             foreach(var item in _moved)if(Live(item.Key)&&EntityManager.HasComponent<PrefabRef>(item.Key)&&EntityManager.GetComponentData<PrefabRef>(item.Key).m_Prefab==item.Value.AppliedPrefab&&item.Value.AppliedPrefab!=item.Value.Prefab)remaining++;
-            _moved.Clear();maintenance.Clear();signalTickets.Clear();nativeSignalChildren.BeginPass();waitingSignalDefinitions.Clear();signalPresentationChecks.Clear();ClearLampTracking();Requested.Clear();_initial=true;
+            _moved.Clear();maintenance.Clear();ClearSignalTickets();nativeSignalChildren.BeginPass();waitingSignalDefinitions.Clear();signalPresentationChecks.Clear();ClearLampTracking();Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Signals);_initial=true;
             Mod.Log.Info("Signal save preparation complete: remaining temporary references="+remaining);
         }
 

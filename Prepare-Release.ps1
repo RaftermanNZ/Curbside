@@ -44,21 +44,45 @@ function Set-PortableSymbolPaths([string]$Path) {
     }
     [IO.File]::WriteAllBytes($Path,$data)
 }
+$dependencies = Join-Path $PSScriptRoot 'Dependencies'
+$symbols = @('MedianGrassReplacement.dll', 'MedianGrassReplacement_win_x86_64.dll')
+$builtFiles = $symbols + @('curbside.mjs', 'curbside.css', 'curbside.mjs.LICENSE.txt')
+$dependencyFiles = @(Get-ChildItem -LiteralPath $dependencies -Filter '*.dll' -File)
+foreach ($file in $dependencyFiles) { $builtFiles += $file.Name }
+foreach ($name in $builtFiles) {
+    $path = Join-Path $BuildFolder $name
+    if (!(Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+        throw "Release input is missing or empty: $name"
+    }
+}
+foreach ($file in $dependencyFiles) {
+    $built = Join-Path $BuildFolder $file.Name
+    if ((Get-FileHash -LiteralPath $built).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) {
+        throw "Release dependency does not match the source package: $($file.Name)"
+    }
+}
+$textures = @(Get-ChildItem -LiteralPath (Join-Path $BuildFolder 'BundledTextures') -Filter '*.png' -File)
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'BundledTextures') -Filter '*.png' -File) {
+    if ($file.Name -notin $textures.Name) { throw "Release texture is missing: $($file.Name)" }
+}
+$resolvedBuild = (Resolve-Path -LiteralPath $BuildFolder).Path
+$resolvedRelease = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReleaseFolder)
+if ($resolvedBuild.TrimEnd('\') -eq $resolvedRelease.TrimEnd('\')) {
+    throw 'Use a separate release output folder.'
+}
 New-Item -ItemType Directory -Path $ReleaseFolder -Force | Out-Null
-foreach($name in @('MedianGrassReplacement.dll','MedianGrassReplacement_win_x86_64.dll')){
-    $destination=Join-Path $ReleaseFolder $name
-    Copy-Item -LiteralPath (Join-Path $BuildFolder $name) -Destination $destination
-    Set-PortableSymbolPaths $destination
+foreach ($name in $builtFiles) {
+    Copy-Item -LiteralPath (Join-Path $BuildFolder $name) -Destination $ReleaseFolder -Force
 }
-Copy-Item -LiteralPath (Join-Path $BuildFolder 'curbside.mjs') -Destination $ReleaseFolder
-foreach($name in @('README.md','CHANGELOG.md')){
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $ReleaseFolder
+foreach ($name in $symbols) { Set-PortableSymbolPaths (Join-Path $ReleaseFolder $name) }
+foreach ($name in @('README.md', 'CHANGELOG.md', 'LICENSE', 'THIRD-PARTY-NOTICES.txt')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $ReleaseFolder -Force
 }
-Write-Output 'Release folder prepared. Symbol files remain in the build folder.'
-
-
-Copy-Item -LiteralPath (Join-Path $BuildFolder "curbside.css") -Destination $ReleaseFolder
-$textureDestination = Join-Path $ReleaseFolder 'BundledTextures'
-New-Item -ItemType Directory -Path $textureDestination -Force | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $BuildFolder 'BundledTextures') -File | Copy-Item -Destination $textureDestination -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $ReleaseFolder
+$noticeFolder = Join-Path $ReleaseFolder 'ThirdParty'
+New-Item -ItemType Directory -Path $noticeFolder -Force | Out-Null
+Get-ChildItem -LiteralPath $dependencies -File |
+    Where-Object Extension -in '.txt', '.nuspec' | Copy-Item -Destination $noticeFolder -Force
+$textureFolder = Join-Path $ReleaseFolder 'BundledTextures'
+New-Item -ItemType Directory -Path $textureFolder -Force | Out-Null
+$textures | Copy-Item -Destination $textureFolder -Force
+Write-Output "Release folder prepared with $($dependencyFiles.Count) managed dependencies."

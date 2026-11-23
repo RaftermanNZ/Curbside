@@ -31,6 +31,18 @@ namespace MedianGrassReplacement.Systems
             int count=System.Math.Min(System.Math.Max(0,budget),rotation.Count);
             for(int i=0;i<count;i++){if(next>=rotation.Count)next=0;output.Add(rotation[next++]);}
         }
+        // Advance over the same bounded recovery slots as Rotate. Actors owned
+        // by a copied changed owner are already in the direct work list.
+        internal void RotateExceptOwners(List<TItem> output, int budget, HashSet<TOwner> copiedOwners)
+        {
+            int count = System.Math.Min(System.Math.Max(0, budget), rotation.Count);
+            for (int i = 0; i < count; i++)
+            {
+                if (next >= rotation.Count) next = 0;
+                var item = rotation[next++];
+                if (!items.TryGetValue(item, out var entry) || !copiedOwners.Contains(entry.Owner)) output.Add(item);
+            }
+        }
         internal void Clear(){items.Clear();owners.Clear();rotation.Clear();next=0;}
     }
 }

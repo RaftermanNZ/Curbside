@@ -33,6 +33,7 @@ namespace MedianGrassReplacement.Localization
             entries[_setting.GetOptionTabLocaleID(Setting.kHighwaysTab)]="Highway markings";
             entries[_setting.GetOptionGroupLocaleID(Setting.kCompatibilityGroup)]="Compatibility controls";
             entries[_setting.GetOptionGroupLocaleID(Setting.kHighwayControlGroup)]="Automatic highway markings";
+            Option(nameof(Setting.PreviewMode),"Tool previews","Vanilla previews (performance) is the default and uses the game's preview visuals. Curbside previews (experimental) tries to carry saved lights, crosswalks and line visibility into road and building previews. Some previews may be incomplete or affect frame rate. Use Vanilla previews for the game's default visuals and less preview work. Visual differences apply only during previews. You can apply every upgrade in either mode.");
             Option(nameof(Setting.AutomaticMarkingTheme),"Automatic marking theme","Map theme is the default. Applies to automatic center, median, edge and divider colors. Manual line tools keep their explicit colors and styles. Ignored while Use vanilla automatic markings is on.");
             Option(nameof(Setting.UseVanillaAutomaticMarkings),"Use vanilla automatic markings","Stop automatically generated road lines, automatic recoloring and automatic junction cleanup. Manually placed line, parking, hatch, crossing and visibility upgrades remain active. Other automatic marking settings are ignored while this is on. Default: off.");
             Option(nameof(Setting.DisableAutomaticHighwayMarkings),"Disable automatic highway lines","Keep vanilla highway markings and your manual upgrades; stop automatic highway additions at sections, nodes and junctions. Default: off.");
@@ -229,3 +230,4 @@ namespace MedianGrassReplacement.Localization
     }
 
 }
+

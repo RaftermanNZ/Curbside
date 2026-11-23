@@ -60,7 +60,7 @@ namespace GardenCitySignals
     foreach(var model in found.Values)if(prefabs.TryGetEntity(model,out var entity))MedianGrassReplacement.Systems.SignalAssetSaveSystem.Register(entity,fallback);
     // A published five-style pack also proves the revised original sign layout.
     // Refresh affected junctions once if that proof arrived after original adoption.
-    using(var items=styledNodes.ToEntityArray(Allocator.Temp))foreach(var entity in items)if(layoutChanged||EntityManager.GetComponentData<MedianGrassReplacement.Systems.MGRSignalStyle>(entity).Value==4)MedianGrassReplacement.Systems.FarSideLightSystem.Queue(entity);
+    using(var items=styledNodes.ToEntityArray(Allocator.Temp))foreach(var entity in items)if(layoutChanged||EntityManager.GetComponentData<MedianGrassReplacement.Systems.MGRSignalStyle>(entity).Value==4)MedianGrassReplacement.Systems.FarSideLightSystem.Queue(World,entity);
     ready=true;Enabled=false;DiscoveryStatus="Ready: 4 Florida modules and shared original modules";Mod.Log.Info(DiscoveryStatus+". Fifth style enabled; startup scan stopped.");return;
    }
    DiscoveryStatus="Florida modules "+found.Count+"/4; originalReady="+original+"; ambiguous="+ambiguous;

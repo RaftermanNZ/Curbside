@@ -274,7 +274,15 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        internal void PruneNodeIntents(Entity node)
+        // Exact read-only early-return predicate of PruneNodeIntents.
+        internal bool HasNodeIntentsForPruning(Entity node)
+            => EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node)
+                && EntityManager.HasBuffer<ConnectedEdge>(node)
+                && EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node, true).Length != 0;
+
+        internal void PruneNodeIntents(Entity node) => PruneNodeIntents(node, null);
+
+        internal void PruneNodeIntents(Entity node, System.Action beforeWrite)
         {
             if (!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node)
                 || !EntityManager.HasBuffer<ConnectedEdge>(node)) return;
@@ -313,6 +321,9 @@ namespace MedianGrassReplacement.Systems
             }
             if (!remove) return;
 
+            // Read-only no-ops must not discard the whole marking cohort's
+            // observed inputs. Close borrowed scopes only before the real write.
+            beforeWrite?.Invoke();
             var buffer = EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);
             for (int i = buffer.Length - 1; i >= 0; i--)
             {

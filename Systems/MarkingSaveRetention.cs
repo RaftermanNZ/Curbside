@@ -20,9 +20,85 @@ namespace MedianGrassReplacement.Systems
         internal readonly Dictionary<Entity, (Entity Owner, Entity Prefab, Bezier4x3 Curve)> SourceIdentities
             = new Dictionary<Entity, (Entity Owner, Entity Prefab, Bezier4x3 Curve)>();
         internal bool Active { get; private set; }
+        internal bool NativePrefabSerialization;
+        private readonly HashSet<Entity> validatedDefinitions = new HashSet<Entity>();
+        private int definitionValidationDepth;
+        internal readonly struct DefinitionValidation : IDisposable
+        {
+            private readonly MarkingSaveRetention owner;
+            internal DefinitionValidation(MarkingSaveRetention owner)
+            {
+                this.owner = owner;
+                if (owner.definitionValidationDepth++ == 0) owner.validatedDefinitions.Clear();
+            }
+            public void Dispose()
+            {
+                if (owner != null && --owner.definitionValidationDepth == 0) owner.validatedDefinitions.Clear();
+            }
+        }
+        // Save-only, explicitly non-mutating validation phases. Never reused
+        // across preparation, native serialization, cancellation or completion.
+        internal DefinitionValidation DefinitionValidationScope() => new DefinitionValidation(this);
+        private sealed class Definition
+        {
+            internal NetLaneGeometryPrefab Managed;
+            internal int RuntimeIndex;
+            internal NetLaneData Lane;
+            internal NetLaneGeometryData Geometry;
+            internal NetLaneArchetypeData Archetype;
+        }
+        private readonly Dictionary<Entity, Definition> definitions = new Dictionary<Entity, Definition>();
 
         internal void Begin() { Clear(); Active = true; }
-        internal void Clear() { Roads.Clear(); Actors.Clear(); Sources.Clear(); SourceIdentities.Clear(); Active = false; }
+        internal void Clear() { Roads.Clear(); Actors.Clear(); Sources.Clear(); SourceIdentities.Clear(); definitions.Clear(); validatedDefinitions.Clear(); definitionValidationDepth = 0; NativePrefabSerialization = false; Active = false; }
+        internal void InheritDefinitionProofs(MarkingSaveRetention original)
+        {
+            NativePrefabSerialization = original.NativePrefabSerialization;
+            foreach (var pair in original.definitions) definitions.Add(pair.Key, pair.Value);
+        }
+        internal bool StableDefinition(EntityManager manager, PrefabSystem prefabs, Entity entity)
+        {
+            if (!Active) return false;
+            if (definitionValidationDepth != 0 && validatedDefinitions.Contains(entity)) return true;
+            if (!NativePrefabSerialization)
+            {
+                if (!StablePaint(manager, prefabs, entity)) return false;
+                if (!definitions.ContainsKey(entity))
+                {
+                    if (!prefabs.TryGetPrefab<NetLaneGeometryPrefab>(entity, out var managed)) return false;
+                    definitions.Add(entity, new Definition { Managed = managed, RuntimeIndex = manager.GetComponentData<PrefabData>(entity).m_Index,
+                        Lane = manager.GetComponentData<NetLaneData>(entity),
+                        Geometry = manager.GetComponentData<NetLaneGeometryData>(entity),
+                        Archetype = manager.GetComponentData<NetLaneArchetypeData>(entity) });
+                }
+            }
+            if (!definitions.TryGetValue(entity, out var expected) || !manager.Exists(entity)
+                || manager.HasComponent<Deleted>(entity) || !manager.HasComponent<PrefabData>(entity)
+                || manager.HasComponent<MGRPrivateVisualPrefab>(entity) || manager.HasComponent<MGRPrivatePaintDefinition>(entity)
+                || !manager.HasComponent<NetLaneData>(entity) || !manager.HasComponent<NetLaneGeometryData>(entity)
+                || !manager.HasComponent<NetLaneArchetypeData>(entity)
+                || !expected.Lane.Equals(manager.GetComponentData<NetLaneData>(entity))
+                || !expected.Geometry.Equals(manager.GetComponentData<NetLaneGeometryData>(entity))
+                || !expected.Archetype.Equals(manager.GetComponentData<NetLaneArchetypeData>(entity))) return false;
+            if (NativePrefabSerialization)
+            {
+                // Referenced definitions carry the native old-index record;
+                // unused definitions stay disabled with their runtime index.
+                // Do not accept arbitrary index/enable changes as normalization.
+                if (manager.IsComponentEnabled<PrefabData>(entity))
+                {
+                    if (!manager.HasBuffer<LoadedIndex>(entity)) return false;
+                    var original = manager.GetBuffer<LoadedIndex>(entity, true);
+                    if (original.Length != 1 || original[0].m_Index != expected.RuntimeIndex) return false;
+                }
+                else if (manager.GetComponentData<PrefabData>(entity).m_Index != expected.RuntimeIndex) return false;
+            }
+            // TryGetEntity uses the managed registration, not remapped PrefabData.
+            bool same = prefabs != null && expected.Managed != null && expected.Managed.isBuiltin
+                && prefabs.TryGetEntity(expected.Managed, out var registered) && registered == entity;
+            if (same && definitionValidationDepth != 0) validatedDefinitions.Add(entity);
+            return same;
+        }
         internal bool Retains(Entity entity) => Active && Actors.Contains(entity);
         internal bool RetainsSource(Entity entity) => Active && Sources.Contains(entity);
 
@@ -56,10 +132,13 @@ namespace MedianGrassReplacement.Systems
 
         internal void CaptureMarkingRetention(MarkingSaveRetention retention)
         {
+            using (retention.DefinitionValidationScope())
+            {
+
             saveRoadMarkings.Clear();
             foreach (var pair in _marks)
             {
-                if (!RetainableRoadMarking(pair.Key, pair.Value)) continue;
+                if (!RetainableRoadMarking(pair.Key, pair.Value, retention)) continue;
                 saveRoadMarkings.Add(pair.Key, new RetainedRoadMarking
                 {
                     Marks = pair.Value,
@@ -71,9 +150,11 @@ namespace MedianGrassReplacement.Systems
                 retention.Roads.Add(pair.Key);
                 foreach (var actor in pair.Value.Entities) retention.Actors.Add(actor);
             }
+        
+            }
         }
 
-        private bool RetainableRoadMarking(Entity road, RoadMarks marks)
+        private bool RetainableRoadMarking(Entity road, RoadMarks marks, MarkingSaveRetention retention)
         {
             if (!EntityManager.Exists(road) || EntityManager.HasComponent<Deleted>(road)
                 || EntityManager.HasComponent<Game.Tools.Temp>(road) || !EntityManager.HasComponent<Road>(road)
@@ -103,7 +184,7 @@ namespace MedianGrassReplacement.Systems
                     || !EntityManager.HasComponent<Curve>(actor) || !EntityManager.HasComponent<PrefabRef>(actor)
                     || EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab != mark.Prefab
                     || !SameRetainedCurve(EntityManager.GetComponentData<Curve>(actor).m_Bezier, mark.Curve)
-                    || !MarkingSaveRetention.StablePaint(EntityManager, _prefabs, mark.Prefab)) return false;
+                    || !retention.StableDefinition(EntityManager, _prefabs, mark.Prefab)) return false;
             }
             return true;
         }
@@ -113,10 +194,15 @@ namespace MedianGrassReplacement.Systems
 
         internal bool ValidateMarkingRetention()
         {
+            var retention = World.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.MarkingRetention;
+            if (retention == null || !retention.Active) return saveRoadMarkings.Count == 0;
+
+            using (retention.DefinitionValidationScope())
+            {
             foreach (var pair in saveRoadMarkings)
             {
                 if (!_marks.TryGetValue(pair.Key, out var current) || !ReferenceEquals(current, pair.Value.Marks)
-                    || !RetainableRoadMarking(pair.Key, current)
+                    || !RetainableRoadMarking(pair.Key, current, retention)
                     || current.Entities.Count != pair.Value.Entities.Count || current.Curves.Count != pair.Value.Curves.Count
                     || !EntityManager.GetComponentData<EdgeGeometry>(pair.Key).Equals(pair.Value.Geometry)
                     || !EntityManager.GetComponentData<Composition>(pair.Key).Equals(pair.Value.Composition)) return false;
@@ -124,6 +210,8 @@ namespace MedianGrassReplacement.Systems
                     if (current.Entities[i] != pair.Value.Entities[i] || !current.Curves[i].Equals(pair.Value.Curves[i])) return false;
             }
             return true;
+        
+            }
         }
 
         internal void EndMarkingRetention() => saveRoadMarkings.Clear();
@@ -151,7 +239,7 @@ namespace MedianGrassReplacement.Systems
                 Mod.Log.Warn("Save retention deferred: matching hidden native source is uncertain.");
                 save.DeferMarkingReconcileAfterSave("hidden-source state changed during the save wait");
             }
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             using (var entities = _owned.ToEntityArray(Allocator.Temp))
                 foreach (var entity in entities)
                     if (!retention.Retains(entity)) GeneratedVisualLifecycle.Retire(World, entity);
@@ -176,6 +264,9 @@ namespace MedianGrassReplacement.Systems
 
         internal bool CaptureRetainedHiddenSources(MarkingSaveRetention retention)
         {
+            using (retention.DefinitionValidationScope())
+            {
+
             RetentionSourceFailure = null;
             retention.Sources.Clear();
             retention.SourceIdentities.Clear();
@@ -204,19 +295,22 @@ namespace MedianGrassReplacement.Systems
                     || _externalPaint.Contains(EntityManager, source))
                 { if (retention.Roads.Contains(road)) return RejectRetainedSource(source, road, "source is missing, temporary, revealed, or externally owned"); continue; }
                 var prefab = EntityManager.GetComponentData<PrefabRef>(source).m_Prefab;
-                if (!MarkingSaveRetention.StablePaint(EntityManager, _prefabs, prefab)
+                if (!retention.StableDefinition(EntityManager, _prefabs, prefab)
                     || !replacement.SourceKey.Equals(new MarkingKey(EntityManager.GetComponentData<Curve>(source).m_Bezier, prefab)))
                 { if (retention.Roads.Contains(road)) return RejectRetainedSource(source, road, "native definition or recorded source curve/prefab no longer matches"); continue; }
                 retention.Sources.Add(source);
                 retention.SourceIdentities.Add(source, (road, prefab, EntityManager.GetComponentData<Curve>(source).m_Bezier));
             }
             return true;
+        
+            }
         }
 
         internal bool ValidateRetainedHiddenSources(MarkingSaveRetention retention)
         {
             var probe = new MarkingSaveRetention();
             probe.Begin();
+            probe.InheritDefinitionProofs(retention);
             probe.Roads.UnionWith(retention.Roads);
             if (!CaptureRetainedHiddenSources(probe) || !retention.Sources.SetEquals(probe.Sources)) return false;
             foreach (var pair in retention.SourceIdentities)
@@ -230,7 +324,7 @@ namespace MedianGrassReplacement.Systems
             var retention = World.GetExistingSystemManaged<GeneratedVisualSaveSystem>()?.MarkingRetention;
             if (retention == null || !retention.Active || retention.Sources.Count == 0)
             { Restore(); World.GetOrCreateSystemManaged<CrosswalkVisualSystem>().RestoreAll(); return; }
-            Dependency.Complete(); RestorePreviewPaint();
+            { CompleteDependency(); Dependency = default; } RestorePreviewPaint();
             using (var sources = _originals.ToEntityArray(Allocator.Temp))
                 foreach (var source in sources) if (!retention.RetainsSource(source)) Remove(source);
             foreach (var source in new List<Entity>(_replacements.Keys))

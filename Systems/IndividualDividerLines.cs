@@ -92,7 +92,7 @@ namespace MedianGrassReplacement.Systems
             if(Mod.Saving||!GranularHighwayLinePolicy.ValidStyle(style)||!IndividualDividerSource(owner,source))return;
             var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
             World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(owner);
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             if(!EntityManager.HasBuffer<MGRIndividualDivider>(owner))EntityManager.AddBuffer<MGRIndividualDivider>(owner);
             var buffer=EntityManager.GetBuffer<MGRIndividualDivider>(owner);int index=-1;
             for(int i=0;i<buffer.Length&&i<256;i++)if(IndividualDividerPolicy.Matches(buffer[i],path)){index=i;break;}

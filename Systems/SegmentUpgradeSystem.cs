@@ -63,7 +63,7 @@ namespace MedianGrassReplacement.Systems
         }
         private void Refresh(Entity road,bool parking=false,bool all=false)
         {
-            CurbLineEmissionSystem.QueueRoad(road);if(parking)FixedParkingSystem.QueueRoad(road);if(all)DecalVisibilitySystem.QueueRoad(road);
+            CurbLineEmissionSystem.QueueRoad(road);if(parking)FixedParkingSystem.QueueRoad(World,road);if(all)DecalVisibilitySystem.QueueRoad(World,road);
             SegmentUpgradePolicy.QueuePaint(EntityManager,road);
             if(all){World.GetOrCreateSystemManaged<CurbDecalSystem>().QueueRoad(road);World.GetOrCreateSystemManaged<VisualPowerlineSystem>().QueueRoad(road,true);}
         }
@@ -97,7 +97,7 @@ namespace MedianGrassReplacement.Systems
                         World.GetOrCreateSystemManaged<StreetLightingSystem>().ResetNode(node);
                         // Node-wide upgrades cannot be removed for only half a junction.
                         Remove<MGRSurfaceSlots>(node);
-                        if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);if(EntityManager.HasBuffer<MGRIndividualDivider>(node))EntityManager.RemoveComponent<MGRIndividualDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(node);
+                        if(EntityManager.HasBuffer<MGRHighwayLineIntent>(node))EntityManager.RemoveComponent<MGRHighwayLineIntent>(node);Remove<MGREdgePaint>(node);Remove<MGRLaneDivider>(node);if(EntityManager.HasBuffer<MGRIndividualDivider>(node))EntityManager.RemoveComponent<MGRIndividualDivider>(node);Remove<MGRCenterlineStyle>(node);Remove<MGRSegmentLineVisibility>(node);Remove<MGRHideCenterline>(node);Remove<MGRHideNodeLines>(node);Remove<MGRJunctionEdgeLines>(node);Remove<MGRRemoveJunctionEdges>(node);Remove<MGRFarSideLights>(node);FarSideLightSystem.Queue(World,node);
                     }
                 }
             }

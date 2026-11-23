@@ -70,7 +70,7 @@ namespace MedianGrassReplacement.Systems
             if(manager==null||prefabs==null)
             {if(bindings.Count>0)Mod.Log.Warn("Quay material registrations unavailable; retaining owned material references.");return;}
             var surfaces=World.GetExistingSystemManaged<GlobalSurfaceMaterialSystem>();
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             // Borrowed accessors stay local. Complete exactly the dependencies
             // returned for this public writer API before reading or rebinding.
             var native=manager.GetNativeBatchGroups(false,out var dependencies);

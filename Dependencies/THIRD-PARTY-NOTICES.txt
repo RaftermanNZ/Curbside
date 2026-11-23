@@ -1,0 +1,5 @@
+Harmony Thin 2.4.3: Andreas Pardeike, MIT; see Harmony-LICENSE.txt.
+MonoMod.Core 1.3.6, MonoMod.Utils 25.0.14, MonoMod.Backports 1.1.2, MonoMod.ILHelpers 1.1.0: 0x0ade, DaNike; MIT per bundled original NuGet manifests. MonoMod.Iced is distributed inside MonoMod.Core.
+Mono.Cecil 0.11.6: MIT; see bundled license.
+Sources: https://github.com/pardeike/Harmony and https://github.com/MonoMod/MonoMod and https://github.com/jbevain/cecil
+Unmodified cached official NuGet payloads; package SHA512 and DLL SHA256 recorded in Dependency-Provenance.json.

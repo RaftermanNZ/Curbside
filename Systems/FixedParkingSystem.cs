@@ -45,6 +45,8 @@ namespace MedianGrassReplacement.Systems
         private static readonly HashSet<Entity> _queuedOwners = new HashSet<Entity>();
 
         internal static void QueueRoad(Entity road) { _queuedOwners.Add(road); }
+        internal static void QueueRoad(World world, Entity road)
+            => CurbsideChangePipeline.For(world).Publish(ChangeConsumer.Parking, road);
 
         private readonly HashSet<Entity> _waiting = new HashSet<Entity>();
 
@@ -107,7 +109,7 @@ namespace MedianGrassReplacement.Systems
 
 
 
-        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; RestoreAndDestroy(true); _queuedOwners.Clear(); }
+        protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; RestoreAndDestroy(true); _queuedOwners.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Parking); }
 
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
 
@@ -115,7 +117,7 @@ namespace MedianGrassReplacement.Systems
 
             base.OnGameLoadingComplete(purpose, mode);
 
-            RestoreAndDestroy(true); _queuedOwners.Clear();
+            RestoreAndDestroy(true); _queuedOwners.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Parking);
 
             _active = (mode & GameMode.GameOrEditor) != GameMode.None;
 
@@ -186,7 +188,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
 
             foreach (var lane in new List<Entity>(_restrictions.Keys)) RestoreRestriction(lane);
 
@@ -299,7 +301,13 @@ namespace MedianGrassReplacement.Systems
 
 
         private void ApplyBays()
+        {
+            parkingRoadInputs.Clear();
+            try { ApplyBaysCore(); }
+            finally { parkingRoadInputs.Clear(); }
+        }
 
+        private void ApplyBaysCore()
         {
             parkingCatalogChecked = false;
 
@@ -334,6 +342,7 @@ namespace MedianGrassReplacement.Systems
 
             }
 
+            CurbsideChangePipeline.For(World).Drain(ChangeConsumer.Parking, _queuedOwners);
             foreach (var owner in _queuedOwners) if (EntityManager.Exists(owner) && EntityManager.HasBuffer<Game.Net.SubLane>(owner))
 
                     foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner, true))
@@ -342,11 +351,13 @@ namespace MedianGrassReplacement.Systems
 
                         var lane = entry.m_SubLane;
 
-                        if (EntityManager.HasComponent<Game.Net.ParkingLane>(lane) && EntityManager.HasComponent<PrefabRef>(lane) && EntityManager.HasComponent<Curve>(lane) && EntityManager.HasComponent<Owner>(lane) && !EntityManager.HasComponent<Deleted>(lane) && !EntityManager.HasComponent<Game.Tools.Temp>(lane)) pending.Add(lane);
+                        // Reject preview/deleted members before registering
+                        // native prefab/curve reads for the committed pass.
+                        if (!EntityManager.HasComponent<Deleted>(lane) && !EntityManager.HasComponent<Game.Tools.Temp>(lane) && EntityManager.HasComponent<Game.Net.ParkingLane>(lane) && EntityManager.HasComponent<PrefabRef>(lane) && EntityManager.HasComponent<Curve>(lane) && EntityManager.HasComponent<Owner>(lane)) pending.Add(lane);
 
                     }
 
-            _queuedOwners.Clear();
+            _queuedOwners.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.Parking);
 
             CollectReadyParking(pending);
 
@@ -557,8 +568,6 @@ namespace MedianGrassReplacement.Systems
 
                 || !EntityManager.HasBuffer<Game.Net.SubLane>(road) || !EntityManager.HasComponent<Game.Net.Edge>(road)) return;
 
-            Entity blocker = Entity.Null;
-
             float lower = 0f, upper = 1f;
 
             var curve = EntityManager.GetComponentData<Curve>(lane).m_Bezier;
@@ -573,25 +582,10 @@ namespace MedianGrassReplacement.Systems
                 parkingCatalogChecked = true;
             }
 
-            foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(road, true))
-
-            {
-
-                Entity other = entry.m_SubLane;
-
-                if (EntityManager.HasComponent<Deleted>(other)) continue;
-
-                if (blocker == Entity.Null && EntityManager.HasComponent<Game.Net.CarLane>(other)) blocker = other;
-
-
-
-            }
-
+            var inputs = ReadParkingRoadInputs(road);
+            Entity blocker = inputs.Blocker;
             if (blocker == Entity.Null) return;
-
-            var edge = EntityManager.GetComponentData<Game.Net.Edge>(road);
-
-            bool roadStartJunction = Junction(edge.m_Start), roadEndJunction = Junction(edge.m_End);
+            bool roadStartJunction = inputs.StartJunction, roadEndJunction = inputs.EndJunction;
 
             float2 delta = new float2(float.NaN);
 
@@ -599,11 +593,9 @@ namespace MedianGrassReplacement.Systems
 
             float firstRoadPosition = float.NaN, lastRoadPosition = float.NaN;
 
-            if (EntityManager.HasComponent<Curve>(road))
-
+            if (inputs.HasCurve)
             {
-
-                var roadCurve = EntityManager.GetComponentData<Curve>(road).m_Bezier;
+                var roadCurve = inputs.Curve.m_Bezier;
 
                 Colossal.Mathematics.MathUtils.Distance(roadCurve, curve.a, out firstRoadPosition);
 
@@ -615,7 +607,16 @@ namespace MedianGrassReplacement.Systems
 
             bool end = ParkingSetback.JunctionEnd(delta.y, lastRoadPosition, roadStartJunction, roadEndJunction);
 
-            marking.GetRoadStopRange(road, curve, marking.LaneForward(road, lane, curve), out lower, out upper);
+            bool forward = marking.LaneForward(road, lane, curve);
+            var stops = inputs.Stops;
+            if (stops == null)
+            {
+                stops = marking.CaptureParkingStops(road);
+                // Foreign stop/parking hybrids retain a fresh read per lane:
+                // private parking-prefab replacement can change their membership.
+                if (stops.Reusable) inputs.Stops = stops;
+            }
+            stops.Range(curve, forward, out lower, out upper);
 
             bool available = ParkingSetback.TryLimits(curve, lower, upper, start, end, _setback, out float first, out float last);
 

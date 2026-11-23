@@ -12,7 +12,33 @@ namespace MedianGrassReplacement.Systems
 
     internal static class NativeVisualInvalidation
     {
+        // Immutable, bounded subsets: one archetype transition for each visual.
+        private static readonly ComponentTypeSet[] RefreshSets = CreateRefreshSets();
+        private static ComponentTypeSet[] CreateRefreshSets()
+        {
+            var sets = new ComponentTypeSet[16];
+            for (int mask = 1; mask < sets.Length; mask++)
+            {
+                var types = new System.Collections.Generic.List<ComponentType>(4);
+                if ((mask & 1) != 0) types.Add(ComponentType.ReadWrite<Updated>());
+                if ((mask & 2) != 0) types.Add(ComponentType.ReadWrite<BatchesUpdated>());
+                if ((mask & 4) != 0) types.Add(ComponentType.ReadWrite<EffectsUpdated>());
+                if ((mask & 8) != 0) types.Add(ComponentType.ReadWrite<MGRPendingSpatialUpdate>());
+                sets[mask] = new ComponentTypeSet(types.ToArray());
+            }
+            return sets;
+        }
+
         internal static void Mark(EntityManager manager,Entity entity) => ApplyMark(manager,entity);
+
+        internal static void QueuePreviewRefresh(EntityManager manager, EntityCommandBuffer commands, Entity entity)
+        {
+            int missing = 0;
+            if (!manager.HasComponent<Updated>(entity)) missing |= 1;
+            if (!manager.HasComponent<BatchesUpdated>(entity)) missing |= 2;
+            if (!manager.HasComponent<EffectsUpdated>(entity)) missing |= 4;
+            if (missing != 0) commands.AddComponent(entity, RefreshSets[missing]);
+        }
 
         internal static void CompleteReaders(World world)
         {
@@ -120,11 +146,15 @@ namespace MedianGrassReplacement.Systems
         internal static void ApplyMark(EntityManager manager, Entity entity)
         {
             if (!manager.Exists(entity) || manager.HasComponent<Deleted>(entity)) return;
-            if (!manager.HasComponent<Updated>(entity)) manager.AddComponent<Updated>(entity);
-            if (!manager.HasComponent<BatchesUpdated>(entity)) manager.AddComponent<BatchesUpdated>(entity);
-            if (!manager.HasComponent<EffectsUpdated>(entity)) manager.AddComponent<EffectsUpdated>(entity);
+            int missing = 0;
+            if (!manager.HasComponent<Updated>(entity)) missing |= 1;
+            if (!manager.HasComponent<BatchesUpdated>(entity)) missing |= 2;
+            if (!manager.HasComponent<EffectsUpdated>(entity)) missing |= 4;
             // Late marking producers keep this until an actual search pass.
-            if (!manager.HasComponent<Game.Tools.Temp>(entity) && !manager.HasComponent<MGRPendingSpatialUpdate>(entity)) manager.AddComponent<MGRPendingSpatialUpdate>(entity);
+            if (!manager.HasComponent<Game.Tools.Temp>(entity) && !manager.HasComponent<MGRPendingSpatialUpdate>(entity)) missing |= 8;
+            // Even an empty AddComponent set enters structural-change handling.
+            // Preserve the no-write path when every required flag is present.
+            if (missing != 0) manager.AddComponent(entity, RefreshSets[missing]);
         }
     }
 

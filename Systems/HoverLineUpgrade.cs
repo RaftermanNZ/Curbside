@@ -78,9 +78,7 @@ namespace MedianGrassReplacement.Systems
             int index=HoverLinePolicy.Pick(_lineHoverChoices,position);
             HoverLineChoice selected=index>=0?_lineHoverChoices[index]:null;
             var overlay=World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>().GetBuffer(out var job);job.Complete();
-            if(ModDiagnostics.ActionJournal.Active&&(applyAction.WasPressedThisFrame()||remove)){for(int n=0;n<_lineHoverChoices.Count;n++){var c=_lineHoverChoices[n];foreach(var p in c.Guides??c.Paths)ModDiagnostics.ActionJournal.Record("line.pickCandidate","target="+c.Target+" node="+c.Node+" selected="+(n==index)+" source="+c.Source+" role="+c.Role+" distance="+HoverLinePolicy.Distance(p,position)+" a="+p.a+" b="+p.b+" c="+p.c+" d="+p.d);}}
 
-            if(selected==null&&ModDiagnostics.ActionJournal.Active&&(applyAction.WasPressedThisFrame()||remove))ModDiagnostics.ActionJournal.Record("line.pickMiss","target="+target+" node="+node+" hit="+position+" choices="+_lineHoverChoices.Count+"; no candidate within selection radius");
             if(selected==null){overlay.DrawCircle(new UnityEngine.Color(1,.25f,.25f,.8f),position,1f);return true;}
             target=selected.Target;node=selected.Node;
             if(!EntityManager.Exists(target)||EntityManager.HasComponent<Deleted>(target)||EntityManager.HasComponent<Game.Tools.Temp>(target))

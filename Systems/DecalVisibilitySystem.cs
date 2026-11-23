@@ -48,6 +48,11 @@ namespace MedianGrassReplacement.Systems
         private readonly HashSet<Entity> _pending = new HashSet<Entity>(), _deferred = new HashSet<Entity>();
 
         internal static void QueueRoad(Entity road) { Requested.Add(road); DecalHoverPreviewSystem.RoadChanged(road); }
+        internal static void QueueRoad(World world, Entity road)
+        {
+            CurbsideChangePipeline.For(world).Publish(ChangeConsumer.HiddenDecals, road);
+            DecalHoverPreviewSystem.RoadChanged(road);
+        }
 
         protected override void OnCreate()
 
@@ -85,7 +90,7 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; Restore(); }
 
-        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); Restore(); Requested.Clear(); _kinds.Clear(); _active = (mode & GameMode.GameOrEditor) != GameMode.None; }
+        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); Restore(); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.HiddenDecals); _kinds.Clear(); _active = (mode & GameMode.GameOrEditor) != GameMode.None; }
 
         private bool Live(Entity e) => EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e) && !EntityManager.HasComponent<Temp>(e);
 
@@ -191,7 +196,7 @@ namespace MedianGrassReplacement.Systems
 
         private bool ParentHidden(Entity obj) => EntityManager.HasComponent<Owner>(obj) && EntityManager.HasComponent<Hidden>(EntityManager.GetComponentData<Owner>(obj).m_Owner);
 
-        private void RenderChanged(Entity obj) { if (Live(obj) && !EntityManager.HasComponent<BatchesUpdated>(obj)) EntityManager.AddComponent<BatchesUpdated>(obj); }
+        private void RenderChanged(Entity obj) { NativePaintProjectionSystem.SourceChanged(World,obj); if (Live(obj) && !EntityManager.HasComponent<BatchesUpdated>(obj)) EntityManager.AddComponent<BatchesUpdated>(obj); }
 
         private void Release(Entity obj)
 
@@ -253,7 +258,7 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        internal void Restore() { World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore(); Dependency.Complete(); using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); sideCache.Clear(); ClearDecalReadiness(); ClearHiddenDecalIndex(); }
+        internal void Restore() { World.GetExistingSystemManaged<DecalHoverPreviewSystem>()?.Restore(); { CompleteDependency(); Dependency = default; } using (var owned = _hidden.ToEntityArray(Allocator.Temp)) foreach (var obj in owned) Release(obj); _initial = true; _deferred.Clear(); sideCache.Clear(); ClearDecalReadiness(); ClearHiddenDecalIndex(); }
 
         public void PreSerialize(Context context) { Restore(); }
 
@@ -266,6 +271,7 @@ namespace MedianGrassReplacement.Systems
             if (Mod.Saving) return;
 
             if (!_active) return;
+            CurbsideChangePipeline.For(World).Drain(ChangeConsumer.HiddenDecals, Requested);
 
             try
 
@@ -278,9 +284,9 @@ namespace MedianGrassReplacement.Systems
                 bool idle=readyDecalSources.Count==0&&!_initial&&Requested.Count==0&&_deferred.Count==0&&_changedRoads.IsEmpty&&_changedNodes.IsEmpty&&_changedHidden.IsEmpty&&_revealedHidden.IsEmpty&&hiddenDecalMarkerChanges.IsEmpty;
                 ModDiagnostics.RuntimeCosts.End("DecalVisibility.Preflight",preflightStarted);
                 if(idle)return;
-                long dependencyStarted=ModDiagnostics.RuntimeCosts.Begin();Dependency.Complete();
+                long dependencyStarted=ModDiagnostics.RuntimeCosts.Begin();// Public ECS APIs below join the component types they access.
                 ModDiagnostics.RuntimeCosts.End("DecalVisibility.DependencyWait",dependencyStarted);
-                bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();
+                bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.HiddenDecals);
 
                 if (!explicitRequest && readyDecalSources.Count==0 && _roads.IsEmpty && _hidden.IsEmpty) { _deferred.Clear(); _initial = false; return; }
 

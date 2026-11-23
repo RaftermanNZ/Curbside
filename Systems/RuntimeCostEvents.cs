@@ -14,21 +14,34 @@ namespace ModDiagnostics
         private static int head, count;
         private static long total;
         private static bool frozen;
+        private static long excludedThrough;
 
         internal static void Reset()
         {
             if (rows != null) Array.Clear(rows, 0, rows.Length);
-            head = count = 0; total = 0; frozen = false;
+            head = count = 0; total = 0; frozen = false; excludedThrough = 0;
         }
 
         internal static void Record(int frame, string name, long start, long end)
         {
-            if (frozen || end < start) return;
+            if (!Accepts(start, end)) return;
             if (rows == null) rows = new Sample[Capacity];
             rows[head] = new Sample { Frame = frame, Name = name, Start = start, End = end };
             head = (head + 1) % Capacity;
             if (count < Capacity) count++;
             total++;
+        }
+
+        internal static bool Accepts(long start, long end)
+            => !frozen && end >= start && start >= excludedThrough;
+
+        internal static void ResumeAfterSnapshot()
+        {
+            if (!frozen) return;
+            // Exclude callbacks spanning the synchronous snapshot collectors,
+            // including an outer UI callback that ends after this finally.
+            excludedThrough = System.Diagnostics.Stopwatch.GetTimestamp();
+            frozen = false;
         }
 
         internal static string FreezeCsv(long frequency)

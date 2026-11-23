@@ -28,7 +28,7 @@ namespace MedianGrassReplacement.Systems
         public void PreSerialize(Context context)
         {
             if(native.Count==0)return; // No optional assets: no city-wide actor scan.
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             using(var items=actors.ToEntityArray(Allocator.Temp))foreach(var actor in items)
             {
                 var custom=EntityManager.GetComponentData<PrefabRef>(actor).m_Prefab;
@@ -46,7 +46,7 @@ namespace MedianGrassReplacement.Systems
         protected override void OnUpdate()
         {
             if(Mod.Saving||restored.Count==0)return;
-            Dependency.Complete();
+            { CompleteDependency(); Dependency = default; }
             foreach(var item in restored)
                 if(EntityManager.Exists(item.Key)&&!EntityManager.HasComponent<Deleted>(item.Key)&&EntityManager.HasComponent<PrefabRef>(item.Key)&&EntityManager.Exists(item.Value.Key)&&!EntityManager.HasComponent<Deleted>(item.Value.Key)&&EntityManager.GetComponentData<PrefabRef>(item.Key).m_Prefab==item.Value.Value)
                 {

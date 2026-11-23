@@ -15,7 +15,7 @@ namespace MedianGrassReplacement.Systems
             ModDiagnostics.TraceBuffer.Record("snapshot.paintTarget",road+" (current ray or last valid Curbside hover)");
             ModDiagnostics.TraceBuffer.Record("snapshot.nativeMode","preserve="+Mod.Settings.PreserveVanillaJunctionLines+" automaticRoadsDisabled="+Mod.Settings.DisableAutomaticMarkings+" automaticHighwaysDisabled="+Mod.Settings.DisableAutomaticHighwayMarkings+" adjustmentsDisabled="+Mod.Settings.DisableAutomaticLineAdjustments+" yellow="+Mod.Settings.YellowCenterLines+" european="+Mod.Settings.EuropeanMarkings);
             ModDiagnostics.TraceBuffer.Record("snapshot.markingSettings","vanillaAutomatic="+Mod.Settings.DisableAutomaticMarkings+" theme="+Mod.Settings.AutomaticMarkingTheme+" median="+Mod.Settings.MedianEdgeLines+" legacyCenter="+Mod.Settings.CenterLineStyle+" legacyEdge="+Mod.Settings.CurbLineStyle+" legacyMedian="+Mod.Settings.MedianLineStyle);
-            Dependency.Complete();int remaining=24;
+            { CompleteDependency(); Dependency = default; }int remaining=24;
             void Read(Entity owner)
             {
                 if(EntityManager.HasComponent<Road>(owner))ModDiagnostics.TraceBuffer.Record("snapshot.sectionStyles",owner+" center="+CenterlineUpgradePolicy.Mode(EntityManager,owner)+" left="+EdgeUpgradePolicy.Mode(EntityManager,owner,true)+" right="+EdgeUpgradePolicy.Mode(EntityManager,owner,false)+" divider="+LaneDividerPolicy.Mode(EntityManager,owner)+" nativeOneWayEdges="+UsesNativeOneWayHighwayEdges(owner));

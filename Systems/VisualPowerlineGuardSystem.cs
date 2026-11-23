@@ -28,7 +28,7 @@ namespace MedianGrassReplacement.Systems
 
         {
 
-            if(Mod.Saving) return;Dependency.Complete();var system=World.GetOrCreateSystemManaged<VisualPowerlineSystem>();
+            if(Mod.Saving) return;{ CompleteDependency(); Dependency = default; }var system=World.GetOrCreateSystemManaged<VisualPowerlineSystem>();
 
             using(var removed=_removed.ToEntityArray(Allocator.Temp)) foreach(var entity in removed) system.NotifyRemoved(entity);
 

@@ -16,39 +16,61 @@ namespace MedianGrassReplacement.Systems
             if (entities.Length == 0) return;
             var manager = world.EntityManager;
             manager.CompleteAllTrackedJobs();
-            var owners = new Dictionary<Entity, HashSet<Entity>>();
-            foreach (var entity in entities)
+            var history = world.GetExistingSystemManaged<VisualLifecycleSystem>()?.LaneOwners;
+            var owners = history?.RetirementGroups;
+            // Nested cleanup owns a separate workspace, so it cannot mutate
+            // an outer owner's enumeration. The usual path reuses capacity.
+            if (owners == null || !owners.TryBegin())
             {
-                if (!manager.Exists(entity)) continue;
-                if (manager.HasComponent<Lane>(entity) && manager.HasComponent<Owner>(entity))
-                    AddSaveLane(owners, manager.GetComponentData<Owner>(entity).m_Owner, entity);
-                if (previousOwners != null && previousOwners.TryGetValue(entity, out var previous))
-                    AddSaveLane(owners, previous, entity);
+                owners = new LaneRetirementGroups();
+                owners.TryBegin();
             }
-            foreach (var pair in owners)
+            try
             {
-                if (!manager.Exists(pair.Key) || !manager.HasBuffer<SubLane>(pair.Key)) continue;
-                // Read-only probing avoids announcing a buffer change when
-                // these generated actors were never members of native SubLane.
-                bool found = false;
+                foreach (var entity in entities)
                 {
-                    var existing = manager.GetBuffer<SubLane>(pair.Key, true);
-                    foreach (var lane in existing)
-                        if (pair.Value.Contains(lane.m_SubLane)) { found = true; break; }
+                    Entity current = Entity.Null, previous = Entity.Null;
+                    if (manager.Exists(entity) && manager.HasComponent<Lane>(entity) && manager.HasComponent<Owner>(entity))
+                    {
+                        current = manager.GetComponentData<Owner>(entity).m_Owner;
+                        AddSaveLane(owners, current, entity);
+                    }
+                    if (previousOwners != null && previousOwners.TryGetValue(entity, out previous) && previous != current)
+                        AddSaveLane(owners, previous, entity);
+                    history?.AddToBatch(entity, owners, current, previous);
                 }
-                if (!found) continue;
+                foreach (var pair in owners.Entries)
+                {
+                    if (!manager.Exists(pair.Key) || !manager.HasBuffer<SubLane>(pair.Key)) continue;
+                    // Unique-owner groups need direct entity equality, not a set
+                    // lookup for every lane element. Keep the same RO probe and
+                    // conditional writable access as single-actor retirement.
+                    if (pair.Value.Shared == null)
+                    {
+                        DetachLaneMembership(manager, pair.Key, pair.Value.First);
+                        continue;
+                    }
+                    // Read-only probing avoids announcing a buffer change when
+                    // these generated actors were never members of native SubLane.
+                    bool found = false;
+                    {
+                        var existing = manager.GetBuffer<SubLane>(pair.Key, true);
+                        foreach (var lane in existing)
+                            if (pair.Value.Shared.Contains(lane.m_SubLane)) { found = true; break; }
+                    }
+                    if (!found) continue;
 
-                var lanes = manager.GetBuffer<SubLane>(pair.Key);
-                for (int i = lanes.Length - 1; i >= 0; i--)
-                    if (pair.Value.Contains(lanes[i].m_SubLane)) lanes.RemoveAt(i);
+                    var lanes = manager.GetBuffer<SubLane>(pair.Key);
+                    for (int i = lanes.Length - 1; i >= 0; i--)
+                        if (pair.Value.Shared.Contains(lanes[i].m_SubLane)) lanes.RemoveAt(i);
+                }
             }
+            finally { owners.End(); }
         }
 
-        private static void AddSaveLane(Dictionary<Entity, HashSet<Entity>> owners, Entity owner, Entity lane)
+        private static void AddSaveLane(LaneRetirementGroups owners, Entity owner, Entity lane)
         {
-            if (owner == Entity.Null) return;
-            if (!owners.TryGetValue(owner, out var lanes)) owners.Add(owner, lanes = new HashSet<Entity>());
-            lanes.Add(lane);
+            owners.Add(owner, lane);
         }
     }
 

@@ -8,11 +8,11 @@
 
     <RootNamespace>MedianGrassReplacement</RootNamespace>
 
-    <Version>0.6.2</Version>
+    <Version>0.6.3</Version>
     <!-- Keep serialized assembly identity stable; display/file versions advance independently. -->
     <AssemblyVersion>0.5.1.0</AssemblyVersion>
-    <FileVersion>0.6.2.0</FileVersion>
-    <InformationalVersion>0.6.2</InformationalVersion>
+    <FileVersion>0.6.3.63</FileVersion>
+    <InformationalVersion>0.6.3</InformationalVersion>
 
     <Product>The Curbside Mod</Product>
 
@@ -29,6 +29,7 @@
     <PathMap>$(MSBuildProjectDirectory)=/_/TheCurbsideMod</PathMap>
 
     <LangVersion>9.0</LangVersion>
+    <DefineConstants>$(DefineConstants);CURBSIDE_SEMANTIC_CERTIFICATE_REPAIR</DefineConstants>
     <!-- Keep scheduling experiments independently selectable from the audited
          save/visibility contract update. Both variants remain offline. -->
     <DefineConstants Condition="'$(EnableBatchedPaintNotifications)' == 'true'">$(DefineConstants);CURBSIDE_ASYNC_PAINT_NOTIFICATIONS</DefineConstants>
@@ -46,6 +47,7 @@
 
   <ItemGroup>
 
+    <Reference Include="0Harmony"><HintPath>Dependencies/0Harmony.dll</HintPath><Private>true</Private></Reference>
     <Reference Include="System"><HintPath>$(ManagedPath)\System.dll</HintPath><Private>false</Private></Reference>
 
     <Reference Include="System.Runtime.Serialization"><HintPath>$(ManagedPath)\System.Runtime.Serialization.dll</HintPath><Private>false</Private></Reference>
@@ -133,6 +135,11 @@
           Condition="'$(DesignTimeBuild)' != 'true'">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/Packaging/Validate-Icons.ps1&quot; -ProjectRoot &quot;$(MSBuildProjectDirectory)&quot; -AssemblyPath &quot;$(MSBuildProjectDirectory)/$(IntermediateOutputPath)$(TargetName).dll&quot;" />
   </Target>
+<ItemGroup>
+    <!-- Runtime dependencies are copied, not imported into C# global namespaces. -->
+    <Content Include="Dependencies/*.dll" Exclude="Dependencies/0Harmony.dll" TargetPath="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Dependencies/*LICENSE*.txt;Dependencies/*License*.txt;Dependencies/*.nuspec;Dependencies/THIRD-PARTY-NOTICES.txt" TargetPath="ThirdParty/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
 
 

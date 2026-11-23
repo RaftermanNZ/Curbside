@@ -41,13 +41,11 @@ namespace MedianGrassReplacement.Systems
         {
             if (_sources.Count == 0 || _networkChanges.IsEmptyIgnoreFilter) return;
             _refreshOwners.Clear(); _refreshSources.Clear(); _refreshWrites.Clear();
-            Entity request = Entity.Null;
             using (var owners = _networkChanges.ToEntityArray(Allocator.Temp))
                 foreach (var owner in owners)
                 {
                     var original = CommittedOwner(owner);
                     if (original == Entity.Null) continue;
-                    if (request == Entity.Null) request = owner;
                     _refreshOwners.Add(original);
                     if (EntityManager.HasComponent<Edge>(original))
                     {
@@ -66,10 +64,9 @@ namespace MedianGrassReplacement.Systems
                 _networkRestored[source] = native;
             }
             if (_refreshWrites.Count == 0) return;
-            // One event marker for the whole native batch, including a rebuild
-            // which produces no changed temporary crossing lane to wake the pass.
-            if (request != Entity.Null && !EntityManager.HasComponent<MGRCrosswalkRestoreRequest>(request))
-                EntityManager.AddComponent<MGRCrosswalkRestoreRequest>(request);
+            // Preview consumers are disabled in this isolation baseline. The
+            // existing registration phase completes this handoff explicitly;
+            // no temporary-owner wake-up tag or structural move is necessary.
             ApplyNetworkDefinitions();
         }
 
