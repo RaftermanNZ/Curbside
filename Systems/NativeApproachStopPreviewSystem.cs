@@ -57,6 +57,8 @@ namespace MedianGrassReplacement.Systems
             catch { Restore(); throw; }
         }
 
+        private readonly Dictionary<int, byte> resolvedModes = new Dictionary<int, byte>();
+
         private void PrepareNode(Entity node)
         {
             var temp = EntityManager.GetComponentData<Temp>(node);
@@ -66,6 +68,7 @@ namespace MedianGrassReplacement.Systems
                     && (EntityManager.GetComponentData<Upgraded>(node).m_Flags.m_General & CompositionFlags.General.AllWayStop) != 0) return;
             var original = NativePreviewOrigin.Resolve(EntityManager, node, true);
             if (!EntityManager.HasComponent<Node>(original) || !EntityManager.HasBuffer<MGRStopApproach>(original)) return;
+            ApproachStopSystem.ResolveModes(EntityManager, original, resolvedModes);
             foreach (var child in EntityManager.GetBuffer<SubLane>(node, true))
             {
                 var actor = child.m_SubLane;
@@ -76,7 +79,6 @@ namespace MedianGrassReplacement.Systems
                 var laneTemp = EntityManager.GetComponentData<Temp>(actor);
                 if (!NativeSignalProjectionPolicy.Eligible(laneTemp.m_Flags)) continue;
                 int incoming = EntityManager.GetComponentData<Lane>(actor).m_StartNode.GetOwnerIndex();
-                bool matched = false; byte mode = 0;
                 Entity sourceRoad = Entity.Null;
                 foreach (var road in EntityManager.GetBuffer<ConnectedEdge>(node, true))
                 {
@@ -98,15 +100,7 @@ namespace MedianGrassReplacement.Systems
                 if ((edge.m_Start == original) == (edge.m_End == original)) continue;
                 // A split preview may move/rotate while retaining this saved
                 // approach. Match intent in the original road/node frame.
-                var direction = ApproachStopSystem.Away(EntityManager, sourceRoad, original);
-                foreach (var choice in EntityManager.GetBuffer<MGRStopApproach>(original, true))
-                {
-                    if (!(Unity.Mathematics.math.dot(Unity.Mathematics.math.normalizesafe(choice.Outward.xz),
-                        Unity.Mathematics.math.normalizesafe(direction.xz)) > .85f)) continue;
-                    if (matched && mode != choice.Stop) { matched = false; break; }
-                    matched = true; mode = choice.Stop;
-                }
-                if (!matched || mode > 2) continue;
+                if (!resolvedModes.TryGetValue(sourceRoad.Index, out byte mode)) continue;
                 var lane = EntityManager.GetComponentData<CarLane>(actor);
                 var next = ApproachStopPolicy.ApplyMode(lane.m_Flags, mode);
                 if (next == lane.m_Flags) continue;

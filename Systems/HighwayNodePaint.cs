@@ -54,7 +54,7 @@ namespace MedianGrassReplacement.Systems
                 if(style==GranularHighwayLinePolicy.Removed)continue;
                 if(style==0&&(!automatic||SegmentUpgradePolicy.Hides(SegmentUpgradePolicy.Mode(EntityManager,node),role==1,role==2)||role==1&&CenterlineVisibility.Hidden(EntityManager,node)||role==2&&EntityManager.HasComponent<MGRRemoveJunctionEdges>(node)))continue;
                 var prefab=EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(source).m_Prefab;
-                if(style!=0)prefab=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LineShapePolicy.Yellow(style));
+                if(style!=0)prefab=LineStylePrefab(style);
                 else if(role==1&&Mod.Settings.MedianEdgeLines){prefab=AutomaticMedianAsset();if(!string.IsNullOrEmpty(Mod.Settings.MedianLineStyle)&&_nativeLineDefinitions.TryGetValue(Mod.Settings.MedianLineStyle,out var medianStyle))prefab=medianStyle;if(Mod.Settings.EuropeanMarkings&&prefab!=Entity.Null)prefab=ThemeEquivalent(prefab);}else if(Mod.Settings.EuropeanMarkings)prefab=ThemeEquivalent(prefab);
                 if(prefab==Entity.Null)continue;
                 var paths=style==0?new List<Colossal.Mathematics.Bezier4x3>{joined}:HighwayLinePaths(node,joined,style,role);

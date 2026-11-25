@@ -6,7 +6,7 @@ Source code for [Curbside for Cities: Skylines II](https://mods.paradoxplaza.com
 
 ## Source versions
 
-This is the source for **Curbside 0.6.3**, based on the Test 9 preview rollback. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
+This is the source for **Curbside 0.6.4**. Public releases use major.minor.patch versioning; internal asset compatibility builds are separate. See [the changelog](CHANGELOG.md), [release safety](docs/RELEASE-SAFETY.md) and [compatibility notes](docs/COMPATIBILITY.md).
 
 ## Build locally on Windows
 

@@ -6,7 +6,7 @@ namespace MedianGrassReplacement
     {
         // Asset manifests use this monotonically increasing compatibility level.
         // It must remain independent of the public major.minor.patch version.
-        internal const int Number = 265;
+        internal const int Number = 301;
         internal static readonly string Version =
             (typeof(Mod).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion ?? "0.6.0").Split('+')[0];

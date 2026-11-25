@@ -6,6 +6,8 @@ The current release protects line generation, previews, saved component layouts 
 
 Keep the public semantic version independent of the internal asset compatibility build. Preserve serialized assembly/type identity unless a separately validated migration is intended. Optional native signal models are published separately at existing listing 165366; the code listing is 165355.
 
+Before packaging a public release, disable the Inspect road diagnostic tool. Verify its entry is absent from the public tool catalog and its diagnostic capture cannot be activated. Keep it available in local test builds.
+
 Publication should preserve existing listing metadata and artwork, then verify the downloaded package against the reviewed file hashes. Create the GitHub release as a draft, attach verified files, and publish only after the source tag matches the release source.
 
 References: [GitHub release guidance](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository), [semantic versioning](https://semver.org/), and the installed Paradox ModPublisher/PDX SDK for the actual upload behavior.

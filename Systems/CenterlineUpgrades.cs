@@ -16,10 +16,10 @@ namespace MedianGrassReplacement.Systems
         internal const string Single="MGR Single Yellow Centerline",Double="MGR Double Yellow Centerline";
         internal const string WhiteSingle="MGR White Single Centerline",WhiteDouble="MGR White Double Centerline",YellowSingle="MGR Explicit Yellow Single Centerline",YellowDouble="MGR Explicit Yellow Double Centerline";
         internal static byte Style(string name)=>name==Single?(byte)1:name==Double?(byte)2:name==WhiteSingle?(byte)4:name==WhiteDouble?(byte)5:name==YellowSingle?(byte)6:name==YellowDouble?(byte)7:(byte)0;
-        internal static byte Pattern(byte style)=>style>=8&&style<=13||style==1||style==4||style==6?(byte)1:style==2||style==5||style==7||style==14||style==15?(byte)2:(byte)0;
+        internal static byte Pattern(byte style)=>style==VanillaDividerPolicy.CenterMode||style>=8&&style<=13||style==1||style==4||style==6?(byte)1:style==2||style==5||style==7||style==14||style==15?(byte)2:(byte)0;
         internal static bool YellowPaint(byte style,bool themeYellow)=>style==15||style>=11&&style<=13||style==6||style==7||(style==1||style==2)&&themeYellow;
-        internal static string Asset(byte style)=>style==4?WhiteSingle:style==5?WhiteDouble:style==6?YellowSingle:style==7?YellowDouble:style==2?Double:Single;
-        internal static string Label(byte style)=>style>=14?(style==15?"Yellow":"White")+" passing centerline":style>=8&&style<=13?(YellowPaint(style,false)?"Yellow":"White")+" dashed centerline":style==3?"Remove centerline":(Pattern(style)==2?"Double":"Single")+" centerline"+(style>=4?(YellowPaint(style,false)?" / yellow":" / white"):" / theme");
+        internal static string Asset(byte style)=>style==VanillaDividerPolicy.CenterMode?VanillaDividerPolicy.Asset:style==4?WhiteSingle:style==5?WhiteDouble:style==6?YellowSingle:style==7?YellowDouble:style==2?Double:Single;
+        internal static string Label(byte style)=>style==VanillaDividerPolicy.CenterMode?"Vanilla white dashed centerline":style>=14?(style==15?"Yellow":"White")+" passing centerline":style>=8&&style<=13?(YellowPaint(style,false)?"Yellow":"White")+" dashed centerline":style==3?"Remove centerline":(Pattern(style)==2?"Double":"Single")+" centerline"+(style>=4?(YellowPaint(style,false)?" / yellow":" / white"):" / theme");
         internal static byte Mode(EntityManager em,Entity road)=>em.HasComponent<MGRCenterlineStyle>(road)?em.GetComponentData<MGRCenterlineStyle>(road).Value:(byte)0;
         internal static bool TryBoundary(IList<NorthAmericanLinePolicy.Traffic> lanes,out float x,out float y)
         {
@@ -143,9 +143,9 @@ namespace MedianGrassReplacement.Systems
             // Commit a complete replacement only after geometry and exact asset are ready.
             // Median avenues use the same replacement at each median pavement edge.
             curves.RemoveAll(m=>m.Median);if(_caps.TryGetValue(road,out var oldCaps))oldCaps.RemoveAll(c=>c.Kind==2||c.Kind==3);
-            int stride=style==2?4:2;var stripeAsset=palette.Explicit(1,yellow);if(stripeAsset==Entity.Null)return;
-            if(requested>=14){AddPassingMarks(road,false,0,paths,stripeAsset,curves);return;}
-            foreach(var path in paths)foreach(var stroke in requested>=8?LaneDividerPolicy.Strokes(path,LineShapePolicy.Dash((byte)(requested-3))):new List<Bezier4x3>{path}){var mark=new MarkCurve(stroke,stripeAsset,0,true);mark.CenterUpgrade=true;curves.Add(mark);}
+            int stride=style==2?4:2;var stripeAsset=requested==VanillaDividerPolicy.CenterMode?palette.VanillaDivider:palette.Explicit(1,yellow);if(stripeAsset==Entity.Null)return;
+            if(requested==14||requested==15){AddPassingMarks(road,false,0,paths,stripeAsset,curves);return;}
+            foreach(var path in paths)foreach(var stroke in requested>=8&&requested<=13?LaneDividerPolicy.Strokes(path,LineShapePolicy.Dash((byte)(requested-3))):new List<Bezier4x3>{path}){var mark=new MarkCurve(stroke,stripeAsset,0,true);mark.CenterUpgrade=true;curves.Add(mark);}
             var single=palette.Explicit(1,yellow);if(requested<8&&single!=Entity.Null)for(int stripe=0;stripe<paths.Count/2;stripe++)AddCaps(road,paths[stripe*2],paths[stripe*2+1],stops,3,single,paths.Count>stride?stripe*2/stride+1:0);
         }
     }

@@ -31,6 +31,10 @@ namespace MedianGrassReplacement.Systems
   private NetLaneGeometryPrefab _solid,_doubleYellow,_white,_doubleWhite,_dashedWhite;internal Entity Solid=>Ready(_solid);
   private Entity _nativeSolid,_nativeDoubleYellow,_nativeWhite,_nativeDoubleWhite,_nativeDashed;
   internal Entity Divider{get{var own=Ready(_dashedWhite);return own!=Entity.Null?own:ReadyEntity(_nativeDashed);}}
+  internal Entity VanillaDivider
+  {
+   get { var native = ReadyEntity(_nativeDashed); return native != Entity.Null ? native : Divider; }
+  }
   internal Entity Explicit(byte style,bool yellow)
   {
    var own=Ready(yellow?(style==2?_doubleYellow:_solid):(style==2?_doubleWhite:_white));

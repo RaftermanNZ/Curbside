@@ -37,6 +37,12 @@ namespace MedianGrassReplacement.Systems
         private EntityQuery _roads, _changedRoads, _changedNodes, _hidden, _changedHidden, _revealedHidden;
         private readonly HashSet<Entity> _visibilityWork=new HashSet<Entity>();
 
+        private readonly HashSet<Entity> _inspectedRoots = new HashSet<Entity>();
+        private readonly List<Entity>[] _childSnapshots =
+        {
+            new List<Entity>(), new List<Entity>(), new List<Entity>(), new List<Entity>(), new List<Entity>()
+        };
+
         private PrefabSystem _prefabs; private bool _active, _initial = true;
 
 
@@ -90,7 +96,7 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnGamePreload(Purpose purpose, GameMode mode) { base.OnGamePreload(purpose, mode); _active = false; Restore(); }
 
-        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); Restore(); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.HiddenDecals); _kinds.Clear(); _active = (mode & GameMode.GameOrEditor) != GameMode.None; }
+        protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode) { base.OnGameLoadingComplete(purpose, mode); Restore(); Requested.Clear(); _kinds.Clear(); _active = (mode & GameMode.GameOrEditor) != GameMode.None; }
 
         private bool Live(Entity e) => EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e) && !EntityManager.HasComponent<Temp>(e);
 
@@ -252,9 +258,11 @@ namespace MedianGrassReplacement.Systems
 
             // Structural changes invalidate a DynamicBuffer, so snapshot links first.
 
-            var children = new List<Entity>(); foreach (var link in EntityManager.GetBuffer<Game.Objects.SubObject>(owner, true)) children.Add(link.m_SubObject);
-
+            var children = _childSnapshots[depth];
+            children.Clear();
+            foreach (var link in EntityManager.GetBuffer<Game.Objects.SubObject>(owner, true)) children.Add(link.m_SubObject);
             foreach (var child in children) { Inspect(child); InspectChildren(child, depth + 1); }
+            children.Clear();
 
         }
 
@@ -277,6 +285,16 @@ namespace MedianGrassReplacement.Systems
 
             {
 
+                // Node prop churn is irrelevant until a road owns a decal choice
+                // or there are flags left to restore.
+                if (Requested.Count == 0 && _roads.IsEmptyIgnoreFilter && _hidden.IsEmptyIgnoreFilter)
+                {
+                    if (_initial || _deferred.Count != 0 || pendingDecalKinds.Count != 0) ClearDecalReadiness();
+                    _deferred.Clear();
+                    _initial = false;
+                    return;
+                }
+
                 // Avoid an unconditional completion/playback on idle rendering frames.
                 // IsEmpty honors changed filters; IsEmptyIgnoreFilter would not.
                 CollectReadyDecalKinds();
@@ -286,15 +304,15 @@ namespace MedianGrassReplacement.Systems
                 if(idle)return;
                 long dependencyStarted=ModDiagnostics.RuntimeCosts.Begin();// Public ECS APIs below join the component types they access.
                 ModDiagnostics.RuntimeCosts.End("DecalVisibility.DependencyWait",dependencyStarted);
-                bool explicitRequest = Requested.Count > 0; _pending.Clear(); foreach (var road in Requested) _pending.Add(road); Requested.Clear();CurbsideChangePipeline.For(World).Clear(ChangeConsumer.HiddenDecals);
-
-                if (!explicitRequest && readyDecalSources.Count==0 && _roads.IsEmpty && _hidden.IsEmpty) { _deferred.Clear(); _initial = false; return; }
+                _pending.Clear();
+                _pending.UnionWith(Requested);
+                Requested.Clear();
 
                 if (_initial) using (var roads = _roads.ToEntityArray(Allocator.Temp)) foreach (var road in roads) _pending.Add(road);
 
-                using (var roads = _changedRoads.ToEntityArray(Allocator.Temp)) foreach (var road in roads) _pending.Add(road);
+                if (!_changedRoads.IsEmpty) using (var roads = _changedRoads.ToEntityArray(Allocator.Temp)) foreach (var road in roads) _pending.Add(road);
 
-                using (var nodes = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) foreach (var link in EntityManager.GetBuffer<ConnectedEdge>(node, true)) if (EntityManager.HasComponent<RDCUpgrade>(link.m_Edge)) _pending.Add(link.m_Edge);
+                if (!_changedNodes.IsEmpty) using (var nodes = _changedNodes.ToEntityArray(Allocator.Temp)) foreach (var node in nodes) foreach (var link in EntityManager.GetBuffer<ConnectedEdge>(node, true)) if (EntityManager.HasComponent<RDCUpgrade>(link.m_Edge)) _pending.Add(link.m_Edge);
 
                 int budget = 4; foreach (var road in _deferred) { if (budget-- <= 0) break; _pending.Add(road); }
 
@@ -302,15 +320,14 @@ namespace MedianGrassReplacement.Systems
 
                 // Repair only flags owned by this mod after native preview visibility updates.
 
-                using (var repairs = new EntityCommandBuffer(Allocator.Temp))
-
+                EntityCommandBuffer repairs = default;
+                bool repairPending = false;
+                try
                 {
-
-                    bool repairPending=false;
                     _visibilityWork.Clear();
-                    using(var changed=_changedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in changed)_visibilityWork.Add(obj);
-                    using(var revealed=_revealedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in revealed)_visibilityWork.Add(obj);
-                    using (var markers = hiddenDecalMarkerChanges.ToEntityArray(Allocator.Temp))
+                    if (!_changedHidden.IsEmpty) using(var changed=_changedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in changed)_visibilityWork.Add(obj);
+                    if (!_revealedHidden.IsEmpty) using(var revealed=_revealedHidden.ToEntityArray(Allocator.Temp))foreach(var obj in revealed)_visibilityWork.Add(obj);
+                    if (!hiddenDecalMarkerChanges.IsEmpty) using (var markers = hiddenDecalMarkerChanges.ToEntityArray(Allocator.Temp))
                         foreach (var obj in markers) _visibilityWork.Add(obj);
                     CollectHiddenDecalWork(_pending, _initial, _visibilityWork);
                     foreach (var obj in _visibilityWork)
@@ -335,7 +352,16 @@ namespace MedianGrassReplacement.Systems
 
                             }
 
-                            if (!EntityManager.HasComponent<Hidden>(obj)) { repairPending=true;repairs.AddComponent<Hidden>(obj); if (!EntityManager.HasComponent<BatchesUpdated>(obj)) repairs.AddComponent<BatchesUpdated>(obj); }
+                            if (!EntityManager.HasComponent<Hidden>(obj))
+                            {
+                                if (!repairPending)
+                                {
+                                    repairs = new EntityCommandBuffer(Allocator.Temp);
+                                    repairPending = true;
+                                }
+                                repairs.AddComponent<Hidden>(obj);
+                                if (!EntityManager.HasComponent<BatchesUpdated>(obj)) repairs.AddComponent<BatchesUpdated>(obj);
+                            }
 
                         }
 
@@ -343,14 +369,17 @@ namespace MedianGrassReplacement.Systems
 
                 }
 
+                finally { if (repairPending) repairs.Dispose(); }
+
+                _inspectedRoots.Clear();
                 foreach (var road in _pending)
-
                 {
-
-                    if (!Live(road)) continue; InspectChildren(road, 0);
-
-                    if (EntityManager.HasComponent<Edge>(road)) { var edge = EntityManager.GetComponentData<Edge>(road); InspectChildren(edge.m_Start, 0); InspectChildren(edge.m_End, 0); }
-
+                    if (!Live(road)) continue;
+                    if (_inspectedRoots.Add(road)) InspectChildren(road, 0);
+                    if (!EntityManager.HasComponent<Edge>(road)) continue;
+                    var edge = EntityManager.GetComponentData<Edge>(road);
+                    if (_inspectedRoots.Add(edge.m_Start)) InspectChildren(edge.m_Start, 0);
+                    if (_inspectedRoots.Add(edge.m_End)) InspectChildren(edge.m_End, 0);
                 }
 
                 // Only sources whose previously missing definition arrived.

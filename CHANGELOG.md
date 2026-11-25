@@ -1,3 +1,15 @@
+# Curbside 0.6.4
+
+- Drag supported marking, parking and traffic upgrades across connected roads. The green overlay shows the targets selected for that drag. Segment markings and junction markings are edited separately.
+- Added a vanilla white dashed line style for supported centerlines, road edges and lane dividers, including eligible lanes with no existing paint.
+- Improved curb-following edge lines and the joins where lined crosswalks meet them. Lined crosswalks can also span supported asphalt gaps between median islands.
+- Reduced unnecessary marking queries, paint repair allocations, signal logging and menu updates during play. The popup sizes to the contents of the current category.
+- Inspect road shows applied upgrades on hover. The temporary click-to-log tool used in test builds has been removed.
+
+Vanilla previews remain the default. Curbside previews are experimental, and some custom layouts still need in-game verification.
+
+---
+
 # Curbside 0.6.3
 
 - Added a preview setting for road and building tools. Vanilla previews are the default. Experimental Curbside previews can show saved signals, crosswalk styles and line visibility where supported. Both modes support the same upgrades.

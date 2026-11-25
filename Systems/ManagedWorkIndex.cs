@@ -9,6 +9,7 @@ namespace MedianGrassReplacement.Systems
         private readonly Dictionary<TOwner,HashSet<TItem>> owners=new Dictionary<TOwner,HashSet<TItem>>();
         private readonly List<TItem> rotation=new List<TItem>();private int next;
         internal int Count=>items.Count;
+        internal bool HasOwner(TOwner owner) => owners.ContainsKey(owner);
         internal void Add(TOwner owner,TItem item)
         {
             if(items.TryGetValue(item,out var existing)){if(EqualityComparer<TOwner>.Default.Equals(existing.Owner,owner))return;Remove(item);}

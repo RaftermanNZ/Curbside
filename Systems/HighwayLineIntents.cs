@@ -22,11 +22,13 @@ namespace MedianGrassReplacement.Systems
         internal static byte LegacyStyle(int role,byte value,bool themeYellow)
         {
             if(value==0)return 0;
+            if(value==(role==1?VanillaDividerPolicy.CenterMode:role==2?VanillaDividerPolicy.EdgeMode:VanillaDividerPolicy.DividerMode))
+                return VanillaDividerPolicy.Style;
             if(role==1){if(value==3)return Removed;if(value>=8&&value<=15)return (byte)(value-3);if(value==1)return themeYellow?(byte)2:(byte)1;if(value==2)return themeYellow?(byte)4:(byte)3;return value==4?(byte)1:value==5?(byte)3:value==6?(byte)2:(byte)4;}
             if(role==2)return value==5?Removed:value>=6?(byte)(value-1):value;
             return value==2?Removed:value==1?(byte)5:value==3?(byte)6:value==4?(byte)7:value==5?(byte)8:value==6?(byte)9:value==7?(byte)10:value==8?(byte)1:value==9?(byte)2:value==10?(byte)3:value==11?(byte)4:(byte)(value-1);
         }
-        internal static bool ValidStyle(byte style)=>style>=1&&style<=12||style==Native||style==Removed;
+        internal static bool ValidStyle(byte style)=>style>=1&&style<=12||style==VanillaDividerPolicy.Style||style==Native||style==Removed;
         internal static Bezier4x3 Path(MGRHighwayLineIntent value)=>new Bezier4x3(value.A,value.B,value.C,value.D);
         internal static MGRHighwayLineIntent Intent(Bezier4x3 path,byte style,byte role)=>new MGRHighwayLineIntent{A=path.a,B=path.b,C=path.c,D=path.d,Style=style,Role=role};
         internal static bool Matches(Bezier4x3 a,Bezier4x3 b)
@@ -104,7 +106,7 @@ namespace MedianGrassReplacement.Systems
                 if(++count>256)break;var source=entry.m_SubLane;int role=HighwayNodeSourceRole(node,source);if(role==0||!TryHighwayLineIntent(node,source,out var intent))continue;
                 var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
                 if(seen.Exists(p=>GranularHighwayLinePolicy.Matches(p,path)))continue;seen.Add(path);
-                var prefab=intent.Style==GranularHighwayLinePolicy.Native||intent.Style==GranularHighwayLinePolicy.Removed?Entity.Null:World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LineShapePolicy.Yellow(intent.Style));
+                var prefab=intent.Style==GranularHighwayLinePolicy.Native||intent.Style==GranularHighwayLinePolicy.Removed?Entity.Null:LineStylePrefab(intent.Style);
                 if(intent.Style<=12&&prefab==Entity.Null)continue;
                 // Remove only the selected native path's automatic copy.
                 output.RemoveAll(m=>!m.Protected&&(m.NativeSource==source||GranularHighwayLinePolicy.Matches(m.Curve,path)));

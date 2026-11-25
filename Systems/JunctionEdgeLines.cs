@@ -34,11 +34,11 @@ namespace MedianGrassReplacement.Systems
     {
         private struct CornerApproach
         {
+            internal Entity Road;
             internal float Angle;
             internal JoinCap Left,Right;
             internal Bezier4x3 LeftCurb,RightCurb;
-            internal bool HasCurbs;
-            internal bool Hidden;
+            internal Bezier4x3 LeftSection,RightSection;
         }
         internal List<Bezier4x3> JunctionEdgePreview(Entity node,byte requestedStyle=0)
         {
@@ -49,42 +49,67 @@ namespace MedianGrassReplacement.Systems
         }
         private bool TryNativeCorner(Entity node,JoinCap a,JoinCap b,out Bezier4x3 result)
             => TryNativeCorner(ReadNativeCornerGuides(node),a,b,out result);
-        private void AddJunctionEdges(Entity node,List<Entity> roads,List<MarkCurve> output,byte requestedStyle=0)
+        private void AddJunctionEdges(Entity node,List<Entity> roads,List<MarkCurve> output,byte requestedStyle=0, List<Bezier4x3> curbReferences = null)
         {
             if(SpecialPaintNode(node)&&AddNativeNodeEdges(node,output,requestedStyle))return;
             if(roads.Exists(r=>RoadSurfacePolicy.IsHighway(EntityManager,r)))
             {
                 var paths=new List<Bezier4x3>();if(!HighwayEdgePlan(node,roads,paths)){AddNativeNodeEdges(node,output,requestedStyle);return;}
                 byte mode=requestedStyle!=0?requestedStyle:EdgeUpgradePolicy.Mode(EntityManager,node,true);if(mode==EdgeUpgradePolicy.Removed)return;
-                var paint=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(EdgeUpgradePolicy.Paired(mode)?(byte)2:(byte)1,EdgeUpgradePolicy.IsYellow(mode));if(paint==Entity.Null)return;
+                var paint=EdgePaintPrefab(mode);if(paint==Entity.Null)return;
                 output.RemoveAll(m=>(m.Curb||m.Median&&!m.CenterUpgrade)&&!m.Protected);
-                foreach(var path in paths)output.Add(new MarkCurve(path,paint,0,false,true));return;
+                foreach(var path in paths)output.Add(new MarkCurve(path,paint,0,false,true,JunctionPaintOrigin.HighwayJoin));return;
             }
             // Highway merge/gore geometry has its own continuity rules.
-            if(roads.Count<2||roads.Count>8||output.Exists(m=>m.Median)&&roads.Exists(r=>RoadSurfacePolicy.IsHighway(EntityManager,r)))return;
+            if(roads.Count<2)return;
             byte edgeMode=requestedStyle!=0?requestedStyle:EdgeUpgradePolicy.Mode(EntityManager,node,true);
-            Entity asset=edgeMode>0&&edgeMode!=EdgeUpgradePolicy.Removed?World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(EdgeUpgradePolicy.Paired(edgeMode)?(byte)2:(byte)1,EdgeUpgradePolicy.IsYellow(edgeMode)):_linePrefab;if(asset==Entity.Null)return;
+            Entity asset=edgeMode>0&&edgeMode!=EdgeUpgradePolicy.Removed?EdgePaintPrefab(edgeMode):_linePrefab;if(asset==Entity.Null)return;
             var approaches=new List<CornerApproach>();
             var visited=new HashSet<Entity>();
             foreach(var road in roads)
             {
-                if(!visited.Add(road))return; // Self-loop endpoints need distinct geometry.
-                if(!EntityManager.HasComponent<Road>(road)||!EntityManager.HasComponent<Edge>(road)||!EntityManager.HasComponent<EdgeGeometry>(road)||!EntityManager.HasComponent<Composition>(road)||EntityManager.HasComponent<Deleted>(road)||EntityManager.HasComponent<Game.Tools.Temp>(road))return;
-                if(!RoadSurfacePolicy.IsPaved(EntityManager,road))return;
-                var edge=EntityManager.GetComponentData<Edge>(road);bool start=edge.m_Start==node;if(!start&&edge.m_End!=node)return;
-                var composition=EntityManager.GetComponentData<Composition>(road).m_Edge;
-                if(!EntityManager.HasComponent<NetCompositionData>(composition)||!EntityManager.HasBuffer<NetCompositionLane>(composition))return;
-                float width=EntityManager.GetComponentData<NetCompositionData>(composition).m_Width;
-                var lanes=EntityManager.GetBuffer<NetCompositionLane>(composition,true);
-                var anchors=ReadCurbAnchors(composition,lanes);if(anchors.Count<2)anchors=ReadDecalAnchors(composition,width,lanes);
-                if(anchors.Count<2)return;anchors.Sort((a,b)=>a.x.CompareTo(b.x));
-                var geometry=EntityManager.GetComponentData<EdgeGeometry>(road);var segment=start?geometry.m_Start:geometry.m_End;
-                var direction=ApproachStopSystem.Away(EntityManager,road,node);if(math.lengthsq(direction)<.5f)return;
-                var approach=new CornerApproach{Angle=math.atan2(direction.x,direction.z),Hidden=false};
-                for(int side=0;side<2;side++)
+                if (!visited.Add(road) || !EntityManager.HasComponent<Edge>(road)) continue;
+                if (!EntityManager.HasComponent<Road>(road) || EntityManager.HasComponent<Deleted>(road)
+                    || EntityManager.HasComponent<Game.Tools.Temp>(road)) continue;
+                var edge = EntityManager.GetComponentData<Edge>(road);
+                bool start = edge.m_Start == node;
+                if (start && edge.m_End == node)
                 {
-                    bool left=side==0;var anchor=anchors[left?0:anchors.Count-1];
-                    if(!CurbPlacement.TryMapComposed(width,anchor,left,Mod.Settings.CurbLineOffset,out var position,out float fraction))return;
+                    AddNativeNodeEdges(node, output, requestedStyle);
+                    return;
+                }
+                if (!start && edge.m_End != node) continue;
+                var direction = ApproachStopSystem.Away(EntityManager, road, node);
+                if (math.lengthsq(direction.xz) < .25f) continue;
+                var approach = new CornerApproach { Road = road, Angle = math.atan2(direction.x, direction.z) };
+                if (!EntityManager.HasComponent<EdgeGeometry>(road) || !RoadSurfacePolicy.IsPaved(EntityManager, road))
+                {
+                    // Keep this approach in angular order so neighbors cannot join across it.
+                    approaches.Add(approach);
+                    continue;
+                }
+                var composition = EntityManager.GetComponentData<Composition>(road).m_Edge;
+                var data = EntityManager.GetComponentData<NetCompositionData>(composition);
+                float width = data.m_Width;
+                var anchors = ReadAuthoredCurbAnchors(composition);
+                if ((!CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, true, out _)
+                    || !CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, false, out _))
+                    && EntityManager.HasBuffer<NetCompositionLane>(composition))
+                    foreach (var anchor in ReadDecalAnchors(composition, width, EntityManager.GetBuffer<NetCompositionLane>(composition, true)))
+                    {
+                        // An authored curb outranks a drivable-width estimate on its side.
+                        bool leftSide = anchor.x < data.m_MiddleOffset;
+                        if (!CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, leftSide, out _))
+                            AddDistinctCurb(anchors, anchor);
+                    }
+                var geometry = EntityManager.GetComponentData<EdgeGeometry>(road);
+                var segment = start ? geometry.m_Start : geometry.m_End;
+                for (int side = 0; side < 2; side++)
+                {
+                    bool left = side == 0;
+                    if (!CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, left, out var anchor)
+                        || !CurbPlacement.TryMapComposed(width, anchor, left, Mod.Settings.CurbLineOffset, out var position, out float fraction))
+                        continue;
                     var curve=MathUtils.Lerp(segment.m_Left,segment.m_Right,fraction);
                     var point=start?curve.a:curve.d;point.y+=position.y;
                     var exit=math.normalizesafe(MathUtils.Tangent(curve,start?0:1))*(start?-1:1);
@@ -94,7 +119,7 @@ namespace MedianGrassReplacement.Systems
                     float best=144;
                     if(_marks.TryGetValue(road,out var marks))foreach(var mark in marks.Curves)
                     {
-                        if((!mark.Curb&&!mark.Median)||mark.Protected)continue;
+                        if(!mark.Curb||mark.Protected)continue;
                         float lateral=RoadMarkingPolicy.Lateral(geometry,MathUtils.Position(mark.Curve,.5f),width);
                         if(!math.isfinite(lateral)||(lateral<0)!=left||math.abs(lateral-position.x)>.6f)continue;
                         for(int end=0;end<2;end++)
@@ -108,24 +133,62 @@ namespace MedianGrassReplacement.Systems
                         if(native.Node!=node||native.Kind!=0||native.Side!=cap.Side)continue;
                         float distance=math.distancesq(native.Point,point);if(distance>=best)continue;best=distance;cap=native;
                     }
-                    if(cap.Side==1)approach.Left=cap;else approach.Right=cap;
+                    var section = start ? MathUtils.Invert(curve) : curve;
+                    AddPaintHeight(ref section, position.y);
+                    if(cap.Side==1){approach.Left=cap;approach.LeftSection=section;}
+                    else{approach.Right=cap;approach.RightSection=section;}
                 }
-                if(TryReadPaintCurbs(road,node,Mod.Settings.CurbLineOffset,out var leftCurb,out var rightCurb))
-                {
-                    approach.HasCurbs=true;
-                    approach.LeftCurb=start?leftCurb:rightCurb;
-                    approach.RightCurb=start?rightCurb:leftCurb;
-                }
+                ReadPaintCurbs(road, node, out approach.LeftCurb, out approach.RightCurb, includeAlleyPavement: true);
+                if (Valid(approach.LeftSection) && Valid(approach.RightSection))
+                    NativePaintCornerGeometry.MatchAvailableMouths(approach.LeftSection.d, approach.RightSection.d,
+                        ref approach.LeftCurb, ref approach.RightCurb);
                 approaches.Add(approach);
             }
             approaches.Sort((a,b)=>a.Angle.CompareTo(b.Angle));
+            if (approaches.Count < 2) return;
             List<Bezier4x3> nativeGuides = null;
+            var nodeCenter = EntityManager.GetComponentData<Node>(node).m_Position;
             for(int i=0;i<approaches.Count;i++)
             {
-                var first=approaches[i];var next=approaches[(i+1)%approaches.Count];if(first.Hidden||next.Hidden)continue;
+                var first=approaches[i];var next=approaches[(i+1)%approaches.Count];
                 var a=first.Right;var b=next.Left;
-                if(edgeMode>0){a.Prefab=asset;b.Prefab=asset;}
-                if(first.HasCurbs&&next.HasCurbs&&AddNativePaintCorner(first.RightCurb,next.LeftCurb,a,b,output))continue;
+                if (a.Prefab == Entity.Null && b.Prefab == Entity.Null) continue;
+                if (edgeMode > 0)
+                {
+                    if (a.Prefab != Entity.Null) a.Prefab = asset;
+                    if (b.Prefab != Entity.Null) b.Prefab = asset;
+                }
+                float radius = .075f + (EdgeUpgradePolicy.Paired(edgeMode) ? EdgeSpacing(edgeMode) : 0f);
+                var curbA = first.RightCurb;
+                var curbB = next.LeftCurb;
+                if (Valid(curbA) && Valid(curbB) && !NativePaintCornerGeometry.NativeSeamMatches(curbA, curbB))
+                {
+                    ReadRenderedPaintCurbs(first.Road, node, out var outerA, out var renderedA);
+                    ReadRenderedPaintCurbs(next.Road, node, out var renderedB, out var outerB);
+                    NativePaintCornerGeometry.MatchAvailableMouths(first.LeftSection.d, first.RightSection.d,
+                        ref outerA, ref renderedA);
+                    NativePaintCornerGeometry.MatchAvailableMouths(next.LeftSection.d, next.RightSection.d,
+                        ref renderedB, ref outerB);
+                    if (Valid(renderedA) && Valid(renderedB))
+                    {
+                        if (NativePaintCornerGeometry.NativeSeamMatches(renderedA, renderedB))
+                        {
+                            curbA = renderedA;
+                            curbB = renderedB;
+                        }
+                        else if (NativePaintCornerGeometry.TryContinueMixedCurb(renderedA, renderedB, out var tracedA, out var tracedB))
+                        {
+                            curbA = tracedA;
+                            curbB = tracedB;
+                        }
+                    }
+                }
+                if (AddNativePaintCorner(curbA, curbB,
+                    Valid(first.LeftSection) ? first.LeftSection.d : nodeCenter,
+                    Valid(next.RightSection) ? next.RightSection.d : nodeCenter,
+                    first.RightSection, next.LeftSection,
+                    a, b, radius, output, curbReferences)) continue;
+                if (a.Prefab == Entity.Null || b.Prefab == Entity.Null) continue;
                 // This loop does not write ECS or schedule jobs. Copy eligible
                 // numeric guides once for all corners, preserving native order
                 // and the original first-256-member inspection limit.
@@ -135,10 +198,11 @@ namespace MedianGrassReplacement.Systems
                 // A fallback without a curb guide must remain conservative.
                 // Inset the interior of the arc into the paved junction, keeping
                 // section endpoints fixed for continuity. Pairs need extra room.
-                if(!guided){var center=EntityManager.GetComponentData<Node>(node).m_Position;float inset=.35f+(EdgeUpgradePolicy.Paired(edgeMode)?EdgeSpacing(edgeMode):0);curve.b+=math.normalizesafe(new float3(center.x-curve.b.x,0,center.z-curve.b.z))*inset;curve.c+=math.normalizesafe(new float3(center.x-curve.c.x,0,center.z-curve.c.z))*inset;}
+                if(!guided){var center=nodeCenter;float inset=.35f+(EdgeUpgradePolicy.Paired(edgeMode)?EdgeSpacing(edgeMode):0);curve.b+=math.normalizesafe(new float3(center.x-curve.b.x,0,center.z-curve.b.z))*inset;curve.c+=math.normalizesafe(new float3(center.x-curve.c.x,0,center.z-curve.c.z))*inset;}
                 if(!Valid(curve))continue;
-                if(a.Prefab==b.Prefab)output.Add(new MarkCurve(curve,a.Prefab,.15f,false,true));
-                else {output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(0,.5f)),a.Prefab,.15f,false,true));output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(.5f,1)),b.Prefab,.15f,false,true));}
+                var origin = guided ? JunctionPaintOrigin.SidewalkLaneFallback : JunctionPaintOrigin.TangentFallback;
+                if(a.Prefab==b.Prefab)output.Add(new MarkCurve(curve,a.Prefab,.15f,false,true,origin));
+                else {output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(0,.5f)),a.Prefab,.15f,false,true,origin));output.Add(new MarkCurve(MathUtils.Cut(curve,new float2(.5f,1)),b.Prefab,.15f,false,true,origin));}
             }
         }
     }

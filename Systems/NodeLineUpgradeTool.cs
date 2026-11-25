@@ -98,6 +98,7 @@ namespace MedianGrassReplacement.Systems
         internal const string EdgeAssetName = "MGR Junction Edge Lines";
 
         private PrefabBase _selected;
+        private readonly UpgradeDrag _drag = new UpgradeDrag();
 
         public override string toolID => "MGRNodeLineUpgrade";
 
@@ -107,21 +108,48 @@ namespace MedianGrassReplacement.Systems
 
         protected override void OnStartRunning() { base.OnStartRunning(); applyAction.shouldBeEnabled = true; secondaryApplyAction.shouldBeEnabled = true; cancelAction.shouldBeEnabled = true; }
 
+        protected override void OnStopRunning()
+        {
+            _drag.Reset();
+            base.OnStopRunning();
+        }
+
         public override void InitializeRaycast() { base.InitializeRaycast(); m_ToolRaycastSystem.typeMask = TypeMask.Net; m_ToolRaycastSystem.netLayerMask = Layer.Road; m_ToolRaycastSystem.collisionMask = CollisionMask.OnGround | CollisionMask.Overground; }
 
         protected override JobHandle OnUpdate(JobHandle deps)
 
         {
 
-            if(m_ToolSystem.activeTool!=this || Mod.Saving) return deps;
+            if (m_ToolSystem.activeTool != this || Mod.Saving)
+            {
+                _drag.Reset();
+                return deps;
+            }
+            if (UpgradeInputPolicy.CancelPressed(cancelAction.WasPressedThisFrame()))
+            {
+                _drag.Reset();
+                m_ToolSystem.activeTool = m_DefaultToolSystem;
+                return deps;
+            }
+            var phase = _drag.Read(_selected, m_HasFocus, applyAction.WasPressedThisFrame(),
+                secondaryApplyAction.WasPressedThisFrame(), applyAction.IsPressed(), secondaryApplyAction.IsPressed());
+            if (phase == UpgradeDrag.Phase.Commit)
+            {
+                if (_drag.Count != 0) { deps.Complete(); deps = default; }
+                _drag.Commit(ApplyDragTarget);
+                return deps;
+            }
+            deps = UpdateHover(deps);
+            if (phase == UpgradeDrag.Phase.Collect)
+                _drag.Draw(World.GetOrCreateSystemManaged<Game.Rendering.OverlayRenderSystem>());
+            return deps;
+        }
 
-            bool remove = UpgradeInputPolicy.RemovePressed(secondaryApplyAction.WasPressedThisFrame());
-
-            if (UpgradeInputPolicy.CancelPressed(cancelAction.WasPressedThisFrame())) { m_ToolSystem.activeTool = m_DefaultToolSystem; return deps; }
-
-            if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit)) return deps;
-
-            if (applyAction.WasPressedThisFrame() || remove) { deps.Complete(); deps = default; } var node = hit.m_Owner;
+        private JobHandle UpdateHover(JobHandle deps)
+        {
+            if (!m_HasFocus || UpgradeInputPolicy.PointerBlocked || !m_ToolRaycastSystem.GetRaycastResult(out var hit))
+                return deps;
+            var node = hit.m_Owner;
 
             if (EntityManager.HasComponent<Temp>(node)) node = EntityManager.GetComponentData<Temp>(node).m_Original;
 
@@ -153,15 +181,28 @@ namespace MedianGrassReplacement.Systems
 
                 roadFound = true; var edge = EntityManager.GetComponentData<Edge>(road); var range = edge.m_Start == node ? new float2(0, .12f) : new float2(.88f, 1);
 
-                buffer.DrawCurve(new UnityEngine.Color(.15f, 1f, .3f, .8f), MathUtils.Cut(EntityManager.GetComponentData<Curve>(road).m_Bezier, range), 2f);
+                if (!_drag.Anchored)
+                    buffer.DrawCurve(new UnityEngine.Color(.15f, 1f, .3f, .8f), MathUtils.Cut(EntityManager.GetComponentData<Curve>(road).m_Bezier, range), 2f);
 
             }
 
-            if (!roadFound || (!applyAction.WasPressedThisFrame() && !remove)) return deps;
+            if (roadFound && _drag.RouteTo(EntityManager, new UpgradeDragTarget(node), hit.m_Hit.m_HitPosition))
+            {
+                _drag.AddNode(EntityManager, _drag.Anchor.Owner);
+                var steps = _drag.Steps;
+                for (int i = 0; i < steps.Count; i++) _drag.AddNode(EntityManager, steps[i].To);
+            }
+            return deps;
+        }
 
+        private void ApplyDragTarget(UpgradeDragTarget target, bool remove)
+        {
+            var node = target.Owner;
+            if (!UpgradeDragTarget.Live(EntityManager, node) || !EntityManager.HasComponent<Node>(node)) return;
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node)) return;
             bool edges=_selected?.name==EdgeAssetName;
             bool has=edges?EntityManager.HasComponent<MGRJunctionEdgeLines>(node):EntityManager.HasComponent<MGRHideNodeLines>(node);
-            if(!edges&&has==!remove){UpgradeFeedback.Report(_selected.name,remove?"This junction upgrade is already removed.":"This junction upgrade is already applied.");return deps;}
+            if(!edges&&has==!remove){UpgradeFeedback.Report(_selected.name,remove?"This junction upgrade is already removed.":"This junction upgrade is already applied.");return;}
             if(edges)
             {
                 if(remove){if(has)EntityManager.RemoveComponent<MGRJunctionEdgeLines>(node);if(!EntityManager.HasComponent<MGRRemoveJunctionEdges>(node))EntityManager.AddComponent<MGRRemoveJunctionEdges>(node);}
@@ -174,8 +215,6 @@ namespace MedianGrassReplacement.Systems
             JunctionMarkingSystem.RequestNodeRefresh(node);
 
             World.GetOrCreateSystemManaged<CurbLineEmissionSystem>().QueueNodeRefresh(node);
-
-            return deps;
 
         }
 

@@ -15,6 +15,14 @@ namespace MedianGrassReplacement.Systems
             internal readonly string Asset,Title,Group,Icon,Hint;
             internal Entry(string asset,string title,string group,string icon,string hint){Asset=asset;Title=title;Group=group;Icon=icon;Hint=hint;}
         }
+        private const string DragHint = " Drag along a connected road, then release. Drag with the right button to remove or restore where supported.";
+        private static string ToolHint(Entry entry)
+        {
+            if (entry.Group == "Crosswalks" || entry.Asset == RoadFeatureInspector.AssetName || entry.Asset == NodeSplitTool.AssetName)
+                return entry.Hint;
+            bool snap = LineShapePolicy.Style(entry.Asset) != 0 || entry.Asset == LineShapePolicy.Visibility;
+            return entry.Hint + DragHint + (snap ? " Start on the line and on the segment or junction you want to edit." : "");
+        }
         internal static readonly Entry[] Entries={
             new Entry(CrosswalkUpgradeSystem.LineName,"Lined crosswalk","Crosswalks","LineCrosswalk.svg","One crossing. Click creates or converts; right-click removes the crossing."),
             new Entry(CrosswalkUpgradeSystem.InvisibleName,"Invisible crosswalk","Crosswalks","InvisibleCrosswalk.svg","One crossing. Click keeps pedestrian function without paint; right-click restores previous paint."),
@@ -47,7 +55,7 @@ namespace MedianGrassReplacement.Systems
             new Entry(SegmentUpgradePolicy.ResetLines,"Restore line defaults","Restore","ResetLines.svg","Click clears selected section or node line style and visibility overrides. Keeps parking behavior and global settings. Right-click does nothing."),
             new Entry(SegmentUpgradePolicy.ResetParking,"Restore parking defaults","Restore","ResetParking.svg","Click restores native parking on both sides and removes Curbside bay/no-parking upgrades. Right-click does nothing."),
             new Entry(SegmentUpgradePolicy.ResetAll,"Reset Curbside upgrades","Restore","ResetSection.svg","Click clears this section's Curbside upgrades and its approach choices. Shared junction hide/reverse upgrades also reset. Keeps native crossings and global settings. Right-click does nothing."),
-            new Entry(RoadFeatureInspector.AssetName,"Inspect road","Markings","InspectRoad.svg","Hover a road to read applied Curbside tools. Click and right-click do not change it."),
+            new Entry(RoadFeatureInspector.AssetName,"Inspect road","Markings","InspectRoad.svg","Hover to see applied Curbside tools."),
             new Entry(NodeLineUpgradeTool.EdgeAssetName,"Junction edge lines","Markings","JunctionEdges.svg","One junction. Connects road edge lines at their curb offset, including over hidden native junction paint. Right-click removes junction edge paint, including native lines."),
             new Entry(SegmentUpgradePolicy.Native,"Hide vanilla lines","Visibility","HideNativeLines.svg","Section or selected node. Hides native road-line paint while keeping Curbside additions, crossings and stop bars. Right-click restores native paint."),
             new Entry(CenterlineUpgradePolicy.WhiteSingle,"White line","Markings","CenterSingleWhite.svg","Hover the center, either edge or lane dividers to select it. Works on sections and supported junction/transition paths. Click adds; right-click removes only the highlighted line category, including native paint."),
@@ -72,7 +80,9 @@ namespace MedianGrassReplacement.Systems
             ,new Entry(PassingLinePolicy.White,"White passing line","Markings","PassingWhite.svg","Hover center, edges or dividers on roads or supported nodes. Click adds solid/dashed pair with dashes toward the road or node center. Right-click removes highlighted category."),
             new Entry(PassingLinePolicy.Yellow,"Yellow passing line","Markings","PassingYellow.svg","Hover center, edges or dividers on roads or supported nodes. Click adds solid/dashed pair with dashes toward the road or node center. Right-click removes highlighted category."),
             new Entry(GardenCityLightPolicy.MetalWireAsset,"Metal-pole span-wire signals","Traffic","FarSideLights.svg","Vertical signal heads on galvanized metal span-wire poles. Right-click removes traffic lights."),
-            new Entry(GardenCityLightPolicy.FloridaAsset,"Florida horizontal traffic lights","Traffic","FarSideLights.svg","Horizontal black signals on rigid mast arms. Uses existing lane anchors and retains native lights where sign clearance or signal spacing does not fit. Right-click removes traffic lights.")
+            new Entry(GardenCityLightPolicy.FloridaAsset,"Florida horizontal traffic lights","Traffic","FarSideLights.svg","Horizontal black signals on rigid mast arms. Uses existing lane anchors and retains native lights where sign clearance or signal spacing does not fit. Right-click removes traffic lights."),
+            new Entry(VanillaDividerPolicy.Asset,"Vanilla white dashed line","Markings","LaneDividers.svg",
+                "Applies stock white dashed paint to supported centerlines, edges, and lane dividers. Right-click removes the selected paint.")
         };
         private ToolSystem _tools;private PrefabSystem _prefabs;
         private ValueBinding<string> _features;private float _nextInspect;
@@ -87,15 +97,20 @@ namespace MedianGrassReplacement.Systems
         private int _translationRevision = -1;
         private bool _open;private float _nextRefresh;
         private bool _signalMenuReadyLogged;
+        private readonly byte[] _catalogStates = new byte[Entries.Length];
+        private int _catalogCount, _publishedActive = -1;
+        private string _publishedStatus, _publishedFeatures;
         public override GameMode gameMode=>GameMode.GameOrEditor;
         protected override void OnCreate()
         {
             base.OnCreate();_tools=World.GetOrCreateSystemManaged<ToolSystem>();_prefabs=World.GetOrCreateSystemManaged<PrefabSystem>();
-            AddBinding(_features=new ValueBinding<string>("curbside","roadFeatures","Choose Inspect road and hover a section."));
+            _publishedFeatures = "Choose Inspect road and hover a section.";
+            _publishedStatus = "Choose a tool. Click once or drag across targets. Release to apply.";
+            AddBinding(_features=new ValueBinding<string>("curbside","roadFeatures",_publishedFeatures));
 
             AddBinding(_translations=new RawValueBinding("curbside","translations",WriteTranslations));
             AddBinding(_catalog=new RawValueBinding("curbside","tools",WriteCatalog));
-            AddBinding(_status=new ValueBinding<string>("curbside","status","Choose a tool. Click applies; right-click removes or restores."));
+            AddBinding(_status=new ValueBinding<string>("curbside","status",_publishedStatus));
             AddBinding(_active=new ValueBinding<int>("curbside","active",-1));
             AddBinding(new TriggerBinding<bool>("curbside","setOpen",SetOpen));
             AddBinding(new TriggerBinding<int>("curbside","select",Select));
@@ -110,15 +125,57 @@ namespace MedianGrassReplacement.Systems
         }
         internal static bool CatalogVisible(string asset)=>asset!=NodeLineUpgradeTool.EdgeAssetName&&asset!=NodeLineUpgradeTool.AssetName&&SurfaceUpgradePolicy.Slot(asset)==0&&asset!=CenterlineUpgradePolicy.Single&&asset!=CenterlineUpgradePolicy.Double&&EdgeUpgradePolicy.Style(asset)==0&&asset!=CenterlineVisibility.AssetName&&asset!=SegmentUpgradePolicy.Edges&&asset!=SegmentUpgradePolicy.Lanes;
         internal static int CatalogCount(){int count=0;foreach(var entry in Entries)if(CatalogVisible(entry.Asset))count++;return count;}
+        private const byte Hidden = 0, Pending = 1, LockedTool = 2, Ready = 3;
+
+        private void RefreshCatalog()
+        {
+            bool optional = GardenCityLightPolicy.Ready(_prefabs, EntityManager);
+            bool present = optional || GardenCityLightPolicy.PackPresent();
+            bool florida = GardenCityLightPolicy.FloridaReady(_prefabs, EntityManager);
+            if (optional && !_signalMenuReadyLogged)
+            {
+                _signalMenuReadyLogged = true;
+                Mod.Log.Info("Signal menu ready: game uptime seconds=" + UnityEngine.Time.realtimeSinceStartup);
+            }
+
+            bool changed = false;
+            _catalogCount = 0;
+            for (int i = 0; i < Entries.Length; i++)
+            {
+                var entry = Entries[i];
+                byte state = Hidden;
+                bool signal = GardenCityLightPolicy.IsAsset(entry.Asset);
+                if (CatalogVisible(entry.Asset) && (!signal || (entry.Asset == GardenCityLightPolicy.FloridaAsset ? florida : present)))
+                {
+                    state = signal && !optional ? Pending
+                        : entry.Asset != NodeSplitTool.AssetName && Available(Find(entry.Asset)) ? Ready : LockedTool;
+                    _catalogCount++;
+                }
+                changed |= _catalogStates[i] != state;
+                _catalogStates[i] = state;
+            }
+            if (changed) _catalog.Update();
+        }
+
         private void WriteCatalog(IJsonWriter writer)
         {
-            bool optional=GardenCityLightPolicy.Ready(_prefabs,EntityManager);
-            bool present=optional||GardenCityLightPolicy.PackPresent();
-            bool florida=GardenCityLightPolicy.FloridaReady(_prefabs,EntityManager);
-            if(optional&&!_signalMenuReadyLogged){_signalMenuReadyLogged=true;Mod.Log.Info("Signal menu ready: game uptime seconds="+UnityEngine.Time.realtimeSinceStartup);}
-            int count=0;foreach(var e in Entries)if(CatalogVisible(e.Asset)&&(!GardenCityLightPolicy.IsAsset(e.Asset)||(e.Asset==GardenCityLightPolicy.FloridaAsset?florida:present)))count++;
-            writer.ArrayBegin(count);
-            for(int i=0;i<Entries.Length;i++){var e=Entries[i];bool signal=GardenCityLightPolicy.IsAsset(e.Asset);if(!CatalogVisible(e.Asset)||(signal&&!(e.Asset==GardenCityLightPolicy.FloridaAsset?florida:present)))continue;writer.TypeBegin("curbside.Tool");writer.PropertyName("id");writer.Write(i);writer.PropertyName("title");writer.Write(e.Title+(signal&&!optional?" (loadingï¿½)":""));writer.PropertyName("group");writer.Write(e.Group);writer.PropertyName("icon");writer.Write("coui://mgr-icons/"+e.Icon);writer.PropertyName("hint");writer.Write(signal&&!optional?"Signal pack is loading. This upgrade will become available automatically.":e.Hint);writer.PropertyName("available");writer.Write(e.Asset!=NodeSplitTool.AssetName&&(!signal||optional)&&Available(Find(e.Asset)));writer.TypeEnd();}writer.ArrayEnd();
+            writer.ArrayBegin(_catalogCount);
+            for (int i = 0; i < Entries.Length; i++)
+            {
+                byte state = _catalogStates[i];
+                if (state == Hidden) continue;
+                var entry = Entries[i];
+                writer.TypeBegin("curbside.Tool");
+                writer.PropertyName("id"); writer.Write(i);
+                writer.PropertyName("title"); writer.Write(state == Pending ? entry.Title + " (loading)" : entry.Title);
+                writer.PropertyName("group"); writer.Write(entry.Group);
+                writer.PropertyName("icon"); writer.Write("coui://mgr-icons/" + entry.Icon);
+                writer.PropertyName("hint"); writer.Write(state == Pending
+                    ? "Signal pack is loading. This upgrade will become available automatically." : ToolHint(entry));
+                writer.PropertyName("available"); writer.Write(state == Ready);
+                writer.TypeEnd();
+            }
+            writer.ArrayEnd();
         }
         private static void WriteCatalogEntries(IJsonWriter writer,System.Func<Entry,bool> available)
         {
@@ -136,22 +193,112 @@ namespace MedianGrassReplacement.Systems
             if(table != null) foreach(var pair in table) { writer.Write(pair.Key); writer.Write(Localization.LocalizationService.NativeText(pair.Key)); }
             writer.MapEnd();
         }
-        private void SetOpen(bool open){_open=open;if(open){_catalog.Update();_nextRefresh=UnityEngine.Time.realtimeSinceStartup+2;}}
+        private void SetOpen(bool open)
+        {
+            if (_open == open) return;
+            _open = open;
+            if (!open) return;
+            RefreshCatalog();
+            _nextRefresh = UnityEngine.Time.realtimeSinceStartup + 2f;
+        }
+
+        private void SetStatus(string status)
+        {
+            if (_publishedStatus == status) return;
+            _publishedStatus = status;
+            _status.Update(status);
+        }
+
+        private void SetFeatures(string features)
+        {
+            if (_publishedFeatures == features) return;
+            _publishedFeatures = features;
+            _features.Update(features);
+        }
+
+        private void SetActive(int index)
+        {
+            if (_publishedActive == index) return;
+            _publishedActive = index;
+            _active.Update(index);
+        }
+
         private void Select(int index)
         {
-            if(ModDiagnostics.TraceBuffer.Enabled)ModDiagnostics.TraceBuffer.Record("tool.select","index="+index+" saving="+Mod.Saving);
-            if(Mod.Saving||(uint)index>=(uint)Entries.Length)return;
-            var entry=Entries[index];if(entry.Asset==NodeSplitTool.AssetName){_status.Update("Split road section is temporarily unavailable while building access is repaired.");return;}var asset=Find(entry.Asset);
-            if(!Available(asset)){_status.Update("Tool unavailable: the native road-service asset is still loading or locked.");_catalog.Update();return;}
-            var crossings=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
-            bool activated=entry.Asset==CrosswalkUpgradeSystem.LineName?crossings.LaunchNativeCrosswalk()
-                :entry.Asset==CrosswalkUpgradeSystem.InvisibleName?crossings.LaunchNativeInvisibleCrosswalk()
-                :_tools.ActivatePrefabTool(asset);
-            if(ModDiagnostics.TraceBuffer.Enabled)ModDiagnostics.TraceBuffer.Record("tool.activation",entry.Asset+" activated="+activated);
-            if(activated){_status.Update(entry.Hint);_active.Update(index);}else _status.Update("This tool could not be activated. Try again after the city finishes loading.");
+            if (ModDiagnostics.TraceBuffer.Enabled) ModDiagnostics.TraceBuffer.Record("tool.select", "index=" + index + " saving=" + Mod.Saving);
+            if (Mod.Saving || (uint)index >= (uint)Entries.Length) return;
+            var entry = Entries[index];
+            if (entry.Asset == NodeSplitTool.AssetName)
+            {
+                SetStatus("Split road section is temporarily unavailable while building access is repaired.");
+                return;
+            }
+            var asset = Find(entry.Asset);
+            if (!Available(asset))
+            {
+                SetStatus("Tool unavailable: the native road-service asset is still loading or locked.");
+                RefreshCatalog();
+                return;
+            }
+
+            bool activated;
+            if (entry.Asset == CrosswalkUpgradeSystem.LineName || entry.Asset == CrosswalkUpgradeSystem.InvisibleName)
+            {
+                var crossings = World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();
+                activated = entry.Asset == CrosswalkUpgradeSystem.LineName
+                    ? crossings.LaunchNativeCrosswalk() : crossings.LaunchNativeInvisibleCrosswalk();
+            }
+            else activated = ActivateUpgrade(asset);
+
+            if (ModDiagnostics.TraceBuffer.Enabled) ModDiagnostics.TraceBuffer.Record("tool.activation", entry.Asset + " activated=" + activated);
+            if (activated)
+            {
+                SetStatus(ToolHint(entry));
+                SetActive(index);
+                _nextInspect = 0f;
+            }
+            else SetStatus("This tool could not be activated. Try again after the city finishes loading.");
         }
-        private void Leave(){if(Mod.Saving)return;_tools.ActivatePrefabTool(null);_active.Update(-1);_status.Update("Tool closed. Existing upgrades are unchanged.");}
-        protected override void OnGamePreload(Purpose purpose,GameMode mode){base.OnGamePreload(purpose,mode);_open=false;_active.Update(-1);_nextInspect=0;_features.Update("Choose Inspect road and hover a section.");}
+
+        private bool ActivateUpgrade(PrefabBase asset)
+        {
+            string name = asset.name;
+            ToolBaseSystem tool;
+            if (CrosswalkUpgradeSystem.IsParkingName(name))
+                tool = World.GetOrCreateSystemManaged<ParkingUpgradeTool>();
+            else if (name == ApproachStopTool.AssetName || name == ApproachStopTool.SingleAssetName
+                || name == ApproachStopTool.YieldAssetName || name == ApproachStopTool.SingleYieldAssetName)
+                tool = World.GetOrCreateSystemManaged<ApproachStopTool>();
+            else if (name == FarSideLightUpgradeTool.AssetName || GardenCityLightPolicy.IsAsset(name))
+                tool = World.GetOrCreateSystemManaged<FarSideLightUpgradeTool>();
+            else if (name == NodeLineUpgradeTool.AssetName || name == NodeLineUpgradeTool.EdgeAssetName)
+                tool = World.GetOrCreateSystemManaged<NodeLineUpgradeTool>();
+            else tool = World.GetOrCreateSystemManaged<DecalUpgradeTool>();
+
+            if (!tool.TrySetPrefab(asset)) return false;
+            _tools.activeTool = tool;
+            return _tools.activeTool == tool && tool.GetPrefab() == asset;
+        }
+
+        private void Leave()
+        {
+            if (Mod.Saving) return;
+            _tools.ActivatePrefabTool(null);
+            SetActive(-1);
+            SetStatus("Tool closed. Existing upgrades are unchanged.");
+        }
+
+        protected override void OnGamePreload(Purpose purpose, GameMode mode)
+        {
+            base.OnGamePreload(purpose, mode);
+            _open = false;
+            SetActive(-1);
+            _nextInspect = 0f;
+            SetFeatures("Choose Inspect road and hover a section.");
+            System.Array.Clear(_catalogStates, 0, _catalogStates.Length);
+            _catalogCount = 0;
+            _catalog.Update();
+        }
         private string _wearStatusSource,_wearStatusText;
         private bool _wearStatusBoth;
         protected override void OnUpdate()
@@ -166,10 +313,21 @@ namespace MedianGrassReplacement.Systems
                 if(own){Leave();return;}
             }
             if(!_open)return;
-            if(!Mod.Saving&&!UpgradeInputPolicy.PointerBlocked&&UnityEngine.Time.realtimeSinceStartup>=_nextInspect){_nextInspect=UnityEngine.Time.realtimeSinceStartup+.25f;var ray=World.GetOrCreateSystemManaged<ToolRaycastSystem>();if(ray.GetRaycastResult(out var hit)&&SectionUpgradeTargeting.TryMarking(EntityManager,hit.m_Hit.m_HitEntity,hit.m_Owner,hit.m_Hit.m_HitPosition,out var road))_features.Update(RoadFeatureInspector.Describe(EntityManager,road));else _features.Update("No road highlighted. Choose Inspect road and hover a section.");}
-            var current=_tools.activeTool?.GetPrefab()?.name;int selected=-1;
+            var current = _tools.activeTool?.GetPrefab()?.name;
+            float now = UnityEngine.Time.realtimeSinceStartup;
+            if (current == RoadFeatureInspector.AssetName && !Mod.Saving && !UpgradeInputPolicy.PointerBlocked && now >= _nextInspect)
+            {
+                _nextInspect = now + .25f;
+                var ray = World.GetOrCreateSystemManaged<ToolRaycastSystem>();
+                if (ray.GetRaycastResult(out var hit) && SectionUpgradeTargeting.TryMarking(EntityManager,
+                    hit.m_Hit.m_HitEntity, hit.m_Owner, hit.m_Hit.m_HitPosition, out var road))
+                    SetFeatures(RoadFeatureInspector.Describe(EntityManager, road));
+                else SetFeatures("No road highlighted. Choose Inspect road and hover a section.");
+            }
+            else if (current != RoadFeatureInspector.AssetName) SetFeatures("Choose Inspect road and hover a section.");
+            int selected = -1;
             for(int i=0;i<Entries.Length;i++)if(Entries[i].Asset==current){selected=i;break;}
-            if(current=="Crosswalk") {var crossing=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();if(crossing.NativeLineMode)selected=0;else if(crossing.NativeInvisibleMode)selected=1;_status.Update(crossing.CrossingStatus);}
+            if(current=="Crosswalk") {var crossing=World.GetOrCreateSystemManaged<CrosswalkUpgradeSystem>();if(crossing.NativeLineMode)selected=0;else if(crossing.NativeInvisibleMode)selected=1;SetStatus(crossing.CrossingStatus);}
             if(current==RoadSideUpgrades.DecalAsset)
             {
                 if(_wearStatusText==null||_wearStatusSource!=CurbDecalSystem.Status||_wearStatusBoth!=Mod.Settings.DecalsBothSides)
@@ -177,11 +335,11 @@ namespace MedianGrassReplacement.Systems
                     _wearStatusSource=CurbDecalSystem.Status;_wearStatusBoth=Mod.Settings.DecalsBothSides;
                     _wearStatusText=(_wearStatusBoth?"Both roadsides. ":"Highlighted roadside. ")+_wearStatusSource;
                 }
-                _status.Update(_wearStatusText);
+                SetStatus(_wearStatusText);
             }
-            else if(current==UpgradeFeedback.Asset&&UpgradeFeedback.Text!=null)_status.Update(UpgradeFeedback.Text);
-            _active.Update(selected);
-            if(UnityEngine.Time.realtimeSinceStartup>=_nextRefresh){_nextRefresh=UnityEngine.Time.realtimeSinceStartup+2;_catalog.Update();}
+            else if(current==UpgradeFeedback.Asset&&UpgradeFeedback.Text!=null)SetStatus(UpgradeFeedback.Text);
+            SetActive(selected);
+            if (now >= _nextRefresh) { _nextRefresh = now + 2f; RefreshCatalog(); }
         }
     }
 }

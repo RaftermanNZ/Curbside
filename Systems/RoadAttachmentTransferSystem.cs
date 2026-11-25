@@ -237,7 +237,7 @@ namespace MedianGrassReplacement.Systems
                 var selection=new Selection();
                 if(EntityManager.HasBuffer<MGRIndividualDivider>(source))
                 {selection.IndividualDividers=new List<MGRIndividualDivider>();int count=0;foreach(var value in EntityManager.GetBuffer<MGRIndividualDivider>(source,true))
-                    {if(++count>256)break;if(GranularHighwayLinePolicy.ValidStyle(value.Style))selection.IndividualDividers.Add(value);}}
+                    {if(++count>256)break;if(IndividualDividerPolicy.ValidStyle(value.Style))selection.IndividualDividers.Add(value);}}
 
 
                 if(EntityManager.HasComponent<MGRVisualPowerlineUpgrade>(source)) selection.Powerlines=EntityManager.GetComponentData<MGRVisualPowerlineUpgrade>(source).Sides;

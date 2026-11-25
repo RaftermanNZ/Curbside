@@ -808,7 +808,7 @@ namespace MedianGrassReplacement.Systems
             if(selectedPrefab==originalPrefab){selectedMask=originalMask;if(EntityManager.HasComponent<MGRGardenCitySignals>(node)){if(applied&&saved.AppliedPrefab!=saved.Prefab&&lightState.m_GroupMask0==saved.AppliedVehicleMask&&lightState.m_GroupMask1==saved.AppliedPedMask)return;if(applied){Undo(prop,saved);ForgetMoved(prop);}return;}}
             if(lightState.m_GroupMask1!=selectedMask){lightState.m_GroupMask1=selectedMask;EntityManager.SetComponentData(prop,lightState);}
             if(applied&&placed.Equals(current)&&prefab==selectedPrefab&&saved.AppliedPedMask==selectedMask&&saved.AppliedVehicleMask==lightState.m_GroupMask0)return;
-            if(prefab!=selectedPrefab){if(custom)Mod.Log.Info("Signal composite applied: node="+node+" prop="+prop+" prefab="+World.GetOrCreateSystemManaged<PrefabSystem>().GetPrefab<StaticObjectPrefab>(selectedPrefab).name+" vehicleMask="+lightState.m_GroupMask0+" pedestrianMask="+selectedMask);SetPreviewPrefab(prop,selectedPrefab);if(!EntityManager.HasComponent<BatchesUpdated>(prop))EntityManager.AddComponent<BatchesUpdated>(prop);}
+            if(prefab!=selectedPrefab){if(custom)Mod.Debug("Signal composite applied: node="+node+" prop="+prop+" prefab="+World.GetOrCreateSystemManaged<PrefabSystem>().GetPrefab<StaticObjectPrefab>(selectedPrefab).name+" vehicleMask="+lightState.m_GroupMask0+" pedestrianMask="+selectedMask);SetPreviewPrefab(prop,selectedPrefab);if(!EntityManager.HasComponent<BatchesUpdated>(prop))EntityManager.AddComponent<BatchesUpdated>(prop);}
 
             _moved[prop] = new Moved { Node = node, Owner = node, Prefab = originalPrefab, AppliedPrefab=selectedPrefab, Original = original, Applied = placed,OriginalPedMask=originalMask,AppliedPedMask=selectedMask,AppliedVehicleMask=lightState.m_GroupMask0 };
 
@@ -1014,7 +1014,7 @@ namespace MedianGrassReplacement.Systems
                 // fixture must use its actual pole position, not the old road-relative mount.
                 if(EntityManager.HasComponent<Game.Objects.Relative>(winner))EntityManager.RemoveComponent<Game.Objects.Relative>(winner);
                 SetPreviewPrefab(winner,selected);_lamps[winner]=new Moved{Node=node,Owner=prior?previous.Owner:EntityManager.HasComponent<Owner>(winner)?EntityManager.GetComponentData<Owner>(winner).m_Owner:Entity.Null,Prefab=originalPrefab,AppliedPrefab=selected,Original=originalPose,Applied=placed,HadRelative=hadRelative,OriginalRelative=relative};maintenance.Track(winner,node,SignalMaintenanceIndex<Entity>.Lamp);Write(winner,placed);SynchronizeLampState(winner,node,true);
-                if(!EntityManager.HasComponent<EffectsUpdated>(winner))EntityManager.AddComponent<EffectsUpdated>(winner);Mod.Log.Info("Native junction luminaire attached: node="+node+" prop="+winner+" support="+index);
+                if(!EntityManager.HasComponent<EffectsUpdated>(winner))EntityManager.AddComponent<EffectsUpdated>(winner);Mod.Debug("Native junction luminaire attached: node="+node+" prop="+winner+" support="+index);
             }
             // Only node-owned junction controllers are considered. Never touch midblock lamps.
             // Keep native lighting until both derived fixtures are initialized.
@@ -1078,7 +1078,7 @@ namespace MedianGrassReplacement.Systems
             if(preserve&&!_originalLampStates.ContainsKey(lamp))_originalLampStates.Add(lamp,state);
             EntityManager.SetComponentData(lamp,updated);
             if(!EntityManager.HasComponent<EffectsUpdated>(lamp))EntityManager.AddComponent<EffectsUpdated>(lamp);
-            Mod.Log.Info("Junction lamp state synchronized: prop="+lamp+" node="+node+" state="+updated.m_State+" connectedRoadLit="+on);
+            Mod.Debug("Junction lamp state synchronized: prop="+lamp+" node="+node+" state="+updated.m_State+" connectedRoadLit="+on);
         }
         private void RetireGeneratedLamps(Entity node,bool saving=false)
         {
@@ -1181,7 +1181,7 @@ namespace MedianGrassReplacement.Systems
                     if(wasMoved&&prior.AppliedPrefab==selected&&current.Equals(placed)&&light.m_GroupMask1==face.Mask&&prior.AppliedVehicleMask==light.m_GroupMask0)continue;
                     light.m_GroupMask1=face.Mask;EntityManager.SetComponentData(winner,light);SetPreviewPrefab(winner,selected);
                     _moved[winner]=new Moved{Node=node,Owner=node,Prefab=originalPrefab,AppliedPrefab=selected,Original=original,Applied=placed,OriginalPedMask=originalMask,AppliedPedMask=face.Mask,AppliedVehicleMask=light.m_GroupMask0};maintenance.Track(winner,node,SignalMaintenanceIndex<Entity>.Moved);Write(winner,placed);
-                    Mod.Log.Info("Crossing face attached: node="+node+" support="+planned.Key+" phase="+face.Mask);
+                    Mod.Debug("Crossing face attached: node="+node+" support="+planned.Key+" phase="+face.Mask);
                 }
             }
             var coverage=ReadSignalCoverage(node,approaches);
@@ -1327,38 +1327,7 @@ namespace MedianGrassReplacement.Systems
                 var composed = marking.ReadCurbAnchors(composition, EntityManager.GetBuffer<NetCompositionLane>(composition, true));
                 if (composed.Count >= 2) return composed;
             }
-            // Native node compositions can carry pieces without a lane buffer.
-            // Use the same piece inversion and offset as AddCompositionLanes.
-            var anchors = new List<float3>();
-            if (!EntityManager.HasBuffer<NetCompositionPiece>(composition)) return anchors;
-            var prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
-            foreach (var piece in EntityManager.GetBuffer<NetCompositionPiece>(composition, true))
-            {
-                if ((piece.m_SectionFlags & (NetSectionFlags.Median | NetSectionFlags.Underground | NetSectionFlags.Overhead)) != 0 ||
-                    !EntityManager.HasBuffer<NetPieceLane>(piece.m_Piece)) continue;
-                var lanes = EntityManager.GetBuffer<NetPieceLane>(piece.m_Piece, true);
-                bool inverted = (piece.m_SectionFlags & NetSectionFlags.Invert) != 0;
-                foreach (var lane in lanes)
-                {
-                    if (!prefabs.TryGetPrefab<NetLanePrefab>(lane.m_Lane, out var prefab) || prefab == null || prefab.name != "Boarding Lane 0") continue;
-                    var position = lane.m_Position; if (inverted) position.x = -position.x; position += piece.m_Offset;
-                    if (math.all(math.isfinite(position)) && !anchors.Exists(p => math.abs(p.x - position.x) < .05f)) anchors.Add(position);
-                }
-                if (!prefabs.TryGetPrefab<NetPiecePrefab>(piece.m_Piece, out var piecePrefab) || piecePrefab == null ||
-                    !piecePrefab.name.StartsWith("Sidewalk With Parking Piece ", StringComparison.Ordinal) ||
-                    piecePrefab.name.IndexOf("Flat", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    !EntityManager.HasComponent<NetVertexMatchData>(piece.m_Piece)) continue;
-                float roadHeight = float.NaN;
-                foreach (var lane in lanes)
-                {
-                    if (!EntityManager.HasComponent<NetLaneData>(lane.m_Lane)) continue;
-                    if ((EntityManager.GetComponentData<NetLaneData>(lane.m_Lane).m_Flags & (LaneFlags.Parking | LaneFlags.Road)) != 0)
-                    { roadHeight = lane.m_Position.y; break; }
-                }
-                if (CurbPlacement.TryParkingCurb(piece.m_Offset, EntityManager.GetComponentData<NetVertexMatchData>(piece.m_Piece).m_Offsets.y,
-                    roadHeight, inverted, out var curb) && !anchors.Exists(p => math.abs(p.x - curb.x) < .05f)) anchors.Add(curb);
-            }
-            return anchors;
+            return marking.ReadPieceCurbAnchors(composition);
         }
 
         private SignalJunctionFootprint ReadLegacyJunctionFootprint(Entity road, bool start, Composition composition, CurbLineEmissionSystem marking)

@@ -15,12 +15,12 @@ namespace MedianGrassReplacement.Systems
         internal const string Yellow="MGR Yellow Edge Lines",DoubleWhite="MGR Double White Edge Lines",DoubleYellow="MGR Double Yellow Edge Lines";
         internal const byte Removed=5;
         internal static byte Style(string name)=>name==SectionEdgePolicy.AssetName?(byte)1:name==Yellow?(byte)2:name==DoubleWhite?(byte)3:name==DoubleYellow?(byte)4:(byte)0;
-        internal static string Asset(byte style)=>style==1?SectionEdgePolicy.AssetName:style==2?Yellow:style==3?DoubleWhite:DoubleYellow;
+        internal static string Asset(byte style)=>style==VanillaDividerPolicy.EdgeMode?VanillaDividerPolicy.Asset:style==1?SectionEdgePolicy.AssetName:style==2?Yellow:style==3?DoubleWhite:DoubleYellow;
         internal static bool Paired(byte style)=>style==3||style==4||style==12||style==13;
         internal static bool IsYellow(byte style)=>style==2||style==4||style==13||style>=9&&style<=11;
         internal static byte Mode(EntityManager em,Entity target,bool left)=>em.HasComponent<MGREdgePaint>(target)?(left?em.GetComponentData<MGREdgePaint>(target).Left:em.GetComponentData<MGREdgePaint>(target).Right):(byte)0;
         internal static MGREdgePaint Set(MGREdgePaint value,bool left,byte style){if(left)value.Left=style;else value.Right=style;return value;}
-        internal static string Label(byte style)=>style>=12?(style==13?"Yellow":"White")+" passing edge":style>=6&&style<=11?(IsYellow(style)?"Yellow":"White")+" dashed edge":style==1?"White edge":style==2?"Yellow edge":style==3?"Double white edge":style==4?"Double yellow edge":"Remove edge";
+        internal static string Label(byte style)=>style==VanillaDividerPolicy.EdgeMode?"Vanilla white dashed edge":style>=12?(style==13?"Yellow":"White")+" passing edge":style>=6&&style<=11?(IsYellow(style)?"Yellow":"White")+" dashed edge":style==1?"White edge":style==2?"Yellow edge":style==3?"Double white edge":style==4?"Double yellow edge":"Remove edge";
     }
     public partial class CurbLineEmissionSystem
     {
@@ -29,6 +29,13 @@ namespace MedianGrassReplacement.Systems
             var comp=EntityManager.GetComponentData<Composition>(road).m_Edge;
             return RoadMarkingPolicy.Lateral(EntityManager.GetComponentData<EdgeGeometry>(road),MathUtils.Position(curve,.5f),EntityManager.GetComponentData<NetCompositionData>(comp).m_Width)<0;
         }
+        private Entity EdgePaintPrefab(byte mode)
+        {
+            var palette = World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
+            return mode == VanillaDividerPolicy.EdgeMode ? palette.VanillaDivider
+                : palette.Explicit(EdgeUpgradePolicy.Paired(mode) ? (byte)2 : (byte)1, EdgeUpgradePolicy.IsYellow(mode));
+        }
+
         internal float EdgeSpacing(byte style)
         {
             var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();
@@ -59,7 +66,7 @@ namespace MedianGrassReplacement.Systems
             for(int side=0;side<2;side++)
             {
                 bool left=side==0;byte mode=EdgeUpgradePolicy.Mode(EntityManager,road,left);if(mode==0)continue;
-                var asset=mode==EdgeUpgradePolicy.Removed?Entity.Null:palette.Explicit(EdgeUpgradePolicy.Paired(mode)?(byte)2:(byte)1,EdgeUpgradePolicy.IsYellow(mode));
+                var asset=mode==EdgeUpgradePolicy.Removed?Entity.Null:EdgePaintPrefab(mode);
                 if(mode!=EdgeUpgradePolicy.Removed&&asset==Entity.Null)continue;
                 // Only this outer pavement edge is owned, never a physical median.
                 output.RemoveAll(m=>!m.Protected&&(m.Curb||RoadSurfacePolicy.IsHighway(EntityManager,road)&&m.Median)&&EdgeSide(road,m.Curve)==left);
@@ -67,8 +74,8 @@ namespace MedianGrassReplacement.Systems
                 if(mode==EdgeUpgradePolicy.Removed)continue;
 
                 var selected=new List<Bezier4x3>();foreach(var path in paths)if(EdgeSide(road,path)==left)selected.Add(ExplicitEdgeCenter(road,path,mode));
-                var single=palette.Explicit(1,EdgeUpgradePolicy.IsYellow(mode));
-                if(mode>=12){AddPassingMarks(road,false,1,EdgePreview(road,left,mode),single,output);continue;}
+                var single=mode==VanillaDividerPolicy.EdgeMode?asset:palette.Explicit(1,EdgeUpgradePolicy.IsYellow(mode));
+                if(mode==12||mode==13){AddPassingMarks(road,false,1,EdgePreview(road,left,mode),single,output);continue;}
                 foreach(var path in EdgePreview(road,left,mode))output.Add(new MarkCurve(path,single,0,false,true));
                 if(mode<6&&!RoadSurfacePolicy.IsHighway(EntityManager,road))for(int i=0;i+1<selected.Count;i+=2)AddCaps(road,selected[i],selected[i+1],stops,0,asset);
             }
@@ -92,7 +99,7 @@ namespace MedianGrassReplacement.Systems
                 var roads=new List<Entity>();foreach(var connection in EntityManager.GetBuffer<ConnectedEdge>(target,true))roads.Add(connection.m_Edge);
                 if(roads.Exists(r=>RoadSurfacePolicy.IsHighway(EntityManager,r))&&!HighwayEdgePlan(target,roads,new List<Bezier4x3>())&&NativeNodePaintPaths(target,2).Count==0){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"This highway node has no supported two-section shoulder continuation. Merge/gore layouts were kept; section-side upgrades remain available.");return;}
             }
-            if(!remove&&World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(EdgeUpgradePolicy.Paired(style)?(byte)2:(byte)1,EdgeUpgradePolicy.IsYellow(style))==Entity.Null){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"Edge paint is loading; no upgrade applied.");return;}
+            if(!remove&&EdgePaintPrefab(style)==Entity.Null){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"Edge paint is loading; no upgrade applied.");return;}
             if(!node&&!remove&&(!RoadSurfacePolicy.IsPaved(EntityManager,target)||EdgePreview(target,left,style).Count==0)){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"No supported paved edge on this side.");return;}
             if(node&&!remove&&JunctionEdgePreview(target,style).Count==0){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"Node: no supported edge paths ready; no upgrade applied.");return;}
             if(!node)World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(target);

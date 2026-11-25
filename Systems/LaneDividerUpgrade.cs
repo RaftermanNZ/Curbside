@@ -18,8 +18,8 @@ namespace MedianGrassReplacement.Systems
         internal static bool Solid(byte mode)=>mode>=8&&mode<=13;
         internal static byte Pattern(byte mode)=>mode==6?(byte)3:mode==7?(byte)4:mode==5?(byte)1:mode;
         internal static bool IsYellow(byte mode)=>mode>=5&&mode<=7||mode==9||mode==11||mode==13;
-        internal static string Label(byte mode)=>Solid(mode)?(IsYellow(mode)?"Yellow":"White")+(mode>=10?" double":" solid")+" dividers":(IsYellow(mode)?"Yellow ":"White ")+(Pattern(mode)==3?"short-dash":Pattern(mode)==4?"long-dash":"standard-dash")+" dividers";
-        internal static bool Applied(byte mode)=>mode==1||mode>=3&&mode<=13;
+        internal static string Label(byte mode)=>mode==VanillaDividerPolicy.DividerMode?"Vanilla white dashed dividers":Solid(mode)?(IsYellow(mode)?"Yellow":"White")+(mode>=10?" double":" solid")+" dividers":(IsYellow(mode)?"Yellow ":"White ")+(Pattern(mode)==3?"short-dash":Pattern(mode)==4?"long-dash":"standard-dash")+" dividers";
+        internal static bool Applied(byte mode)=>mode==VanillaDividerPolicy.DividerMode||mode==1||mode>=3&&mode<=13;
         internal static List<Bezier4x3> Strokes(Bezier4x3 path,byte style)
         {
             var result=new List<Bezier4x3>();float length=MathUtils.Length(path);if(!math.isfinite(length)||length<.1f||length>2000)return result;
@@ -55,14 +55,25 @@ namespace MedianGrassReplacement.Systems
                 float fraction=boundary.x/width+.5f;if(fraction<=0||fraction>=1)continue;
                 for(int half=0;half<2;half++)
                 {
-                    var side=half==0?geometry.m_Start:geometry.m_End;var path=MathUtils.Lerp(side.m_Left,side.m_Right,fraction);
-                    path.a.y+=boundary.y+.01f;path.b.y+=boundary.y+.01f;path.c.y+=boundary.y+.01f;path.d.y+=boundary.y+.01f;
+                    var path = DividerBoundary(geometry, boundary.y, fraction, half == 0);
                     GetStopRange(path,stops,true,out float lower,out float upper);
                     if(StopLinePlacement.TrimRange(path,lower,upper,.55f,out var clipped)&&Valid(clipped))paths.Add(clipped);
                 }
                 if(paths.Count!=before+2)paths.RemoveRange(before,paths.Count-before);
             }return paths.Count>0;
         }
+        private static Bezier4x3 DividerBoundary(EdgeGeometry geometry, float height, float fraction, bool first)
+        {
+            var side = first ? geometry.m_Start : geometry.m_End;
+            var path = MathUtils.Lerp(side.m_Left, side.m_Right, fraction);
+            float lift = height + .01f;
+            path.a.y += lift;
+            path.b.y += lift;
+            path.c.y += lift;
+            path.d.y += lift;
+            return path;
+        }
+
         internal bool IsInteriorLanePaint(Entity road,Bezier4x3 curve)
         {
             if(!EntityManager.HasComponent<Composition>(road)||!EntityManager.HasComponent<EdgeGeometry>(road))return false;
@@ -82,7 +93,8 @@ namespace MedianGrassReplacement.Systems
         private void AddDividerMarks(Entity road,List<StopMark> stops,List<MarkCurve> output)
         {
             byte mode=LaneDividerPolicy.Mode(EntityManager,road);if(!LaneDividerPolicy.Applied(mode)||!TryDividerPlan(road,out var paths))return;
-            var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();var asset=palette.Explicit(mode>=10?(byte)2:(byte)1,LaneDividerPolicy.IsYellow(mode));if(asset==Entity.Null)return;
+            var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();var asset=mode==VanillaDividerPolicy.DividerMode?palette.VanillaDivider:palette.Explicit(mode>=10?(byte)2:(byte)1,LaneDividerPolicy.IsYellow(mode));if(asset==Entity.Null)return;
+            if(mode==VanillaDividerPolicy.DividerMode){foreach(var path in paths)output.Add(new MarkCurve(path,asset){DividerUpgrade=true});return;}
             if(mode>=12){var pairs=new List<Bezier4x3>();foreach(var path in paths){pairs.Add(NetUtils.OffsetCurveLeftSmooth(path,-EdgeSpacing(mode==12?(byte)3:(byte)4)));pairs.Add(NetUtils.OffsetCurveLeftSmooth(path,EdgeSpacing(mode==12?(byte)3:(byte)4)));}AddPassingMarks(road,false,4,pairs,palette.Explicit(1,LaneDividerPolicy.IsYellow(mode)),output);return;}
             foreach(var path in paths){var strokes=LaneDividerPolicy.Solid(mode)?new List<Bezier4x3>{path}:LaneDividerPolicy.Strokes(path,mode);if(mode==10||mode==11){byte edgeStyle=mode==10?(byte)3:(byte)4;strokes=new List<Bezier4x3>{NetUtils.OffsetCurveLeftSmooth(path,-EdgeSpacing(edgeStyle)),NetUtils.OffsetCurveLeftSmooth(path,EdgeSpacing(edgeStyle))};}foreach(var stroke in strokes){var mark=new MarkCurve(stroke,mode>=10?palette.Explicit(1,LaneDividerPolicy.IsYellow(mode)):asset);mark.DividerUpgrade=true;output.Add(mark);}}
             // Explicit dash strokes keep length/color consistent with junctions and previews.

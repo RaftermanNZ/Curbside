@@ -21,7 +21,8 @@ namespace MedianGrassReplacement.Systems
         internal static Bezier4x3 Path(MGRIndividualDivider value)=>new Bezier4x3(value.A,value.B,value.C,value.D);
         internal static MGRIndividualDivider Intent(Bezier4x3 path,byte style)=>new MGRIndividualDivider{A=path.a,B=path.b,C=path.c,D=path.d,Style=style};
         // A changed road cannot silently send an old selection to the adjacent lane.
-        internal static bool Matches(MGRIndividualDivider value,Bezier4x3 path)=>GranularHighwayLinePolicy.ValidStyle(value.Style)&&GranularHighwayLinePolicy.Matches(Path(value),path);
+        internal static bool ValidStyle(byte style) => VanillaDividerPolicy.IsGenerated(style) || GranularHighwayLinePolicy.ValidStyle(style);
+        internal static bool Matches(MGRIndividualDivider value,Bezier4x3 path)=>ValidStyle(value.Style)&&GranularHighwayLinePolicy.Matches(Path(value),path);
         internal static bool Covers(Bezier4x3 path,Bezier4x3 stroke)
         {
             foreach(float t in new[]{0f,.5f,1f})
@@ -45,7 +46,9 @@ namespace MedianGrassReplacement.Systems
             if(!_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(source).m_Prefab,out var prefab)||!NodeLinePolicy.IsLineGeometry(prefab))return false;
             var curve=EntityManager.GetComponentData<Curve>(source).m_Bezier;if(!Valid(curve))return false;
             if(EntityManager.HasComponent<Node>(owner))return NodeDividerSource(owner,source);
-            return EntityManager.HasComponent<Road>(owner)&&!IsOuterEdgePaint(owner,curve)&&!IsOpposingBoundary(owner,curve)&&IsInteriorLanePaint(owner,curve);
+            return EntityManager.HasComponent<Road>(owner)&&!IsOuterEdgePaint(owner,curve)&&!IsOpposingBoundary(owner,curve)
+                && (IsInteriorLanePaint(owner,curve) || IsAdditionalVanillaDivider(owner,curve)
+                    || RoadSurfacePolicy.IsHighway(EntityManager,owner) && HighwayNodePaintPolicy.Role(prefab.name,false)==3);
         }
         private List<Bezier4x3> IndividualDividerPaths(Entity owner,Entity source,Bezier4x3 path,byte style)
         {
@@ -76,7 +79,7 @@ namespace MedianGrassReplacement.Systems
         {
             intent=default;if(!EntityManager.HasBuffer<MGRIndividualDivider>(owner)||!IndividualDividerSource(owner,source))return false;
             var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
-            int inspected=0;foreach(var item in EntityManager.GetBuffer<MGRIndividualDivider>(owner,true))if(++inspected>256)break;else if(IndividualDividerPolicy.Matches(item,path)){intent=item;return true;}
+            int inspected=0;foreach(var item in EntityManager.GetBuffer<MGRIndividualDivider>(owner,true))if(++inspected>256)break;else if(!VanillaDividerPolicy.IsGenerated(item.Style) && IndividualDividerPolicy.Matches(item,path)){intent=item;return true;}
             return false;
         }
         internal bool OwnsIndividualDivider(Entity owner,Entity source)
@@ -95,7 +98,7 @@ namespace MedianGrassReplacement.Systems
             { CompleteDependency(); Dependency = default; }
             if(!EntityManager.HasBuffer<MGRIndividualDivider>(owner))EntityManager.AddBuffer<MGRIndividualDivider>(owner);
             var buffer=EntityManager.GetBuffer<MGRIndividualDivider>(owner);int index=-1;
-            for(int i=0;i<buffer.Length&&i<256;i++)if(IndividualDividerPolicy.Matches(buffer[i],path)){index=i;break;}
+            for(int i=0;i<buffer.Length&&i<256;i++)if(!VanillaDividerPolicy.IsGenerated(buffer[i].Style) && IndividualDividerPolicy.Matches(buffer[i],path)){index=i;break;}
             if(index<0&&buffer.Length>=256){UpgradeFeedback.Report("Selected divider","Individual line limit reached; nothing changed.");return;}
             var value=IndividualDividerPolicy.Intent(path,style);if(index>=0)buffer[index]=value;else buffer.Add(value);
             // Buffer is no longer used after these calls; no native view is retained.
@@ -118,8 +121,9 @@ namespace MedianGrassReplacement.Systems
             {
                 if(!TryIndividualDivider(owner,source,out var intent))continue;
                 var path=EntityManager.GetComponentData<Curve>(source).m_Bezier;
-                var asset=intent.Style<=12?World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LineShapePolicy.Yellow(intent.Style)):Entity.Null;
-                if(intent.Style<=12&&asset==Entity.Null)continue;
+                bool paints = intent.Style != GranularHighwayLinePolicy.Native && intent.Style != GranularHighwayLinePolicy.Removed;
+                var asset = paints ? LineStylePrefab(intent.Style) : Entity.Null;
+                if(paints && asset == Entity.Null)continue;
                 // Never erase a neighboring fork's stroke merely because the paths
                 // converge. Legacy strokes without provenance require unique coverage.
                 output.RemoveAll(m=>m.DividerUpgrade&&(m.NativeSource==source||m.NativeSource==Entity.Null&&IndividualDividerPolicy.Covers(path,m.Curve)

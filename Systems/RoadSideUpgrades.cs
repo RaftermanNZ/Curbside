@@ -86,7 +86,7 @@ namespace MedianGrassReplacement.Systems
         {
             if(asset==DecalAsset)return DecalTarget(left,bothDecals);
             // Section-wide operations must not advertise a single roadside.
-            if(asset==StreetLightingSystem.AssetName||asset==RoadFeatureInspector.AssetName||SegmentUpgradePolicy.Known(asset)||UpgradeAssetsSystem.Mask(asset)!=0||SurfaceUpgradePolicy.Slot(asset)!=0)return 3;
+            if(asset==StreetLightingSystem.AssetName||asset==RoadFeatureInspector.AssetName||SegmentUpgradePolicy.Known(asset)||SurfaceUpgradePolicy.Slot(asset)!=0)return 3;
             return SideMask(left);
         }
 
@@ -200,7 +200,8 @@ namespace MedianGrassReplacement.Systems
 
             var center = em.GetComponentData<Curve>(road).m_Bezier;
 
-            if (!em.HasComponent<EdgeGeometry>(road)) return center;
+            if (!em.HasComponent<EdgeGeometry>(road))
+                return NetUtils.OffsetCurveLeftSmooth(center, left ? 1.5f : -1.5f);
 
             var geometry = em.GetComponentData<EdgeGeometry>(road);
 

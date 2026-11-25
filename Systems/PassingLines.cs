@@ -24,7 +24,7 @@ namespace MedianGrassReplacement.Systems
             for(int i=0;i<paths.Count;i+=stride){if(i+stride>paths.Count){for(int j=i;j<paths.Count;j++)result.Add(paths[j]);break;}for(int half=0;half<stride/2;half++){var a=paths[i+half];var b=paths[i+half+stride/2];result.AddRange(PassingLinePolicy.Pair(a,b,PassingReference(target,MathUtils.Lerp(a,b,.5f))));}}
             return result;
         }
-        private void AddPassingMarks(Entity target,bool node,byte role,List<Bezier4x3> paths,Entity asset,List<MarkCurve> output)
-        {foreach(var stroke in PassingPreview(target,node,role,paths)){var mark=new MarkCurve(stroke,asset,0,role==0,role==1);mark.CenterUpgrade=role==0;mark.DividerUpgrade=role==4;output.Add(mark);}}
+        private void AddPassingMarks(Entity target,bool node,byte role,List<Bezier4x3> paths,Entity asset,List<MarkCurve> output,JunctionPaintOrigin origin=JunctionPaintOrigin.Other)
+        {foreach(var stroke in PassingPreview(target,node,role,paths)){var mark=new MarkCurve(stroke,asset,0,role==0,role==1,origin);mark.CenterUpgrade=role==0;mark.DividerUpgrade=role==4;output.Add(mark);}}
     }
 }

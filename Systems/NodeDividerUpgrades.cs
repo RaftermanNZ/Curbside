@@ -20,12 +20,12 @@ namespace MedianGrassReplacement.Systems
             int count=0;foreach(var item in EntityManager.GetBuffer<Game.Net.SubLane>(node,true)){if(++count>256)break;if(NodeDividerSource(node,item.m_SubLane))result.Add(EntityManager.GetComponentData<Curve>(item.m_SubLane).m_Bezier);}return result;
         }
         internal List<Bezier4x3> NodeDividerPreview(Entity node,byte style)
-        {var paths=NodeDividerPlan(node);if(LaneDividerPolicy.Solid(style))return paths;var strokes=new List<Bezier4x3>();foreach(var path in paths)strokes.AddRange(LaneDividerPolicy.Strokes(path,style));return strokes;}
+        {var paths=NodeDividerPlan(node);if(style==VanillaDividerPolicy.DividerMode||LaneDividerPolicy.Solid(style))return paths;var strokes=new List<Bezier4x3>();foreach(var path in paths)strokes.AddRange(LaneDividerPolicy.Strokes(path,style));return strokes;}
         internal bool OwnsNodeDivider(Entity node,Entity source)=>NodeDividerSource(node,source)&&(LaneDividerPolicy.Mode(EntityManager,node)==2||LaneDividerPolicy.Applied(LaneDividerPolicy.Mode(EntityManager,node))&&_joins.TryGetValue(node,out var marks)&&marks.Curves.Exists(m=>m.DividerUpgrade));
         internal void ApplyNodeDividers(Entity node,bool remove,byte style=1)
         {
             if(Mod.Saving)return;
-            if(!remove&&World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LaneDividerPolicy.IsYellow(style))==Entity.Null){UpgradeFeedback.Report(LaneDividerPolicy.AssetName,"Divider paint is loading; no upgrade applied.");return;}
+            if(!remove&&(style==VanillaDividerPolicy.DividerMode?LineStylePrefab(VanillaDividerPolicy.Style):World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,LaneDividerPolicy.IsYellow(style)))==Entity.Null){UpgradeFeedback.Report(LaneDividerPolicy.AssetName,"Divider paint is loading; no upgrade applied.");return;}
             if(!remove&&NodeDividerPlan(node).Count==0){UpgradeFeedback.Report(LaneDividerPolicy.AssetName,"Node: no authored interior divider paths to replace. No upgrade applied.");return;}
             if(!EntityManager.HasComponent<MGRLaneDivider>(node))EntityManager.AddComponent<MGRLaneDivider>(node);EntityManager.SetComponentData(node,new MGRLaneDivider{Value=remove?(byte)2:style});
             QueueNodeRefresh(node);JunctionMarkingSystem.RequestNodeRefresh(node);
@@ -35,8 +35,9 @@ namespace MedianGrassReplacement.Systems
         private void AddNodeDividers(Entity node,List<MarkCurve> output)
         {
             byte mode=LaneDividerPolicy.Mode(EntityManager,node);if(!LaneDividerPolicy.Applied(mode))return;
-            var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();var asset=palette.Explicit(mode>=10?(byte)2:(byte)1,LaneDividerPolicy.IsYellow(mode));if(asset==Entity.Null)return;
+            var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();var asset=mode==VanillaDividerPolicy.DividerMode?palette.VanillaDivider:palette.Explicit(mode>=10?(byte)2:(byte)1,LaneDividerPolicy.IsYellow(mode));if(asset==Entity.Null)return;
             output.RemoveAll(m=>m.DividerUpgrade);
+            if(mode==VanillaDividerPolicy.DividerMode){foreach(var path in NodeDividerPlan(node))output.Add(new MarkCurve(path,asset){DividerUpgrade=true});return;}
             if(mode>=12){var pairs=new List<Bezier4x3>();foreach(var path in NodeDividerPlan(node)){pairs.Add(NetUtils.OffsetCurveLeftSmooth(path,-EdgeSpacing(mode==12?(byte)3:(byte)4)));pairs.Add(NetUtils.OffsetCurveLeftSmooth(path,EdgeSpacing(mode==12?(byte)3:(byte)4)));}AddPassingMarks(node,true,4,pairs,palette.Explicit(1,LaneDividerPolicy.IsYellow(mode)),output);return;}
             foreach(var path in NodeDividerPreview(node,mode)){var strokes=mode>=10?new List<Bezier4x3>{NetUtils.OffsetCurveLeftSmooth(path,-EdgeSpacing(mode==10?(byte)3:(byte)4)),NetUtils.OffsetCurveLeftSmooth(path,EdgeSpacing(mode==10?(byte)3:(byte)4))}:new List<Bezier4x3>{path};foreach(var stroke in strokes){var mark=new MarkCurve(stroke,mode>=10?palette.Explicit(1,LaneDividerPolicy.IsYellow(mode)):asset);mark.DividerUpgrade=true;output.Add(mark);}}
         }

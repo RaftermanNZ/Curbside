@@ -94,8 +94,11 @@ namespace MedianGrassReplacement.Systems
             ownerStatus.Clear();
             // Structural lifecycle queries need no change-version synchronization
             // on Owner, Curve, parking state or the shared SubLane buffer.
-            using(var changed=owners.ToEntityArray(Allocator.Temp))foreach(var owner in changed)AddOwner(em,owner,roads,nodes);
+            if (!owners.IsEmptyIgnoreFilter)
+                using (var changed = owners.ToEntityArray(Allocator.Temp))
+                    foreach (var owner in changed) AddOwner(em, owner, roads, nodes);
             var selected=seeded?events:inputs;
+            if (!selected.IsEmptyIgnoreFilter)
             using(var changed=selected.ToEntityArray(Allocator.Temp))
             {
                 if (changed.Length > 1 && PaintInputReadScope.Supported) ownerReads.Begin();

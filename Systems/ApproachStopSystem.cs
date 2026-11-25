@@ -26,7 +26,7 @@ namespace MedianGrassReplacement.Systems
         internal static CarLaneFlags Apply(CarLaneFlags flags,bool stop)=>ApplyMode(flags,stop?(byte)1:(byte)0);
         internal static CarLaneFlags ApplyMode(CarLaneFlags flags,byte mode)=>(flags&~Mask)|(mode==1?CarLaneFlags.Stop:mode==2?CarLaneFlags.Yield:CarLaneFlags.RightOfWay);
         internal static bool OwnsPriority(CarLaneFlags current,CarLaneFlags applied)=>(current&Mask)==(applied&Mask);
-        internal static bool Opposite(float3 a,float3 b)=>math.dot(math.normalizesafe(a.xz),math.normalizesafe(b.xz))<-.85f;
+        internal static bool Opposite(float3 a,float3 b)=>ApproachDirection.Opposite(a,b);
     }
     public partial class ApproachStopSystem:GameSystemBase,IPreSerialize
     {
@@ -48,6 +48,34 @@ namespace MedianGrassReplacement.Systems
             bool start=em.GetComponentData<Edge>(road).m_Start==node;
             return (start?1:-1)*math.normalizesafe(MathUtils.Tangent(em.GetComponentData<Curve>(road).m_Bezier,start?0:1));
         }
+        internal static Entity MatchApproach(EntityManager manager, Entity node, float3 direction)
+        {
+            if (!manager.HasBuffer<ConnectedEdge>(node)) return Entity.Null;
+            var match = new ApproachDirection.Match();
+            foreach (var entry in manager.GetBuffer<ConnectedEdge>(node, true))
+            {
+                var road = entry.m_Edge;
+                if (!UpgradeDragTarget.Live(manager, road) || !manager.HasComponent<Road>(road)
+                    || !manager.HasComponent<Edge>(road)) continue;
+                var edge = manager.GetComponentData<Edge>(road);
+                if ((edge.m_Start == node) == (edge.m_End == node)) continue;
+                match.Consider(road, ApproachDirection.Alignment(direction, Away(manager, road, node)));
+            }
+            return match.Result;
+        }
+
+        internal static void ResolveModes(EntityManager manager, Entity node, Dictionary<int, byte> modes)
+        {
+            modes.Clear();
+            foreach (var choice in manager.GetBuffer<MGRStopApproach>(node, true))
+            {
+                var road = MatchApproach(manager, node, choice.Outward);
+                if (road != Entity.Null && choice.Stop <= 2) modes[road.Index] = choice.Stop;
+            }
+        }
+
+        private readonly Dictionary<int, byte> _resolvedModes = new Dictionary<int, byte>();
+
         public void PreSerialize(Context context)
         {
             { CompleteDependency(); Dependency = default; }
@@ -64,8 +92,9 @@ namespace MedianGrassReplacement.Systems
                 var lane=entry.m_SubLane;if(!EntityManager.HasComponent<Game.Net.Lane>(lane)||!EntityManager.HasComponent<Game.Net.CarLane>(lane)||EntityManager.GetComponentData<Game.Net.Lane>(lane).m_StartNode.GetOwnerIndex()!=road.Index||!_original.TryGetValue(lane,out var flags))continue;
                 var value=EntityManager.GetComponentData<Game.Net.CarLane>(lane);if(_applied.TryGetValue(lane,out var applied)&&ApproachStopPolicy.OwnsPriority(value.m_Flags,applied)){value.m_Flags=(value.m_Flags&~ApproachStopPolicy.Mask)|flags;EntityManager.SetComponentData(lane,value);}Forget(lane);
             }
-            var direction=Away(EntityManager,road,node);var choices=EntityManager.GetBuffer<MGRStopApproach>(node);
-            for(int i=choices.Length-1;i>=0;i--)if(CrosswalkIntentPolicy.Score(direction,choices[i].Outward)>.85f)choices.RemoveAt(i);
+            var choices=EntityManager.GetBuffer<MGRStopApproach>(node);
+            for (int i = choices.Length - 1; i >= 0; i--)
+                if (MatchApproach(EntityManager, node, choices[i].Outward) == road) choices.RemoveAt(i);
             if(choices.Length==0)EntityManager.RemoveComponent<MGRStopApproach>(node);
             if(!EntityManager.HasComponent<Updated>(node))EntityManager.AddComponent<Updated>(node);Queue(node);
         }
@@ -76,17 +105,25 @@ namespace MedianGrassReplacement.Systems
         }
         private void UpdatePerformanceCore()
         {
-            if(Mod.Saving)return;
-            using(var roads=_changedRoads.ToEntityArray(Allocator.Temp))foreach(var road in roads)
+            if (Mod.Saving) return;
+            if (_queued.Count == 0 && !_initial && _original.Count == 0
+                && _nodes.IsEmptyIgnoreFilter && _updatedNodes.IsEmptyIgnoreFilter) return;
+            if (!_changedRoads.IsEmpty) using(var roads=_changedRoads.ToEntityArray(Allocator.Temp))foreach(var road in roads)
             {
                 var edge=EntityManager.GetComponentData<Edge>(road);
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_Start))_queued.Add(edge.m_Start);
                 if(EntityManager.HasBuffer<MGRStopApproach>(edge.m_End))_queued.Add(edge.m_End);
             }
-            using(var nodes=_updatedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
-            if(!_initial)_nodes.SetChangedVersionFilter(ApproachChanges);
-            using(var nodes=_nodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
-            _nodes.ResetFilter();_initial=false;
+            if (!_updatedNodes.IsEmpty) using(var nodes=_updatedNodes.ToEntityArray(Allocator.Temp))foreach(var node in nodes)_queued.Add(node);
+            if (!_initial) _nodes.SetChangedVersionFilter(ApproachChanges);
+            try
+            {
+                if (!_nodes.IsEmpty)
+                    using (var nodes = _nodes.ToEntityArray(Allocator.Temp))
+                        foreach (var node in nodes) _queued.Add(node);
+            }
+            finally { _nodes.ResetFilter(); }
+            _initial = false;
             if(_queued.Count==0)return;
             { CompleteDependency(); Dependency = default; }
             foreach(var node in _queued)
@@ -99,7 +136,7 @@ namespace MedianGrassReplacement.Systems
                     // Native controls take precedence while active. Keep saved approach choices for when they are removed.
                     continue;
                 }
-                var choices=EntityManager.GetBuffer<MGRStopApproach>(node,true);
+                ResolveModes(EntityManager, node, _resolvedModes);
                 using(var lanes=EntityManager.GetBuffer<Game.Net.SubLane>(node,true).ToNativeArray(Allocator.Temp))foreach(var entry in lanes)
                 {
                     var entity=entry.m_SubLane;
@@ -107,14 +144,17 @@ namespace MedianGrassReplacement.Systems
                     if(!EntityManager.HasComponent<Owner>(entity)||EntityManager.GetComponentData<Owner>(entity).m_Owner!=node)continue;
                     var lane=EntityManager.GetComponentData<Game.Net.CarLane>(entity);
                     int incoming=EntityManager.GetComponentData<Game.Net.Lane>(entity).m_StartNode.GetOwnerIndex();
-                    bool matched=false;byte mode=0;
-                    foreach(var road in EntityManager.GetBuffer<ConnectedEdge>(node,true))if(road.m_Edge.Index==incoming)
+                    if (!_resolvedModes.TryGetValue(incoming, out byte mode))
                     {
-                        var direction=Away(EntityManager,road.m_Edge,node);
-                        foreach(var choice in choices)if(math.dot(math.normalizesafe(choice.Outward.xz),math.normalizesafe(direction.xz))>.85f){matched=true;mode=choice.Stop;break;}
-                        break;
+                        if (_original.TryGetValue(entity, out var before) && _applied.TryGetValue(entity, out var applied)
+                            && ApproachStopPolicy.OwnsPriority(lane.m_Flags, applied))
+                        {
+                            lane.m_Flags = (lane.m_Flags & ~ApproachStopPolicy.Mask) | before;
+                            EntityManager.SetComponentData(entity, lane);
+                        }
+                        Forget(entity);
+                        continue;
                     }
-                    if(!matched)continue;
                     if(!_original.ContainsKey(entity))_original[entity]=lane.m_Flags&ApproachStopPolicy.Mask;
                     var next=ApproachStopPolicy.ApplyMode(lane.m_Flags,mode);
                     _applied[entity]=next&ApproachStopPolicy.Mask;

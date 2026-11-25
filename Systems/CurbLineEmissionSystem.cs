@@ -54,9 +54,9 @@ namespace MedianGrassReplacement.Systems
 
             internal Entity Prefab; internal Entity NativeSource;
 
-            internal float Width; internal bool Median,Curb,CenterUpgrade,DividerUpgrade,Protected;
+            internal float Width; internal bool Median,Curb,CenterUpgrade,DividerUpgrade,Protected; internal JunctionPaintOrigin Origin;
 
-            internal MarkCurve(Bezier4x3 curve, Entity prefab, float width = 0f,bool median=false,bool curb=false) { Curve = curve; Prefab = prefab; NativeSource=Entity.Null; Width = width; Median=median; Curb=curb; CenterUpgrade=false;DividerUpgrade=false;Protected=false; }
+            internal MarkCurve(Bezier4x3 curve, Entity prefab, float width = 0f,bool median=false,bool curb=false,JunctionPaintOrigin origin=JunctionPaintOrigin.Other) { Origin=origin; Curve = curve; Prefab = prefab; NativeSource=Entity.Null; Width = width; Median=median; Curb=curb; CenterUpgrade=false;DividerUpgrade=false;Protected=false; }
 
         }
 
@@ -120,7 +120,7 @@ namespace MedianGrassReplacement.Systems
 
         internal void RefreshDefinitionsIfNeeded() => RefreshDefinitions(true);
 
-        private EntityQuery _joinNodes;
+        private EntityQuery _joinNodes, _changedJunctionGeometry;
         private EntityQuery _roads, _changedRoads, _changedLaneRoads, _deletedRoads, _owned, _deletedOwned, _lanePrefabs;
 
         private Entity _linePrefab;
@@ -526,6 +526,12 @@ namespace MedianGrassReplacement.Systems
 
             _joinNodes=GetEntityQuery(ComponentType.ReadOnly<Node>(),ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.ReadOnly<SubLane>(),ComponentType.Exclude<Deleted>(),ComponentType.Exclude<Game.Tools.Temp>());
             _joinNodes.SetChangedVersionFilter(new[]{ComponentType.ReadOnly<ConnectedEdge>(),ComponentType.ReadOnly<SubLane>()});
+            _changedJunctionGeometry = GetEntityQuery(ComponentType.ReadOnly<Road>(), ComponentType.ReadOnly<Edge>(),
+                ComponentType.ReadOnly<StartNodeGeometry>(), ComponentType.ReadOnly<EndNodeGeometry>(),
+                ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Tools.Temp>());
+            _changedJunctionGeometry.SetChangedVersionFilter(new[] {
+                ComponentType.ReadOnly<StartNodeGeometry>(), ComponentType.ReadOnly<EndNodeGeometry>()
+            });
             _deletedRoads = GetEntityQuery(ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Deleted>());
 
             _owned = GetEntityQuery(new EntityQueryDesc
@@ -720,19 +726,20 @@ namespace MedianGrassReplacement.Systems
 
             // every frame. Unexpected direct destruction gets a bounded audit.
 
-            using (var deleted = _deletedOwned.ToEntityArray(Allocator.Temp))
+            if (!_deletedOwned.IsEmptyIgnoreFilter)
+                using (var deleted = _deletedOwned.ToEntityArray(Allocator.Temp))
 
-                foreach (var entity in deleted)
+                    foreach (var entity in deleted)
 
-                {
+                    {
 
-                    Entity road = EntityManager.GetComponentData<Owner>(entity).m_Owner;
+                        Entity road = EntityManager.GetComponentData<Owner>(entity).m_Owner;
 
-                    if (_marks.TryGetValue(road, out var marks) && marks.Entities.Contains(entity)) _pendingRoads.Add(road);
+                        if (_marks.TryGetValue(road, out var marks) && marks.Entities.Contains(entity)) _pendingRoads.Add(road);
 
-                    if (_joins.ContainsKey(road)) _dirtyNodes.Add(road);
+                        if (_joins.ContainsKey(road)) _dirtyNodes.Add(road);
 
-                }
+                    }
 
             int countNow = _owned.CalculateEntityCount();
 
@@ -762,7 +769,8 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            using (var deleted = _deletedRoads.ToEntityArray(Allocator.Temp))
+            if (!_deletedRoads.IsEmptyIgnoreFilter)
+                using (var deleted = _deletedRoads.ToEntityArray(Allocator.Temp))
 
                 foreach (var road in deleted) RemoveRoad(road);
 
@@ -848,6 +856,7 @@ namespace MedianGrassReplacement.Systems
             }
             }
             finally { if (ownerNotificationBatch) _ownerNotifications.EndBatch(); }
+            QueueChangedJunctionGeometry();
             if (pending.Count == 0 && _roadWorkOrder.Count == 0 && _dirtyNodes.Count == 0) return;
 
             int catalogBeforeWork = CatalogRevision;
@@ -1317,6 +1326,7 @@ namespace MedianGrassReplacement.Systems
 
             if(CenterlineVisibility.Hidden(EntityManager,road))curves.RemoveAll(m=>m.Median&&!m.Protected&&!m.CenterUpgrade);
             AddParkingHatching(road,curves);CanonicalCenterPairs(curves);ApplyIndividualDividers(road,curves);
+            AddPlacedDividers(road, curves);
             // Additions after a hide action are independent; applying visibility
             // explicitly clears the matching placed intent before this rebuild.
             return curves;
@@ -2255,7 +2265,7 @@ namespace MedianGrassReplacement.Systems
 
                         var curve = NodeLinePlacement.Connect(a.Point, a.Outward, other.Point, other.Outward);
 
-                        if (Valid(curve)) curves.Add(new MarkCurve(curve, a.Prefab, a.Kind==2||a.Kind==3?0f:(a.Kind == 1 ? .1f : .15f),(a.Kind==2||a.Kind==3),a.Kind==0));
+                        if (Valid(curve)) curves.Add(new MarkCurve(curve, a.Prefab, a.Kind==2||a.Kind==3?0f:(a.Kind == 1 ? .1f : .15f),(a.Kind==2||a.Kind==3),a.Kind==0,JunctionPaintOrigin.TwoRoadJoin));
 
                     }
 
@@ -2269,13 +2279,20 @@ namespace MedianGrassReplacement.Systems
                 curves.RemoveAll(m=>!m.Protected&&SegmentUpgradePolicy.Hides(nodeHidden,m.Median,m.Curb));
                 if(CenterlineVisibility.Hidden(EntityManager,node))curves.RemoveAll(m=>m.Median&&!m.Protected);
                 if(!nativeHighway){AddNodeDividers(node,curves);AddNodeCenter(node,curves);CanonicalCenterPairs(curves);}
-                if(!nativeHighway&&EntityManager.HasComponent<MGRJunctionEdgeLines>(node))AddJunctionEdges(node,roads,curves);
+                _paintedCornerCurbs.Remove(node);
+                if (!nativeHighway && EntityManager.HasComponent<MGRJunctionEdgeLines>(node)
+                    && !EntityManager.HasComponent<MGRRemoveJunctionEdges>(node))
+                {
+                    var cornerCurbs = new List<Bezier4x3>();
+                    AddJunctionEdges(node, roads, curves, curbReferences: cornerCurbs);
+                    if (cornerCurbs.Count > 0) _paintedCornerCurbs[node] = cornerCurbs;
+                }
                 if(EntityManager.HasComponent<MGRRemoveJunctionEdges>(node))curves.RemoveAll(m=>!m.Protected&&(m.Curb||roads.Exists(r=>RoadSurfacePolicy.IsHighway(EntityManager,r))&&m.Median&&!m.CenterUpgrade));
                 // Render explicit paired node edges as the same individual stripes as their previews.
                 byte edgePattern=EdgeUpgradePolicy.Mode(EntityManager,node,true);
                 if(!nativeHighway&&EdgeUpgradePolicy.Paired(edgePattern)){
                     var split=new List<MarkCurve>();var single=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,EdgeUpgradePolicy.IsYellow(edgePattern));
-                    foreach(var mark in curves)if(mark.Curb&&!mark.Protected){if(edgePattern>=12){AddPassingMarks(node,true,1,new List<Bezier4x3>{NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern))},single,split);continue;}split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),single,0,false,true));split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern)),single,0,false,true));}else split.Add(mark);
+                    foreach(var mark in curves)if(mark.Curb&&!mark.Protected){if(edgePattern>=12){AddPassingMarks(node,true,1,new List<Bezier4x3>{NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern))},single,split,mark.Origin);continue;}split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,-EdgeSpacing(edgePattern)),single,0,false,true,mark.Origin));split.Add(new MarkCurve(NetUtils.OffsetCurveLeftSmooth(mark.Curve,EdgeSpacing(edgePattern)),single,0,false,true,mark.Origin));}else split.Add(mark);
                     curves=split;
                 }
                 if(nativeHighway)AddHighwayNodePaint(node,curves);else ApplyDashedEdges(node,curves,true);
@@ -2324,6 +2341,7 @@ namespace MedianGrassReplacement.Systems
             foreach (var node in completed)
             {
                 JunctionMarkingSystem.RequestNodeRefresh(node);
+                World.GetExistingSystemManaged<IntersectionPaintSystem>()?.RefreshCrosswalkEdges(node);
                 // Replacement joins are now committed. Node-source paint must see
                 // that final ownership, even when native SubLane buffers did not change.
                 if(!EntityManager.Exists(node)||!EntityManager.HasBuffer<SubLane>(node))continue;
@@ -2331,7 +2349,9 @@ namespace MedianGrassReplacement.Systems
                 {
                     var lane=entry.m_SubLane;
                     if(EntityManager.HasComponent<MGRCurbMarking>(lane)||EntityManager.HasComponent<MGRIntersectionPaint>(lane)||!EntityManager.HasComponent<PrefabRef>(lane))continue;
-                    if(_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab,out var prefab)&&NodeLinePolicy.IsLineGeometry(prefab))IntersectionPaintSystem.RequestSource(lane);
+                    if (EntityManager.HasComponent<MGRReplacedPaint>(lane) ||
+                        (_prefabs.TryGetPrefab<NetLaneGeometryPrefab>(EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab,out var prefab) && NodeLinePolicy.IsLineGeometry(prefab)))
+                        IntersectionPaintSystem.RequestSource(lane);
                 }
             }
 
@@ -2658,6 +2678,8 @@ namespace MedianGrassReplacement.Systems
         internal void ClearOwned()
 
         {
+            _curbMeshFaces.Clear();
+            _paintedCornerCurbs.Clear();
 
             { CompleteDependency(); Dependency = default; }
 

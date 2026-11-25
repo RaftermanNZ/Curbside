@@ -61,11 +61,11 @@ namespace MedianGrassReplacement.Systems
         {
             byte style=CenterlineUpgradePolicy.Mode(EntityManager,node);if(style==0)return;
             if(style==CenterlineUpgradePolicy.Removed){output.RemoveAll(m=>m.Median&&!m.Protected);return;}
-            var paths=NodeCenterPlan(node,style);var single=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>().Explicit(1,CenterlineUpgradePolicy.YellowPaint(style,Mod.Settings.YellowToolPaint));
+            var paths=NodeCenterPlan(node,style);var palette=World.GetOrCreateSystemManaged<YellowPaintDefinitionSystem>();var single=style==VanillaDividerPolicy.CenterMode?palette.VanillaDivider:palette.Explicit(1,CenterlineUpgradePolicy.YellowPaint(style,Mod.Settings.YellowToolPaint));
             if(paths.Count==0||single==Entity.Null)return;
             output.RemoveAll(m=>m.Median&&!m.Protected);
-            if(style>=14){AddPassingMarks(node,true,0,paths,single,output);return;}
-            foreach(var path in paths)foreach(var stroke in style>=8?LaneDividerPolicy.Strokes(path,LineShapePolicy.Dash((byte)(style-3))):new List<Bezier4x3>{path}){var mark=new MarkCurve(stroke,single,0,true);mark.CenterUpgrade=true;output.Add(mark);}
+            if(style==14||style==15){AddPassingMarks(node,true,0,paths,single,output);return;}
+            foreach(var path in paths)foreach(var stroke in style>=8&&style<=13?LaneDividerPolicy.Strokes(path,LineShapePolicy.Dash((byte)(style-3))):new List<Bezier4x3>{path}){var mark=new MarkCurve(stroke,single,0,true);mark.CenterUpgrade=true;output.Add(mark);}
         }
         internal void RefreshNodePaint(Entity node)
         {
