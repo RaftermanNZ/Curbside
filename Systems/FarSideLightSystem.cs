@@ -803,8 +803,12 @@ namespace MedianGrassReplacement.Systems
             var lightState=EntityManager.GetComponentData<ObjectLight>(prop);
             ushort originalMask=applied&&lightState.m_GroupMask1==saved.AppliedPedMask?saved.OriginalPedMask:lightState.m_GroupMask1;
             ushort selectedMask=originalMask;
+            bool presentationPending=false;
             if(custom)
-                selectedPrefab=GardenCityLightPolicy.Select(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager,node,original,ref placed,approaches,originalPrefab,originalMask,out selectedMask,_supportPositions,_virtualSupport,_requiredWireSpans,_sourceApproaches.TryGetValue(prop,out var bound)?bound:-1,OwnsSharedPole(prop),lightState.m_GroupMask0,!_supportLeaders.TryGetValue(prop,out var assemblyOwner)||assemblyOwner==prop,_sharedPhaseSignals.Contains(prop));
+                selectedPrefab=GardenCityLightPolicy.Select(World.GetOrCreateSystemManaged<PrefabSystem>(),EntityManager,node,original,ref placed,approaches,originalPrefab,originalMask,out selectedMask,out presentationPending,_supportPositions,_virtualSupport,_requiredWireSpans,_sourceApproaches.TryGetValue(prop,out var bound)?bound:-1,OwnsSharedPole(prop),lightState.m_GroupMask0,!_supportLeaders.TryGetValue(prop,out var assemblyOwner)||assemblyOwner==prop,_sharedPhaseSignals.Contains(prop));
+            // Wait for the new composite with the current custom mesh still
+            // on its actor. The game's updated controller masks stay live.
+            if (SignalNativePhasePolicy.KeepsReadyPresentation(presentationPending, applied, prefab != originalPrefab)) return;
             if(selectedPrefab==originalPrefab){selectedMask=originalMask;if(EntityManager.HasComponent<MGRGardenCitySignals>(node)){if(applied&&saved.AppliedPrefab!=saved.Prefab&&lightState.m_GroupMask0==saved.AppliedVehicleMask&&lightState.m_GroupMask1==saved.AppliedPedMask)return;if(applied){Undo(prop,saved);ForgetMoved(prop);}return;}}
             if(lightState.m_GroupMask1!=selectedMask){lightState.m_GroupMask1=selectedMask;EntityManager.SetComponentData(prop,lightState);}
             if(applied&&placed.Equals(current)&&prefab==selectedPrefab&&saved.AppliedPedMask==selectedMask&&saved.AppliedVehicleMask==lightState.m_GroupMask0)return;
@@ -1175,7 +1179,7 @@ namespace MedianGrassReplacement.Systems
                     var current=EntityManager.GetComponentData<ObjectTransform>(winner);var original=OriginalTransform(winner);var originalPrefab=OriginalPrefab(winner);
                     var light=EntityManager.GetComponentData<ObjectLight>(winner);bool wasMoved=_moved.TryGetValue(winner,out var prior);
                     ushort originalMask=wasMoved&&light.m_GroupMask1==prior.AppliedPedMask?prior.OriginalPedMask:light.m_GroupMask1;
-                    var placed=pole.Applied;var face=faces[faceIndex];_visibleSignals.Add(winner);var selected=GardenCityLightPolicy.SelectPedestrian(prefabs,EntityManager,node,originalPrefab,ref placed,face);
+                    var placed=pole.Applied;var face=faces[faceIndex];_visibleSignals.Add(winner);var selected=GardenCityLightPolicy.SelectPedestrian(prefabs,EntityManager,node,originalPrefab,ref placed,face,out _);
                     if(selected==originalPrefab)continue;
                     _visibleSignals.Add(winner);ReleaseHiddenSignal(winner);
                     if(wasMoved&&prior.AppliedPrefab==selected&&current.Equals(placed)&&light.m_GroupMask1==face.Mask&&prior.AppliedVehicleMask==light.m_GroupMask0)continue;

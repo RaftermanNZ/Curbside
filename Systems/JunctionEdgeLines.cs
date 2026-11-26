@@ -32,6 +32,38 @@ namespace MedianGrassReplacement.Systems
     }
     public partial class CurbLineEmissionSystem
     {
+        internal bool OwnsReplacedJunctionStripe(Entity node, NetLaneGeometryPrefab prefab, Bezier4x3 source)
+        {
+            if (!EntityManager.HasComponent<MGRJunctionEdgeLines>(node) ||
+                !NodeLinePolicy.IsLineGeometry(prefab) || NodeLinePolicy.IsProtected(prefab.name) ||
+                !_joins.TryGetValue(node,out var joins)) return false;
+            if (prefab.name.IndexOf("Center Line",System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                prefab.name.IndexOf("Centre Line",System.StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            float reach = Mod.Settings.CurbLineOffset + .35f;
+            return JunctionStripeCoverage.Covers(source,reach,CoveredByJoint);
+
+            bool CoveredByJoint(float3 point, float2 tangent, float limit)
+            {
+                foreach (var curve in joins.Curves)
+                    if (curve.Curb && !curve.Protected && !curve.Median &&
+                        JunctionStripeCoverage.CoversPoint(curve.Curve,point,tangent,limit)) return true;
+                return false;
+            }
+        }
+
+        private static void RemoveDuplicateEdgeStrokes(List<MarkCurve> curves)
+        {
+            var keys = new HashSet<MarkingKey>();
+            for (int i = 0; i < curves.Count; i++)
+            {
+                var mark = curves[i];
+                if (!mark.Curb || mark.Protected || mark.Median) continue;
+                var key = new MarkingKey(mark.Curve,Entity.Null);
+                if (!keys.Add(key)) { curves.RemoveAt(i--); continue; }
+                keys.Add(new MarkingKey(MathUtils.Invert(mark.Curve),Entity.Null));
+            }
+        }
+
         private struct CornerApproach
         {
             internal Entity Road;
@@ -95,7 +127,7 @@ namespace MedianGrassReplacement.Systems
                 if ((!CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, true, out _)
                     || !CurbPlacement.TryOuterAnchor(anchors, width, data.m_MiddleOffset, false, out _))
                     && EntityManager.HasBuffer<NetCompositionLane>(composition))
-                    foreach (var anchor in ReadDecalAnchors(composition, width, EntityManager.GetBuffer<NetCompositionLane>(composition, true)))
+                    foreach (var anchor in ReadDecalAnchors(composition, width, EntityManager.GetBuffer<NetCompositionLane>(composition, true), data.m_MiddleOffset))
                     {
                         // An authored curb outranks a drivable-width estimate on its side.
                         bool leftSide = anchor.x < data.m_MiddleOffset;
@@ -121,7 +153,7 @@ namespace MedianGrassReplacement.Systems
                     {
                         if(!mark.Curb||mark.Protected)continue;
                         float lateral=RoadMarkingPolicy.Lateral(geometry,MathUtils.Position(mark.Curve,.5f),width);
-                        if(!math.isfinite(lateral)||(lateral<0)!=left||math.abs(lateral-position.x)>.6f)continue;
+                        if(!math.isfinite(lateral)||(lateral<data.m_MiddleOffset)!=left||math.abs(lateral-position.x)>.6f)continue;
                         for(int end=0;end<2;end++)
                         {
                             var candidate=end==0?mark.Curve.a:mark.Curve.d;float distance=math.distancesq(candidate,point);

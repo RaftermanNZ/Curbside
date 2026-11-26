@@ -92,6 +92,16 @@ namespace MedianGrassReplacement.Systems
         internal void ApplyEdge(Entity target,bool node,bool left,byte style,bool remove)
         {
             if(Mod.Saving)return;
+            byte requested = remove ? EdgeUpgradePolicy.Removed : style;
+            var current = EntityManager.HasComponent<MGREdgePaint>(target) ? EntityManager.GetComponentData<MGREdgePaint>(target) : default;
+            if (requested != 0 && (left ? current.Left : current.Right) == requested &&
+                (!node || current.Left == current.Right &&
+                    EntityManager.HasComponent<MGRJunctionEdgeLines>(target) == !remove &&
+                    EntityManager.HasComponent<MGRRemoveJunctionEdges>(target) == remove))
+            {
+                UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"Selected edge already has this setting.");
+                return;
+            }
             // Highway gores retain their native-route-validated joins. Urban
             // curb-corner reconstruction must not be substituted for those paths.
             if(node&&EntityManager.HasBuffer<ConnectedEdge>(target))
@@ -103,8 +113,7 @@ namespace MedianGrassReplacement.Systems
             if(!node&&!remove&&(!RoadSurfacePolicy.IsPaved(EntityManager,target)||EdgePreview(target,left,style).Count==0)){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"No supported paved edge on this side.");return;}
             if(node&&!remove&&JunctionEdgePreview(target,style).Count==0){UpgradeFeedback.Report(EdgeUpgradePolicy.Asset(style),"Node: no supported edge paths ready; no upgrade applied.");return;}
             if(!node)World.GetOrCreateSystemManaged<RoadAttachmentTransferSystem>().Forget(target);
-            var value=EntityManager.HasComponent<MGREdgePaint>(target)?EntityManager.GetComponentData<MGREdgePaint>(target):default;
-            value=EdgeUpgradePolicy.Set(value,left,remove?EdgeUpgradePolicy.Removed:style);
+            var value=EdgeUpgradePolicy.Set(current,left,requested);
             if(node)value.Right=value.Left;
             if(!EntityManager.HasComponent<MGREdgePaint>(target))EntityManager.AddComponent<MGREdgePaint>(target);EntityManager.SetComponentData(target,value);
             if(node)

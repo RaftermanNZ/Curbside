@@ -285,6 +285,10 @@ namespace MedianGrassReplacement.Systems
                         || EntityManager.Exists(temporary) && !EntityManager.HasComponent<Deleted>(temporary)) { rejectedReceipts++; continue; }
                     var edge = EntityManager.GetComponentData<Edge>(key.Road);
                     if (edge.m_Start != key.Node && edge.m_End != key.Node) { rejectedReceipts++; continue; }
+                    // The accepted native edit can rebuild signal actors and
+                    // masks even when the crossing's appearance stays the same.
+                    if (EntityManager.HasComponent<MGRFarSideLights>(key.Node))
+                        FarSideLightSystem.Queue(World,key.Node);
                     if (item.Value == NativeCrosswalkAppearance.Restore) choices.RestoreHiddenAppearance(key.Road, key.Node);
                     else
                     {

@@ -10,17 +10,19 @@ namespace MedianGrassReplacement.Systems
 
     {
 
-        internal static List<float3> Complete(IList<float3> authored,float width,float left,float right,float leftY,float rightY)
+        internal static List<float3> Complete(IList<float3> authored,float width,float left,float right,float leftY,float rightY,
+            float middle=0, bool allowSectionBounds=true)
 
         {
 
             var anchors=new List<float3>(authored);bool hasLeft=false,hasRight=false;
 
-            foreach(var curb in anchors) {if(curb.x<0) hasLeft=true;else if(curb.x>0) hasRight=true;}
+            foreach(var curb in anchors) {if(curb.x<middle) hasLeft=true;else if(curb.x>middle) hasRight=true;}
 
-            if(!hasLeft) anchors.Add(new float3(math.isfinite(left)&&left<float.MaxValue?left:-width*.5f,leftY,0));
-
-            if(!hasRight) anchors.Add(new float3(math.isfinite(right)&&right>float.MinValue?right:width*.5f,rightY,0));
+            bool validLeft = math.isfinite(left) && left < middle;
+            bool validRight = math.isfinite(right) && right > middle;
+            if(!hasLeft && (validLeft || allowSectionBounds)) anchors.Add(new float3(validLeft?left:-width*.5f,leftY,0));
+            if(!hasRight && (validRight || allowSectionBounds)) anchors.Add(new float3(validRight?right:width*.5f,rightY,0));
 
             return anchors;
 

@@ -15,6 +15,9 @@ namespace MedianGrassReplacement.Systems
         // in 4B. Placement must still precede search/override in phase 5.
         internal static bool CanApply(SystemUpdatePhase phase,bool saving,bool active)
             =>active&&!saving&&phase==SystemUpdatePhase.Modification5;
+
+        internal static bool KeepsReadyPresentation(bool pending, bool ownsCurrentPose, bool customPrefab)
+            => pending && ownsCurrentPose && customPrefab;
     }
     public partial class FarSideLightSystem
     {

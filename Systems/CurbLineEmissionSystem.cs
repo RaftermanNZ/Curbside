@@ -976,6 +976,7 @@ namespace MedianGrassReplacement.Systems
                         }
 
                     var next = new RoadMarks { Signature = signature };
+                    if (EntityManager.HasComponent<MGREdgePaint>(road)) RemoveDuplicateEdgeStrokes(curves);
 
                     foreach (var curve in curves)
 
@@ -1686,7 +1687,8 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        private List<float3> ReadDecalAnchors(Entity composition,float width,DynamicBuffer<NetCompositionLane> lanes)
+        private List<float3> ReadDecalAnchors(Entity composition,float width,DynamicBuffer<NetCompositionLane> lanes,
+            float middle=0, bool requirePavement=false)
 
         {
 
@@ -1701,6 +1703,9 @@ namespace MedianGrassReplacement.Systems
                 var data=EntityManager.GetComponentData<NetLaneData>(lane.m_Lane);
 
                 if((data.m_Flags&(LaneFlags.Road|LaneFlags.Parking))==0 || (data.m_Flags&LaneFlags.Underground)!=0 || !math.all(math.isfinite(lane.m_Position))) continue;
+                if (requirePavement && (((data.m_Flags | lane.m_Flags) &
+                    (LaneFlags.Master | LaneFlags.Underground | LaneFlags.Virtual)) != 0 ||
+                    !math.isfinite(data.m_Width) || data.m_Width <= .1f)) continue;
 
                 float lo=lane.m_Position.x-data.m_Width*.5f,hi=lane.m_Position.x+data.m_Width*.5f;
 
@@ -1708,7 +1713,7 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            return RoadsideAnchorPolicy.Complete(anchors,width,left,right,leftY,rightY);
+            return RoadsideAnchorPolicy.Complete(anchors,width,left,right,leftY,rightY,middle,!requirePavement);
 
         }
 
@@ -2297,6 +2302,7 @@ namespace MedianGrassReplacement.Systems
                 }
                 if(nativeHighway)AddHighwayNodePaint(node,curves);else ApplyDashedEdges(node,curves,true);
                 ApplyHighwayLineIntents(node,curves);ApplyIndividualDividers(node,curves);
+                if (EntityManager.HasComponent<MGRJunctionEdgeLines>(node)) RemoveDuplicateEdgeStrokes(curves);
                 var reusable = new Dictionary<MarkingKey, Queue<Entity>>();
 
                 if (_joins.TryGetValue(node, out var old))

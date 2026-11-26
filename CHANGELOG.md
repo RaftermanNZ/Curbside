@@ -1,3 +1,12 @@
+# Curbside 0.6.5
+
+- Improved edge-line and lined crosswalk alignment where one-way, asymmetric and wide roads meet. Applying the same edge style again keeps one aligned marking, and lined crosswalks can meet the ends of adjoining edge stripes.
+- Improved crosswalk fitting on wide and curved approaches and across separate, supported asphalt openings between median islands. Affected crossings refit after road edits.
+- Saved crosswalk choices stay separate at shallow forks. Existing saves rebuild Curbside markings on load.
+- Reduced brief flashes of vanilla traffic lights when removing crosswalks by keeping an existing custom model visible while its replacement initializes.
+
+---
+
 # Curbside 0.6.4
 
 - Drag supported marking, parking and traffic upgrades across connected roads. The green overlay shows the targets selected for that drag. Segment markings and junction markings are edited separately.

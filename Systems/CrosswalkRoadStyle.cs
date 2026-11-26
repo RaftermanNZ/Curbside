@@ -74,56 +74,6 @@ namespace MedianGrassReplacement.Systems
 
     }
 
-    internal static class CrosswalkIntentPolicy
-
-    {
-
-        internal static float Score(float3 a,float3 b)
-
-        {
-
-            if(!math.all(math.isfinite(a)) || !math.all(math.isfinite(b)) || math.lengthsq(a.xz)<.001f || math.lengthsq(b.xz)<.001f) return -1;
-
-            return math.dot(math.normalize(a.xz),math.normalize(b.xz));
-
-        }
-
-        internal static bool Matches(float3 a,float3 b) => Score(a,b) >= .95f;
-
-    }
-
-    internal static class CrosswalkApproachPlacement
-
-    {
-
-        internal static bool TryScore(EdgeGeometry geometry, bool start, Bezier4x3 crossing, out float score)
-
-        {
-
-            score = float.MaxValue; var segment = start ? geometry.m_Start : geometry.m_End;
-
-            var left = start ? segment.m_Left.a : segment.m_Left.d; var right = start ? segment.m_Right.a : segment.m_Right.d;
-
-            var axis = math.normalizesafe((right - left).xz); var tangent = math.normalizesafe(MathUtils.Tangent(crossing, .5f).xz);
-
-            if (math.lengthsq(axis) < .5f || math.abs(math.dot(axis, tangent)) < .7f) return false;
-
-            var point = MathUtils.Position(crossing, .5f);
-
-            if (!math.all(math.isfinite(point)) || math.abs(point.y - (left.y + right.y) * .5f) > 3f) return false;
-
-            float width = math.distance(left.xz, right.xz); if (!math.isfinite(width) || width < .1f) return false;
-
-            float along = math.clamp(math.dot(point.xz - left.xz, axis), 0f, width);
-
-            score = math.distance(point.xz, left.xz + axis * along);
-
-            return math.isfinite(score) && score <= 12f;
-
-        }
-
-    }
-
     public partial class CrosswalkUpgradeSystem
 
     {
@@ -134,13 +84,22 @@ namespace MedianGrassReplacement.Systems
             var edge=EntityManager.GetComponentData<Edge>(road);
             foreach(var node in new[]{edge.m_Start,edge.m_End})
             {
-                if(ApproachDirection(road,node,out var direction)&&EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node))
-                {var intents=EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);for(int i=intents.Length-1;i>=0;i--)if(CrosswalkIntentPolicy.Matches(direction,intents[i].Direction))intents.RemoveAt(i);}
+                if(EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node))
+                {var intents=EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);for(int i=intents.Length-1;i>=0;i--)if(LegacyIntentRoad(node,intents[i].Direction)==road)intents.RemoveAt(i);}
             }
             if(HasChoices&&EntityManager.HasComponent<EdgeGeometry>(road))
             {
                 var choices=EntityManager.GetBuffer<MGRCrosswalkChoice>(_choices);
-                for(int i=choices.Length-1;i>=0;i--){var c=choices[i];var axis=math.normalizesafe(c.Axis);var path=new Bezier4x3(c.Center-axis,c.Center-axis/3,c.Center+axis/3,c.Center+axis);bool owned=false;foreach(var node in new[]{edge.m_Start,edge.m_End}){if(!EntityManager.HasBuffer<ConnectedEdge>(node))continue;Entity best=Entity.Null;float limit=float.MaxValue;foreach(var connected in EntityManager.GetBuffer<ConnectedEdge>(node,true)){var candidate=connected.m_Edge;if(!EntityManager.HasComponent<Edge>(candidate)||!EntityManager.HasComponent<EdgeGeometry>(candidate))continue;bool start=EntityManager.GetComponentData<Edge>(candidate).m_Start==node;if(CrosswalkApproachPlacement.TryScore(EntityManager.GetComponentData<EdgeGeometry>(candidate),start,path,out float score)&&score<limit){limit=score;best=candidate;}}owned|=best==road;}if(owned)choices.RemoveAt(i);}
+                for (int i = choices.Length - 1; i >= 0; i--)
+                {
+                    var choice = choices[i];
+                    var axis = math.normalizesafe(choice.Axis);
+                    var path = new Bezier4x3(choice.Center-axis, choice.Center-axis/3f,
+                        choice.Center+axis/3f, choice.Center+axis);
+                    if ((TryResolveNodeCrossing(edge.m_Start, path, out var startRoad) && startRoad == road) ||
+                        (TryResolveNodeCrossing(edge.m_End, path, out var endRoad) && endRoad == road))
+                        choices.RemoveAt(i);
+                }
             }
             if(EntityManager.HasComponent<MGRCrosswalkRoadStyle>(road))EntityManager.RemoveComponent<MGRCrosswalkRoadStyle>(road);
             if(EntityManager.HasComponent<MGRInvisibleCrosswalkStyle>(road))EntityManager.RemoveComponent<MGRInvisibleCrosswalkStyle>(road);
@@ -168,26 +127,38 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            if (!EntityManager.HasBuffer<ConnectedEdge>(owner)) return false;
+            if (!TryResolveNodeCrossing(owner, curve, out road)) return false;
+            node = owner;
+            return true;
+        }
 
+        private bool TryResolveNodeCrossing(Entity node, Bezier4x3 curve, out Entity road)
+        {
+            road = Entity.Null;
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node)) return false;
             float best = float.MaxValue;
-
-            foreach (var entry in EntityManager.GetBuffer<ConnectedEdge>(owner, true))
-
+            bool tied = false;
+            foreach (var entry in EntityManager.GetBuffer<ConnectedEdge>(node, true))
             {
-
                 var candidate = entry.m_Edge;
-
-                if (!EntityManager.HasComponent<Road>(candidate) || EntityManager.HasComponent<Deleted>(candidate) || EntityManager.HasComponent<Game.Tools.Temp>(candidate) || !EntityManager.HasComponent<Edge>(candidate) || !EntityManager.HasComponent<EdgeGeometry>(candidate)) continue;
-
-                var edge = EntityManager.GetComponentData<Edge>(candidate); bool start = edge.m_Start == owner; if (!start && edge.m_End != owner) continue;
-
-                if (CrosswalkApproachPlacement.TryScore(EntityManager.GetComponentData<EdgeGeometry>(candidate), start, curve, out float score) && score < best) { best = score; road = candidate; node = owner; }
-
+                if (!EntityManager.HasComponent<Road>(candidate) || EntityManager.HasComponent<Deleted>(candidate) ||
+                    EntityManager.HasComponent<Game.Tools.Temp>(candidate) || !EntityManager.HasComponent<Edge>(candidate) ||
+                    !EntityManager.HasComponent<EdgeGeometry>(candidate)) continue;
+                var edge = EntityManager.GetComponentData<Edge>(candidate);
+                bool start = edge.m_Start == node;
+                if (start == (edge.m_End == node)) continue;
+                if (!CrosswalkApproachPlacement.TryScore(EntityManager.GetComponentData<EdgeGeometry>(candidate),
+                    start, curve, out float score)) continue;
+                if (CrosswalkPreviewChoicePolicy.Better(score, best))
+                {
+                    best = score;
+                    road = candidate;
+                    tied = false;
+                }
+                else if (candidate != road && CrosswalkPreviewChoicePolicy.Tied(score, best)) tied = true;
             }
-
+            if (tied) road = Entity.Null;
             return road != Entity.Null;
-
         }
 
         private bool ApproachDirection(Entity road,Entity node,out float3 direction)
@@ -208,40 +179,78 @@ namespace MedianGrassReplacement.Systems
 
         }
 
-        private void StoreNodeIntent(Entity road,Entity node,byte appearance)
-
+        private Entity LegacyIntentRoad(Entity node, float3 direction)
         {
-
-            if(!EntityManager.HasComponent<Node>(node) || !ApproachDirection(road,node,out var direction)) return;
-
-            if(!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node)) EntityManager.AddBuffer<MGRCrosswalkApproachIntent>(node);
-
-            var buffer=EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);
-
-            int best=-1;float score=.95f;
-
-            for(int i=0;i<buffer.Length;i++) { float s=CrosswalkIntentPolicy.Score(buffer[i].Direction,direction);if(s>=score) {score=s;best=i;} }
-
-            var value=new MGRCrosswalkApproachIntent {Direction=direction,Appearance=appearance};
-
-            if(best>=0) buffer[best]=value; else if(buffer.Length<32) buffer.Add(value);
-
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node)) return Entity.Null;
+            Entity bestRoad = Entity.Null;
+            var match = new CrosswalkIntentPolicy.LegacyMatch();
+            foreach (var connection in EntityManager.GetBuffer<ConnectedEdge>(node, true))
+            {
+                var candidate = connection.m_Edge;
+                if (!EntityManager.HasComponent<Road>(candidate) || EntityManager.HasComponent<Deleted>(candidate) ||
+                    EntityManager.HasComponent<Game.Tools.Temp>(candidate)) continue;
+                if (!ApproachDirection(candidate, node, out var outward)) return Entity.Null;
+                float score = CrosswalkIntentPolicy.Score(direction, outward);
+                if (match.Consider(score)) bestRoad = candidate;
+            }
+            return match.Unique ? bestRoad : Entity.Null;
         }
 
-        private bool NodeIntent(Entity road,Entity node,out byte appearance)
-
+        private int FindLegacyIntent(Entity road, Entity node, DynamicBuffer<MGRCrosswalkApproachIntent> buffer)
         {
+            if (!ApproachDirection(road,node,out var outward)) return -1;
+            int best = -1;
+            float bestScore = -1f;
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                var entry = buffer[i];
+                float score = CrosswalkIntentPolicy.Score(entry.Direction,outward);
+                if (score <= bestScore || LegacyIntentRoad(node,entry.Direction) != road) continue;
+                best = i;
+                bestScore = score;
+            }
+            return best;
+        }
 
-            appearance=0;
+        private void StoreNodeIntent(Entity road, Entity node, byte appearance)
+        {
+            // Keep directional entries for legacy replacement recovery only.
+            // The persisted road end retains its choice even at a parallel fork.
+            if (!EntityManager.HasComponent<Node>(node) || !ApproachDirection(road,node,out var direction) ||
+                LegacyIntentRoad(node,direction) != road) return;
+            if (!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node))
+                EntityManager.AddBuffer<MGRCrosswalkApproachIntent>(node);
+            var buffer = EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node);
+            int index = FindLegacyIntent(road,node,buffer);
+            var value = new MGRCrosswalkApproachIntent {Direction=direction,Appearance=appearance};
+            if (index >= 0) buffer[index] = value;
+            else if (buffer.Length < 32) buffer.Add(value);
+        }
 
-            if(!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node) || !ApproachDirection(road,node,out var direction)) return false;
+        private bool NodeIntent(Entity road, Entity node, out byte appearance)
+        {
+            appearance = 0;
+            if (!EntityManager.HasComponent<Edge>(road)) return false;
+            var edge = EntityManager.GetComponentData<Edge>(road);
+            bool start = edge.m_Start == node;
+            if (!start && edge.m_End != node) return false;
+            bool invisible = EntityManager.HasComponent<MGRInvisibleCrosswalkStyle>(road) &&
+                EntityManager.GetComponentData<MGRInvisibleCrosswalkStyle>(road).Has(start);
+            bool line = false;
+            bool style = EntityManager.HasComponent<MGRCrosswalkRoadStyle>(road) &&
+                EntityManager.GetComponentData<MGRCrosswalkRoadStyle>(road).TryGet(start,out line);
+            if (invisible || style)
+            {
+                appearance = invisible ? (byte)2 : line ? (byte)1 : (byte)0;
+                return true;
+            }
 
-            int best=-1;float score=.95f;var buffer=EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node,true);
-
-            for(int i=0;i<buffer.Length;i++) {float s=CrosswalkIntentPolicy.Score(buffer[i].Direction,direction);if(s>=score){score=s;best=i;}}
-
-            if(best<0) return false; appearance=buffer[best].Appearance;return true;
-
+            if (!EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node)) return false;
+            var buffer = EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node,true);
+            int index = FindLegacyIntent(road,node,buffer);
+            if (index < 0) return false;
+            appearance = buffer[index].Appearance;
+            return true;
         }
 
         internal void SeedNodeIntents()
@@ -262,7 +271,8 @@ namespace MedianGrassReplacement.Systems
 
                     var node=start?edge.m_Start:edge.m_End;
 
-                    if(NodeIntent(road,node,out var existing) || !style.TryGet(start,out bool line)) continue;
+                    if(!style.TryGet(start,out bool line) || (EntityManager.HasBuffer<MGRCrosswalkApproachIntent>(node) &&
+                        FindLegacyIntent(road,node,EntityManager.GetBuffer<MGRCrosswalkApproachIntent>(node,true)) >= 0)) continue;
 
                     bool invisible=EntityManager.HasComponent<MGRInvisibleCrosswalkStyle>(road) && EntityManager.GetComponentData<MGRInvisibleCrosswalkStyle>(road).Has(start);
 

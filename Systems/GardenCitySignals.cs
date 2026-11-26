@@ -385,10 +385,11 @@ namespace MedianGrassReplacement.Systems
    var toward=math.normalizesafe(new float3(centre.x-support.x,0,centre.z-support.z));
    return quaternion.LookRotationSafe(math.cross(toward,new float3(0,1,0)),new float3(0,1,0));
   }
-  internal static Entity Select(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,IList<float3> supports=null,int virtualSupport=-1,IList<int2> requiredSpans=null,int sourceApproach=-1,bool includePole=true,ushort vehicleMask=0,bool includeAssembly=true,bool sharedPhaseSupport=false)
+  internal static Entity Select(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,out bool presentationPending,IList<float3> supports=null,int virtualSupport=-1,IList<int2> requiredSpans=null,int sourceApproach=-1,bool includePole=true,ushort vehicleMask=0,bool includeAssembly=true,bool sharedPhaseSupport=false)
   {
+   presentationPending=false;
    if(!TryDescribe(p,em,node,original,ref placed,approaches,fallback,originalMask,out pedestrianMask,supports,virtualSupport,requiredSpans,sourceApproach,includePole,vehicleMask,includeAssembly,sharedPhaseSupport,out var meshes,out var rotation,out var style))return fallback;
-   return Resolve(p,em,node,fallback,meshes,rotation,ref placed,true,style);
+   return Resolve(p,em,node,fallback,meshes,rotation,ref placed,true,style,out presentationPending);
   }
   internal static bool TryDescribe(PrefabSystem p,EntityManager em,Entity node,ObjectTransform original,ref ObjectTransform placed,IList<FarSideLightPolicy.Approach> approaches,Entity fallback,ushort originalMask,out ushort pedestrianMask,IList<float3> supports,int virtualSupport,IList<int2> requiredSpans,int sourceApproach,bool includePole,ushort vehicleMask,bool includeAssembly,bool sharedPhaseSupport,out List<ObjectMeshInfo> meshes,out quaternion rotation,out byte style)
   {
@@ -491,26 +492,28 @@ namespace MedianGrassReplacement.Systems
    return true;
   }
 
-  internal static Entity SelectPedestrian(PrefabSystem p,EntityManager em,Entity node,Entity fallback,ref ObjectTransform placed,CrossingFace face)
+  internal static Entity SelectPedestrian(PrefabSystem p,EntityManager em,Entity node,Entity fallback,ref ObjectTransform placed,CrossingFace face,out bool presentationPending)
   {
+   presentationPending=false;
    if(!Ready(p,em))return fallback;
    var rotation=quaternion.LookRotationSafe(face.Facing,new float3(0,1,0));
    byte style=em.HasComponent<MGRSignalStyle>(node)?em.GetComponentData<MGRSignalStyle>(node).Value:(byte)0;
    if(style==4&&!FloridaReady(p,em))return fallback;
    var meshes=new List<ObjectMeshInfo>{Mesh(style==4?"CSFPedHead":IsWireStyle(style)?"PedHeadWire":"PedHead",new float3(0,2.55f,PedestrianOffset),quaternion.identity)};
-   return Resolve(p,em,node,fallback,meshes,rotation,ref placed,false,style);
+   return Resolve(p,em,node,fallback,meshes,rotation,ref placed,false,style,out presentationPending);
   }
-  private static Entity Resolve(PrefabSystem p,EntityManager em,Entity node,Entity fallback,List<ObjectMeshInfo> meshes,quaternion rotation,ref ObjectTransform placed,bool vehicle,byte style)
+  private static Entity Resolve(PrefabSystem p,EntityManager em,Entity node,Entity fallback,List<ObjectMeshInfo> meshes,quaternion rotation,ref ObjectTransform placed,bool vehicle,byte style,out bool presentationPending)
   {
+   presentationPending=false;
    fallback=NativeSource(fallback);
    var key=new StringBuilder(p.GetPrefab<StaticObjectPrefab>(fallback).GetPrefabID().ToString()).Append('|').Append(style);
    foreach(var mesh in meshes){key.Append('|').Append(mesh.m_Mesh.name);foreach(float f in new[]{mesh.m_Position.x,mesh.m_Position.y,mesh.m_Position.z,mesh.m_Rotation.value.x,mesh.m_Rotation.value.y,mesh.m_Rotation.value.z,mesh.m_Rotation.value.w})key.Append(':').Append(math.round(f*1000).ToString(CultureInfo.InvariantCulture));}
-   string id=key.ToString();if(variants.TryGetValue(id,out var ready)){if(!Initialized(em,ready,vehicle)){FarSideLightSystem.WaitForSignalDefinition(node);if(TraceEnabled)Trace(node,"composite awaiting initialized signal geometry: "+ready);return fallback;}placed.m_Rotation=rotation;return ready;}
-   if(pending.ContainsKey(id)){FarSideLightSystem.WaitForSignalDefinition(node);pendingNodes.Add(node);return fallback;}
+   string id=key.ToString();if(variants.TryGetValue(id,out var ready)){if(!Initialized(em,ready,vehicle)){presentationPending=true;FarSideLightSystem.WaitForSignalDefinition(node);if(TraceEnabled)Trace(node,"composite awaiting initialized signal geometry: "+ready);return fallback;}placed.m_Rotation=rotation;return ready;}
+   if(pending.ContainsKey(id)){presentationPending=true;FarSideLightSystem.WaitForSignalDefinition(node);pendingNodes.Add(node);return fallback;}
    if(variants.Count+pending.Count>=2048){if(notices.Add("variant-capacity"))Mod.Log.Warn("Signal composite capacity reached (2048). Retaining native signals for unsupported new configurations; existing prefabs are not freed. Write a snapshot for cache counts.");return fallback;}
    var prefab=(StaticObjectPrefab)p.GetPrefab<StaticObjectPrefab>(fallback).Clone("CSG Applied "+(variants.Count+pending.Count));prefab.m_Meshes=meshes.ToArray();prefab.Remove<EffectSource>();if(vehicle&&IsWireStyle(style))WireStandingGeometry.Configure(prefab,meshes);if(!vehicle){prefab.Remove<StandingObject>();var role=prefab.GetComponent<TrafficLightObject>();role.m_VehicleLeft=false;role.m_VehicleRight=false;role.m_CrossingLeft=false;role.m_CrossingRight=true;}prefab.Remove<SpawnableObject>();prefab.Remove<ObsoleteIdentifiers>();prefab.Remove<ObjectSubObjects>();prefab.Remove<SubObjectDefaultProbability>();if(prefab.TryGet<UIObject>(out var ui))ui.m_Group=null;
    // Register before the native prefab initialization pass, never during modification.
-   pending.Add(id,prefab);pendingSources[id]=fallback;FarSideLightSystem.WaitForSignalDefinition(node);pendingNodes.Add(node);if(TraceEnabled)Trace(node,"composite queued: style="+style+" vehicle="+vehicle+" meshes="+meshes.Count);return fallback;
+   pending.Add(id,prefab);pendingSources[id]=fallback;presentationPending=true;FarSideLightSystem.WaitForSignalDefinition(node);pendingNodes.Add(node);if(TraceEnabled)Trace(node,"composite queued: style="+style+" vehicle="+vehicle+" meshes="+meshes.Count);return fallback;
   }
  }
  public partial class SignalPrefabRegistrationSystem:Game.GameSystemBase

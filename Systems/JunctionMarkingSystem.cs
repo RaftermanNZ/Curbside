@@ -284,10 +284,10 @@ namespace MedianGrassReplacement.Systems
 
             }
 
-            if(EntityManager.HasComponent<MGRJunctionEdgeLines>(owner)&&EntityManager.HasComponent<Curve>(line)&&NodeLinePolicy.IsLaneLine(prefab.name)&&!NodeLinePolicy.IsProtected(prefab.name))
+            if(EntityManager.HasComponent<MGRJunctionEdgeLines>(owner)&&EntityManager.HasComponent<Curve>(line))
             {
                 var marking=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
-                if(marking.CoversNativeNodePaint(owner,EntityManager.GetComponentData<Curve>(line).m_Bezier,false))return true;
+                if(marking.OwnsReplacedJunctionStripe(owner,prefab,EntityManager.GetComponentData<Curve>(line).m_Bezier))return true;
             }
             // Explicit visibility/replacement choices above still win. Leave
             // unsolicited junction cleanup to the native game when opted in.

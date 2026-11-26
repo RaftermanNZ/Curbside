@@ -33,7 +33,7 @@ namespace MedianGrassReplacement.Systems
         }
 
         private bool TryReadPaintApproach(Entity road, Entity node, out EdgeNodeGeometry geometry,
-            out NetCompositionData data, out List<float3> anchors, out bool start, bool includeMedian = true, bool includeAlleyPavement = false)
+            out NetCompositionData data, out List<float3> anchors, out bool start, bool completeExterior = true, bool includeAlleyPavement = false, bool allowEmpty = false)
         {
             geometry = default; data = default; anchors = null; start = false;
             if (!EntityManager.HasComponent<Road>(road) || !EntityManager.HasComponent<Edge>(road)
@@ -55,16 +55,34 @@ namespace MedianGrassReplacement.Systems
             // Special nodes keep the existing split geometry path.
             if (geometry.m_MiddleRadius > 0 || !math.isfinite(data.m_Width) || data.m_Width < 1) return false;
             anchors = ReadAuthoredCurbAnchors(definition);
-            if (includeMedian)
+            if (completeExterior)
             {
-                if (anchors.Count < 2 && EntityManager.HasBuffer<NetCompositionLane>(definition))
-                    anchors = ReadDecalAnchors(definition, data.m_Width, EntityManager.GetBuffer<NetCompositionLane>(definition, true));
-                if (anchors.Count < 2) return false;
-                ReadMedianCurbs(definition, data, anchors);
+                // Parking and sidewalk pieces can both contribute anchors on
+                // the same side. They do not create separate crossing spans.
+                if ((!CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, true, out _)
+                    || !CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, false, out _))
+                    && EntityManager.HasBuffer<NetCompositionLane>(definition))
+                {
+                    var estimated = ReadDecalAnchors(definition, data.m_Width,
+                        EntityManager.GetBuffer<NetCompositionLane>(definition, true), data.m_MiddleOffset, requirePavement: true);
+                    for (int side = 0; side < 2; side++)
+                    {
+                        bool left = side == 0;
+                        if (!CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, left, out _)
+                            && CurbPlacement.TryOuterAnchor(estimated, data.m_Width, data.m_MiddleOffset, left, out var fallback))
+                            AddDistinctCurb(anchors, fallback);
+                    }
+                }
+                if (!CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, true, out var leftCurb)
+                    || !CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, false, out var rightCurb))
+                    return false;
+                anchors.Clear();
+                anchors.Add(leftCurb);
+                anchors.Add(rightCurb);
             }
             if (anchors.Count == 0 && includeAlleyPavement && RoadSurfacePolicy.IsAlley(EntityManager, road))
                 AddAlleyPavementAnchors(definition, data, anchors);
-            if (anchors.Count == 0) return false;
+            if (anchors.Count == 0 && !allowEmpty) return false;
             anchors.Sort((a, b) => a.x.CompareTo(b.x));
             return true;
         }
@@ -197,102 +215,125 @@ namespace MedianGrassReplacement.Systems
             anchors.Add(position);
         }
 
-        private void ReadMedianCurbs(Entity composition, NetCompositionData data, List<float3> anchors)
+        private struct SurfaceMedian
         {
-            if (!EntityManager.HasBuffer<NetCompositionPiece>(composition)) return;
-            float left = float.PositiveInfinity, right = float.NegativeInfinity;
-            foreach (var anchor in anchors)
+            internal float2 Bounds;
+            internal float Height;
+            internal bool BlocksCrosswalk;
+        }
+
+        internal struct MedianOpening
+        {
+            internal Bezier4x3 Left, Right;
+            internal float Width;
+            internal bool Split;
+        }
+
+        private static void ReadMedianCurbs(List<SurfaceMedian> medians, List<float3> anchors)
+        {
+            float left = anchors[0].x, right = anchors[1].x;
+            foreach (var median in medians)
             {
-                left = math.min(left, anchor.x);
-                right = math.max(right, anchor.x);
-            }
-            // The native sync breakpoints delimit the median (including
-            // inverted pieces). Use them only for a real surface median.
-            foreach (var piece in EntityManager.GetBuffer<NetCompositionPiece>(composition, true))
-            {
-                if ((piece.m_SectionFlags & NetSectionFlags.Median) == 0 ||
-                    (piece.m_SectionFlags & (NetSectionFlags.Underground | NetSectionFlags.Overhead)) != 0) continue;
-                if (CurbPlacement.TryMedianBoundaries(data.m_Width, data.m_MiddleOffset,
-                    data.m_SyncVertexOffsetsLeft.w, data.m_SyncVertexOffsetsRight.x, left, right, out var bounds))
-                {
-                    AddDistinctCurb(anchors, new float3(bounds.x, piece.m_Offset.y, 0));
-                    AddDistinctCurb(anchors, new float3(bounds.y, piece.m_Offset.y, 0));
-                }
-                return;
+                if (median.Bounds.x <= left + .05f || median.Bounds.y >= right - .05f) continue;
+                AddDistinctCurb(anchors, new float3(median.Bounds.x, median.Height, 0));
+                AddDistinctCurb(anchors, new float3(median.Bounds.y, median.Height, 0));
             }
         }
 
-        internal bool TryAuthoredMedianCrossing(Entity road, Entity node, out float width)
-            => ReadMedianCrossingLayout(road, node, out width) is MedianCrossingLayout.Continuous or MedianCrossingLayout.AlignedSplit;
-
-        private enum MedianCrossingLayout { MissingInputs, NoMedian, Blocked, NoCompatibleSpan, Continuous, AlignedSplit }
-
-        private MedianCrossingLayout ReadMedianCrossingLayout(Entity road, Entity node, out float width)
+        internal List<MedianOpening> ReadMedianOpenings(Entity road, Entity node)
         {
-            width = 0f;
-            if (!EntityManager.HasComponent<Edge>(road) || !EntityManager.HasComponent<Composition>(road)) return MedianCrossingLayout.MissingInputs;
-            var edge = EntityManager.GetComponentData<Edge>(road);
-            if (edge.m_Start != node && edge.m_End != node) return MedianCrossingLayout.MissingInputs;
+            if (!TryReadPaintApproach(road, node, out var geometry, out var data, out _, out bool start,
+                completeExterior: false, allowEmpty: true)) return null;
             var composition = EntityManager.GetComponentData<Composition>(road);
-            var definition = edge.m_Start == node ? composition.m_StartNode : composition.m_EndNode;
-            if (!EntityManager.HasComponent<NetCompositionData>(definition)
-                || !EntityManager.HasBuffer<NetCompositionPiece>(definition)
-                || !EntityManager.HasBuffer<NetCompositionCrosswalk>(definition)) return MedianCrossingLayout.MissingInputs;
-            var data = EntityManager.GetComponentData<NetCompositionData>(definition);
-            var pieceBounds = ReadSurfaceMedianBounds(definition, out bool blocked);
-            if (blocked) return MedianCrossingLayout.Blocked;
-            if (!math.all(math.isfinite(pieceBounds)))
+            var definition = start ? composition.m_StartNode : composition.m_EndNode;
+            if (!EntityManager.HasBuffer<NetCompositionCrosswalk>(definition)) return null;
+            var medians = ReadSurfaceMedians(definition, data, false);
+            // An edit can remove a single island from the node patch while
+            // keeping its neighbors. Use section bounds for that island only.
+            int authoredCount = medians.Count;
+            foreach (var section in ReadSurfaceMedians(composition.m_Edge, data, start))
             {
-                // Some intersection compositions remove the median piece
-                // entirely in the paved opening. The road section supplies
-                // its lateral extent; the node's own crossing spans still
-                // have to prove a same-grade opening.
-                pieceBounds = ReadSurfaceMedianBounds(composition.m_Edge, out _);
-                if (edge.m_Start == node) pieceBounds = -pieceBounds.yx;
+                bool represented = false;
+                for (int i = 0; i < authoredCount; i++)
+                    if (CrosswalkCurbGeometry.TryMergeMedianSpans(medians[i].Bounds,section.Bounds,out _))
+                    { represented = true; break; }
+                if (!represented) medians.Add(section);
             }
-            if (!CurbPlacement.TryCrossingMedianBounds(data.m_Width, data.m_MiddleOffset,
-                data.m_SyncVertexOffsetsLeft.w, data.m_SyncVertexOffsetsRight.x, pieceBounds, out var median))
-                return MedianCrossingLayout.NoMedian;
+            if (medians.Count == 0) return null;
 
-            width = median.y - median.x;
+            var openings = new List<MedianOpening>(medians.Count);
             var crossings = EntityManager.GetBuffer<NetCompositionCrosswalk>(definition, true);
+            foreach (var median in medians)
+            {
+                if (median.BlocksCrosswalk || !CanCrossMedian(median.Bounds, crossings, out bool split)) continue;
+                if (!TryPaintCurb(geometry,data,new float3(median.Bounds.x,median.Height,0),out var left) ||
+                    !TryPaintCurb(geometry,data,new float3(median.Bounds.y,median.Height,0),out var right)) continue;
+                openings.Add(new MedianOpening { Left = left, Right = right, Width = median.Bounds.y - median.Bounds.x, Split = split });
+            }
+            return openings;
+        }
+
+        private static bool CanCrossMedian(float2 median, DynamicBuffer<NetCompositionCrosswalk> crossings, out bool split)
+        {
+            split = false;
             foreach (var crossing in crossings)
-                if ((crossing.m_Flags & LaneFlags.Underground) == 0 && CrosswalkCurbGeometry.CoversMedianOpening(median, crossing.m_Start, crossing.m_End)) return MedianCrossingLayout.Continuous;
+                if ((crossing.m_Flags & LaneFlags.Underground) == 0 &&
+                    CrosswalkCurbGeometry.CoversMedianOpening(median, crossing.m_Start, crossing.m_End)) return true;
             for (int i = 0; i < crossings.Length; i++)
             {
                 var left = crossings[i];
+                if ((left.m_Flags & LaneFlags.Underground) != 0) continue;
                 var outerLeft = left.m_Start.x < left.m_End.x ? left.m_Start : left.m_End;
                 var innerLeft = left.m_Start.x < left.m_End.x ? left.m_End : left.m_Start;
-                if ((left.m_Flags & LaneFlags.Underground) != 0 || innerLeft.x >= median.y) continue;
+                if (innerLeft.x >= median.y) continue;
                 for (int j = 0; j < crossings.Length; j++)
                 {
                     var right = crossings[j];
-                    if ((right.m_Flags & LaneFlags.Underground) != 0 || i == j) continue;
+                    if (i == j || (right.m_Flags & LaneFlags.Underground) != 0) continue;
                     var innerRight = right.m_Start.x < right.m_End.x ? right.m_Start : right.m_End;
                     var outerRight = right.m_Start.x < right.m_End.x ? right.m_End : right.m_Start;
-                    if (CrosswalkCurbGeometry.BracketsMedianOpening(median, outerLeft, innerLeft, innerRight, outerRight)) return MedianCrossingLayout.AlignedSplit;
+                    if (CrosswalkCurbGeometry.BracketsMedianOpening(median, outerLeft, innerLeft, innerRight, outerRight, .45f))
+                    {
+                        split = true;
+                        return true;
+                    }
                 }
             }
-            return MedianCrossingLayout.NoCompatibleSpan;
+            return false;
         }
 
-        private float2 ReadSurfaceMedianBounds(Entity definition, out bool blocked)
+        private List<SurfaceMedian> ReadSurfaceMedians(Entity definition, NetCompositionData data, bool invert)
         {
-            blocked = false;
-            var pieceBounds = new float2(float.PositiveInfinity, float.NegativeInfinity);
-            if (!EntityManager.HasBuffer<NetCompositionPiece>(definition)) return pieceBounds;
+            var medians = new List<SurfaceMedian>();
+            if (!EntityManager.HasBuffer<NetCompositionPiece>(definition)) return medians;
             foreach (var piece in EntityManager.GetBuffer<NetCompositionPiece>(definition, true))
             {
                 if ((piece.m_SectionFlags & NetSectionFlags.Median) == 0 ||
-                    (piece.m_SectionFlags & (NetSectionFlags.Hidden | NetSectionFlags.HiddenSurface
-                    | NetSectionFlags.Underground | NetSectionFlags.Overhead)) != 0 ||
+                    (piece.m_SectionFlags & (NetSectionFlags.Hidden | NetSectionFlags.HiddenSurface |
+                        NetSectionFlags.Underground | NetSectionFlags.Overhead)) != 0 ||
                     (piece.m_PieceFlags & NetPieceFlags.Surface) == 0) continue;
-                blocked |= (piece.m_PieceFlags & NetPieceFlags.BlockCrosswalk) != 0;
-                if (!math.isfinite(piece.m_Offset.x) || !math.isfinite(piece.m_Size.x) || piece.m_Size.x <= 0) continue;
-                pieceBounds.x = math.min(pieceBounds.x, piece.m_Offset.x - piece.m_Size.x * .5f);
-                pieceBounds.y = math.max(pieceBounds.y, piece.m_Offset.x + piece.m_Size.x * .5f);
+                float x = invert ? -piece.m_Offset.x : piece.m_Offset.x;
+                var raw = new float2(x - piece.m_Size.x * .5f, x + piece.m_Size.x * .5f);
+                if (!CurbPlacement.TryCrossingMedianBounds(data.m_Width, data.m_MiddleOffset,
+                    data.m_SyncVertexOffsetsLeft.w, data.m_SyncVertexOffsetsRight.x, raw, out var bounds)) continue;
+                var median = new SurfaceMedian { Bounds = bounds, Height = piece.m_Offset.y,
+                    BlocksCrosswalk = (piece.m_PieceFlags & NetPieceFlags.BlockCrosswalk) != 0 };
+                // Authored pieces for the same island can overlap. A real
+                // carriageway gap between islands must stay a separate span.
+                for (int i = medians.Count - 1; i >= 0; i--)
+                {
+                    var existing = medians[i];
+                    if (math.abs(existing.Height - median.Height) > .08f ||
+                        !CrosswalkCurbGeometry.TryMergeMedianSpans(median.Bounds, existing.Bounds, out var merged)) continue;
+                    median.Bounds = merged;
+                    median.BlocksCrosswalk |= existing.BlocksCrosswalk;
+                    medians.RemoveAt(i);
+                    i = medians.Count;
+                }
+                medians.Add(median);
             }
-            return pieceBounds;
+            medians.Sort((a,b) => a.Bounds.x.CompareTo(b.Bounds.x));
+            return medians;
         }
 
         private static bool TryPaintCurb(EdgeNodeGeometry geometry, NetCompositionData data, float3 anchor,
@@ -370,7 +411,7 @@ namespace MedianGrassReplacement.Systems
         private void ReadRenderedPaintCurbs(Entity road, Entity node, out Bezier4x3 left, out Bezier4x3 right, bool includeAlleyPavement = true)
         {
             left = right = default;
-            if (!TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out bool atStart, includeMedian: false, includeAlleyPavement: includeAlleyPavement))
+            if (!TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out bool atStart, completeExterior: false, includeAlleyPavement: includeAlleyPavement))
                 return;
             // Middle connections, roundabouts and other patched meshes use
             // different vertex encodings from ordinary left/right node halves.
@@ -406,7 +447,7 @@ namespace MedianGrassReplacement.Systems
         private void ReadPaintCurbs(Entity road, Entity node, out Bezier4x3 left, out Bezier4x3 right, bool includeAlleyPavement = false)
         {
             left = right = default;
-            if (!TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out _, includeMedian: false, includeAlleyPavement: includeAlleyPavement)) return;
+            if (!TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out _, completeExterior: false, includeAlleyPavement: includeAlleyPavement)) return;
             // Read a side only when its own surface piece supplies a boundary.
             // The center or median cannot stand in for a missing exterior curb.
             if (CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, true, out var a))
@@ -439,25 +480,52 @@ namespace MedianGrassReplacement.Systems
             // Require the native lane's resolved approach. The old conservative
             // fit remains available when the lane has no reliable owner.
             if (!TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out bool start)) return false;
+            var composition = EntityManager.GetComponentData<Composition>(road);
+            var definition = start ? composition.m_StartNode : composition.m_EndNode;
+            var medians = ReadSurfaceMedians(definition, data, false);
+            ReadMedianCurbs(medians, anchors);
+            if (medians.Count > 0) anchors.Sort((a, b) => a.x.CompareTo(b.x));
             float best = float.MaxValue;
             Bezier4x3 firstFit = default, secondFit = default;
-            for (int i = 1; i < anchors.Count; i++)
+            for (int i = 0; i < anchors.Count - 1; i++)
             {
-                // Adjacent boundaries keep divided crossings on their own side.
-                if (!TryPaintCurb(geometry, data, anchors[i - 1], out var left)
-                    || !TryPaintCurb(geometry, data, anchors[i], out var right)) continue;
-                var leftSection = ReadSectionCurb(road, start, anchors[i - 1], left);
-                var rightSection = ReadSectionCurb(road, start, anchors[i], right);
-                if (!CrosswalkCurbGeometry.Fit(first, left, right, leftSection, rightSection, width, out var a)
-                    || !CrosswalkCurbGeometry.Fit(second, left, right, leftSection, rightSection, width, out var b)) continue;
-                float score = math.distancesq(a.a, first.a) + math.distancesq(a.d, first.d)
-                    + math.distancesq(b.a, second.a) + math.distancesq(b.d, second.d);
-                if (score >= best) continue;
-                best = score; firstFit = a; secondFit = b;
+                if (InsideMedian(anchors[i].x) || !TryPaintCurb(geometry, data, anchors[i], out var left)) continue;
+                var leftSection = ReadSectionCurb(road, start, anchors[i], left);
+                for (int j = i + 1; j < anchors.Count; j++)
+                {
+                    if (!TryPaintCurb(geometry, data, anchors[j], out var right)) break;
+                    if (j > i + 1 && !CanContinue(first, second, anchors[j - 2], anchors[j - 1])) break;
+                    if (InsideMedian((anchors[j].x + anchors[j - 1].x) * .5f)) continue;
+                    var rightSection = ReadSectionCurb(road, start, anchors[j], right);
+                    if (!CrosswalkCurbGeometry.Fit(first, left, right, leftSection, rightSection, width, out var a)
+                        || !CrosswalkCurbGeometry.Fit(second, left, right, leftSection, rightSection, width, out var b)) continue;
+                    float score = math.distancesq(a.a, first.a) + math.distancesq(a.d, first.d)
+                        + math.distancesq(b.a, second.a) + math.distancesq(b.d, second.d);
+                    if (score >= best) continue;
+                    best = score; firstFit = a; secondFit = b;
+                }
             }
             if (best == float.MaxValue) return false;
             first = firstFit; second = secondFit;
             return true;
+
+            bool InsideMedian(float x)
+            {
+                foreach (var median in medians)
+                    if (x >= median.Bounds.x - .025f && x < median.Bounds.y - .025f) return true;
+                return false;
+            }
+
+            bool CanContinue(Bezier4x3 a, Bezier4x3 b, float3 low, float3 high)
+            {
+                if (!InsideMedian((low.x + high.x) * .5f)) return true;
+                foreach (var median in medians)
+                    if (median.BlocksCrosswalk && low.x < median.Bounds.y && high.x > median.Bounds.x) return false;
+                return TryPaintCurb(geometry, data, low, out var left) &&
+                    TryPaintCurb(geometry, data, high, out var right) &&
+                    CrosswalkCurbGeometry.CrossesBothBoundaries(a,left,right) &&
+                    CrosswalkCurbGeometry.CrossesBothBoundaries(b,left,right);
+            }
         }
 
         internal void JoinVisibleCrosswalkEdges(Entity node, Entity road, bool fittedToCurbs, float railWidth, ref Bezier4x3 first, ref Bezier4x3 second)
@@ -482,18 +550,20 @@ namespace MedianGrassReplacement.Systems
                 }
             }
             else if (!fittedToCurbs && edges.Count > 0 &&
-                TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out bool start))
+                TryReadPaintApproach(road, node, out var geometry, out var data, out var anchors, out bool start, completeExterior: false))
             {
                 boundaries = new List<Bezier4x3>();
-                foreach (var anchor in anchors)
+                for (int side = 0; side < 2; side++)
                 {
-                    if (!TryPaintCurb(geometry, data, anchor, out var curb)) continue;
+                    if (!CurbPlacement.TryOuterAnchor(anchors, data.m_Width, data.m_MiddleOffset, side == 0, out var anchor)
+                        || !TryPaintCurb(geometry, data, anchor, out var curb)) continue;
                     boundaries.Add(curb);
                     boundaries.Add(ReadSectionCurb(road, start, anchor, curb));
                 }
             }
-            first = CrosswalkCurbGeometry.JoinEdgeEnds(first, edges, fittedToCurbs, boundaries, .25f, railWidth, emittedCurbEdges);
-            second = CrosswalkCurbGeometry.JoinEdgeEnds(second, edges, fittedToCurbs, boundaries, .25f, railWidth, emittedCurbEdges);
+            float curbLineOffset = Mod.Settings.CurbLineOffset;
+            first = CrosswalkCurbGeometry.JoinEdgeEnds(first, edges, fittedToCurbs, boundaries, .25f, railWidth, emittedCurbEdges, curbLineOffset, requireCurbEvidence: true);
+            second = CrosswalkCurbGeometry.JoinEdgeEnds(second, edges, fittedToCurbs, boundaries, .25f, railWidth, emittedCurbEdges, curbLineOffset, requireCurbEvidence: true);
 
             void AddVisibleEdges(RoadMarks marks)
             {

@@ -114,7 +114,7 @@ namespace MedianGrassReplacement.Systems
 
             internal MarkingKey SourceKey;
             internal bool RoutedCrossing;
-            internal Entity MedianPartner;
+            internal List<Entity> MedianPartners;
 
             internal readonly List<Entity> Paint = new List<Entity>();
 
@@ -132,6 +132,11 @@ namespace MedianGrassReplacement.Systems
         {
             // All callers are in this notification phase before reconciliation.
             if (!_queuedOwnerBatch.FirstOwner(owner)) return;
+            // A node's crossing spans can live on different road owners.
+            // Refit both sides of a bridge even if their sublanes survived the edit.
+            _changedCrossings.Clear();
+            _crossingsAtNode.CopyOwner(owner,_changedCrossings);
+            foreach (var source in _changedCrossings) pending.Add(source);
             if(!EntityManager.HasBuffer<Game.Net.SubLane>(owner))return;
             foreach(var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner,true))
             {
@@ -309,7 +314,7 @@ namespace MedianGrassReplacement.Systems
             bool fittedToCurbs = marking.TryFitCrosswalkRails(node,road,lineWidth,ref first,ref second);
             if (!fittedToCurbs)
             {
-                if (marking.TryClipCrosswalk(node,first,out var a,road) && marking.TryClipCrosswalk(node,second,out var b,road))
+                if (road != Entity.Null && marking.TryClipCrosswalk(node,first,out var a,road) && marking.TryClipCrosswalk(node,second,out var b,road))
                 {
                     first = a;
                     second = b;
@@ -321,28 +326,45 @@ namespace MedianGrassReplacement.Systems
             return true;
         }
 
-        private Entity AddMedianCrosswalkBridges(Entity source, Entity road, Entity node, Bezier4x3 first, Bezier4x3 second,
+        private List<Entity> AddMedianCrosswalkBridges(Entity source, Entity road, Entity node, Bezier4x3 first, Bezier4x3 second,
             CrosswalkUpgradeSystem choices, CurbLineEmissionSystem marking, List<Bezier4x3> output)
         {
-            if (!marking.TryAuthoredMedianCrossing(road, node, out float medianWidth)) return Entity.Null;
-            float maximumSpan = math.max(5f, medianWidth * 1.5f + 1f);
+            var openings = marking.ReadMedianOpenings(road, node);
+            if (openings == null || openings.Count == 0) return null;
 
-            // Either source can be recreated first. The lower entity ID owns
-            // the visual bridge, and both rails are computed from native inputs.
-            Entity partner = Entity.Null;
-            float best = float.PositiveInfinity;
-            Bezier4x3 a = default, b = default;
-            ReadPartner(node);
-            if (road != node) ReadPartner(road);
-            if (partner != Entity.Null && source.Index < partner.Index)
+            var candidates = new List<(Entity Entity, Bezier4x3 First, Bezier4x3 Second)>();
+            ReadPartners(node);
+            if (road != node) ReadPartners(road);
+            List<Entity> partners = null;
+            foreach (var opening in openings)
             {
+                float maximumSpan = math.max(5f, opening.Width * 1.5f + 1f);
+                Entity partner = Entity.Null;
+                float best = float.PositiveInfinity;
+                Bezier4x3 a = default, b = default;
+                foreach (var other in candidates)
+                {
+                    if (!CrosswalkCurbGeometry.TryBridgeRails(first, second, other.First, other.Second,
+                            out var firstBridge, out var secondBridge, maximumSpan, opening.Split ? .45f : .2f)
+                        || !CrosswalkCurbGeometry.BridgeMatchesOpening(firstBridge, opening.Left, opening.Right, opening.Width)
+                        || !CrosswalkCurbGeometry.BridgeMatchesOpening(secondBridge, opening.Left, opening.Right, opening.Width)) continue;
+                    float score = MathUtils.Length(firstBridge) + MathUtils.Length(secondBridge);
+                    if (score > best || (score == best && other.Entity.Index >= partner.Index)) continue;
+                    best = score;
+                    partner = other.Entity;
+                    a = firstBridge;
+                    b = secondBridge;
+                }
+                // Either paint source can be recreated first. Use one owner
+                // per opening, including when the middle span has two neighbors.
+                if (partner == Entity.Null || source.Index >= partner.Index) continue;
                 output.Add(a);
                 output.Add(b);
-                return partner;
+                (partners ??= new List<Entity>()).Add(partner);
             }
-            return Entity.Null;
+            return partners;
 
-            void ReadPartner(Entity owner)
+            void ReadPartners(Entity owner)
             {
                 if (!EntityManager.HasBuffer<Game.Net.SubLane>(owner)) return;
                 foreach (var entry in EntityManager.GetBuffer<Game.Net.SubLane>(owner, true))
@@ -362,14 +384,8 @@ namespace MedianGrassReplacement.Systems
                         || otherRoad != road || otherNode != node) continue;
                     var curve = EntityManager.GetComponentData<Curve>(other).m_Bezier;
                     float width = EntityManager.GetComponentData<NetLaneGeometryData>(definition).m_Size.x;
-                    if (!TryPreviewLines(road, node, curve, width, out var otherFirst, out var otherSecond, out _)
-                        || !CrosswalkCurbGeometry.TryBridgeRails(first, second, otherFirst, otherSecond, out var firstBridge, out var secondBridge, maximumSpan)) continue;
-                    float score = MathUtils.Length(firstBridge) + MathUtils.Length(secondBridge);
-                    if (score > best || (score == best && other.Index >= partner.Index)) continue;
-                    best = score;
-                    partner = other;
-                    a = firstBridge;
-                    b = secondBridge;
+                    if (TryPreviewLines(road, node, curve, width, out var otherFirst, out var otherSecond, out _))
+                        candidates.Add((other, otherFirst, otherSecond));
                 }
             }
         }
@@ -412,6 +428,12 @@ namespace MedianGrassReplacement.Systems
             if(routedCrossing && (!crossing || (EntityManager.GetComponentData<Game.Net.PedestrianLane>(source).m_Flags & PedestrianLaneFlags.Crosswalk)==0)){Remove(source);return;}
 
             var lineSystem=World.GetOrCreateSystemManaged<CurbLineEmissionSystem>();
+
+            // JunctionMarking owns native visibility here. Retire any themed
+            // copy of the same native stripe so it cannot overlay the curb.
+            if (!crossing && EntityManager.HasComponent<MGRJunctionEdgeLines>(owner) &&
+                lineSystem.OwnsReplacedJunctionStripe(owner,prefab,EntityManager.GetComponentData<Curve>(source).m_Bezier))
+            { Remove(source); return; }
 
             bool roadLine=EntityManager.HasComponent<Road>(owner)&&NodeLinePolicy.IsLineGeometry(prefab);
 
@@ -487,7 +509,7 @@ namespace MedianGrassReplacement.Systems
             var curve = EntityManager.GetComponentData<Curve>(source).m_Bezier;
 
             Entity linedCrossingNode = Entity.Null;
-            Entity medianPartner = Entity.Null;
+            List<Entity> medianPartners = null;
             var curves = new List<Bezier4x3>(); Entity paintPrefab = preserveNative?nativeColor:adaptEdge?themedEdge:yellow?lineSystem.ResolveCenterStyle(prefabEntity):prefabEntity;
 
             if(hideCenter||segmentHidden||nativeHidden||dividerOwned||removedEdge||highwayOwned){}
@@ -533,7 +555,7 @@ namespace MedianGrassReplacement.Systems
                 }
 
                 bool fittedToCurbs=marking.TryFitCrosswalkRails(crossingNode,crossingRoad,lineWidth,ref first,ref second);
-                if (!fittedToCurbs && (!marking.TryClipCrosswalk(crossingNode, first, out first, crossingRoad) || !marking.TryClipCrosswalk(crossingNode, second, out second, crossingRoad)))
+                if (!fittedToCurbs && (crossingRoad == Entity.Null || !marking.TryClipCrosswalk(crossingNode, first, out first, crossingRoad) || !marking.TryClipCrosswalk(crossingNode, second, out second, crossingRoad)))
 
                 {
 
@@ -555,7 +577,7 @@ namespace MedianGrassReplacement.Systems
                 linedCrossingNode = crossingNode;
                 marking.JoinVisibleCrosswalkEdges(crossingNode,crossingRoad,fittedToCurbs,lineWidth,ref first,ref second);
                 _clipFailures.Remove(source);_clipRetries.Remove(source); curves.Add(first); curves.Add(second);
-                medianPartner = AddMedianCrosswalkBridges(source, crossingRoad, crossingNode, first, second, choices, marking, curves);
+                medianPartners = AddMedianCrosswalkBridges(source, crossingRoad, crossingNode, first, second, choices, marking, curves);
 
             }
 
@@ -590,7 +612,7 @@ namespace MedianGrassReplacement.Systems
 
             if (same) for (int i = 0; i < keys.Count; i++) if (!old.Keys[i].Equals(keys[i]) || !Alive(old.Paint[i])) { same = false; break; }
 
-            if (same) {old.SourceKey=new MarkingKey(curve,prefabEntity);old.RoutedCrossing=routedCrossing;old.MedianPartner=medianPartner;_sourceIndex.Add(owner,source);TrackCrosswalk(source,linedCrossingNode);if(crossing)choices.NoteSource(source,invisible?"Invisible crossing applied.":"Lined crossing rendered.");return;}
+            if (same) {old.SourceKey=new MarkingKey(curve,prefabEntity);old.RoutedCrossing=routedCrossing;old.MedianPartners=medianPartners;_sourceIndex.Add(owner,source);TrackCrosswalk(source,linedCrossingNode);if(crossing)choices.NoteSource(source,invisible?"Invisible crossing applied.":"Lined crossing rendered.");return;}
 
             var next = new Replacement { SourceKey = new MarkingKey(curve, prefabEntity), RoutedCrossing=routedCrossing };
 
@@ -616,7 +638,7 @@ namespace MedianGrassReplacement.Systems
 
             Remove(source);
 
-            next.Keys.AddRange(keys); _replacements[source] = next;_sourceIndex.Add(owner,source);TrackCrosswalk(source,linedCrossingNode);PreviewPaintInheritanceSystem.SourceChanged(World,source);
+            next.MedianPartners = medianPartners; next.Keys.AddRange(keys); _replacements[source] = next;_sourceIndex.Add(owner,source);TrackCrosswalk(source,linedCrossingNode);PreviewPaintInheritanceSystem.SourceChanged(World,source);
 
             EntityManager.AddComponent<MGRReplacedPaint>(source);
 
@@ -629,7 +651,7 @@ namespace MedianGrassReplacement.Systems
         private void MaintainReplacement(Entity source,HashSet<Entity> pending,ref EntityCommandBuffer visibility,CrosswalkVisualSystem crossings)
         {
             if(!_replacements.TryGetValue(source,out var entry))return;
-            if (entry.MedianPartner != Entity.Null && !Alive(entry.MedianPartner))
+            if (entry.MedianPartners != null && entry.MedianPartners.Exists(partner => !Alive(partner)))
                 pending.Add(source);
             if(!Alive(source)||_externalPaint.Contains(EntityManager,source)||!EntityManager.HasComponent<Owner>(source)){pending.Add(source);return;}
             Entity owner=EntityManager.GetComponentData<Owner>(source).m_Owner;
